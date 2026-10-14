@@ -142,6 +142,7 @@ void ci_cancel(void)
 }
 
 /* main loop: replaces CALL tape_c::service(0) at 0x019F0A24; presses PLAY once the count is over */
+extern void tl_service(void);
 int ci_service(int arg)
 {
     int r =
@@ -153,6 +154,7 @@ int ci_service(int arg)
     pu_service();                                                 /* punch in / out (main loop) */
     extern void du_service(void) __attribute__((weak));
     if (du_service) du_service();                                 /* dev update over SysEx (--dev, docs/35) */
+    tl_service();                                                 /* per-track tape loops (tape/tapeloop.c) */
     if (ci_play_req) {
         ci_play_req = 0;
         if (TAPE_STATE == 6) {                                    /* still armed (not cancelled by the stock keys) */

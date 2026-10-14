@@ -850,6 +850,7 @@ static int peal_page(void)
 /* tape markers (tape/markers.c, docs/22): only while the stock tape screen is the current one */
 extern void *tm_scr;
 extern void tm_add(void), tm_remove(void), tm_turn(int delta);
+extern void tl_toggle(void);                                   /* tape/tapeloop.c */
 static int tape_page(void)
 {
     int id = *(volatile int *)0x018B65C8;                      /* current screen id -> object via the screen table */
@@ -890,6 +891,10 @@ void key_event_hook(int code, int pressed)
                 se_open_close(0); se_swap();                            /* leaving: close, the key acts as usual */
             }
         }
+    }
+    if (code == 0x3B && tape_page()) {                         /* blue press: per-track loops on / off */
+        if (pressed) tl_toggle();
+        return;
     }
     if (code == 0x3E && tape_page()) {                         /* red press: add, Shift: remove */
         if (pressed) { if (*(volatile uint8_t *)0x01DD7F78) tm_remove(); else tm_add(); }
