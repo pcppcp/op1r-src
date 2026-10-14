@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 volatile uint8_t pu_mode;
+void mt_draw(void) {}
 #include "../tape/markers.c"
 
 static struct { int32_t x0, y0, x1, y1, w; uint8_t c[4]; } L[512]; static int nl;

@@ -87,7 +87,7 @@ static void tm_ready(void) { if (!tm_loaded) { tm_loaded = 1; tm_load(); } }
 
 /* ---- edits ---- */
 /* zoom (IEEE float px/s from the firmware) -> Q10 integer, clamped to 1..4096 px/s; no soft-float */
-static int32_t tm_zoom_q10(void)
+int32_t tm_zoom_q10(void)                                   /* (also tape/miditrack.c) */
 {
     uint32_t b = TM_ZOOM_BITS();
     int e = (int)((b >> 23) & 0xFF) - 127;
@@ -192,4 +192,6 @@ void tm_screen_draw(void *scr, int dt)
     ((void (*)(void *, int))0x01A5CF94)(scr, dt);
     tm_scr = scr;
     tm_draw();
+    extern void mt_draw(void);
+    mt_draw();                                                  /* MIDI track strip (tape/miditrack.c) */
 }

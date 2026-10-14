@@ -65,6 +65,11 @@ SECTIONS {
   .hook_recB 0x019ACC7C : { KEEP(*(.hook_recB)) }
   .hook_recend 0x019DEEF2 : { KEEP(*(.hook_recend)) }
   .hook_opzset 0x019E3540 : { KEEP(*(.hook_opzset)) }
+  .hook_vcdown 0x01A85750 : { KEEP(*(.hook_vcdown)) }
+  .hook_vcup 0x01A85840 : { KEEP(*(.hook_vcup)) }
+  .hook_tapepre 0x01A5CFA8 : { KEEP(*(.hook_tapepre)) }
+  _vc_down_body = 0x01A85754;      /* VoiceCtl key_down after its LINK 0x10 (MIDI track hook) */
+  _vc_up_body = 0x01A85844;        /* VoiceCtl key_up after its LINK 0x20 */
   _midi_rx_parse_next = 0x019E348E;   /* end of the SysEx dispatch in midi_rx_parse */
   .hook_devboot 0x019F01B8 : { KEEP(*(.hook_devboot)) }
   .hook_devrx 0x019E3CC8 : { KEEP(*(.hook_devrx)) }

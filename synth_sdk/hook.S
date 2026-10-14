@@ -335,6 +335,41 @@ _l1_tramp_rev:
 	P1 = [SP++]; RETS = [SP++];
 	rts;
 
+/* MIDI track (tape/miditrack.c): VoiceCtl key_down 0x01A85750 / key_up 0x01A85840 entries (LINK 0x10 / LINK 0x20)
+ * -> JUMP.L here: the note is offered to the recorder (R0 = record, R1 = param), then the original LINK and on. */
+	.section .hook_vcdown,"ax"
+	jump.l _mt_vc_down_stub;
+	.section .hook_vcup,"ax"
+	jump.l _mt_vc_up_stub;
+/* tape screen draw: CALL 0x01A5C728 (recording flag) -> mt_tape_pre: red theme while the MIDI track records */
+	.section .hook_tapepre,"ax"
+	call _mt_tape_pre;
+	.text
+	.align 2
+_mt_vc_down_stub:
+	[--SP] = RETS;
+	[--SP] = R0;
+	[--SP] = R1;
+	SP += -12;
+	call _mt_vc_down;
+	SP += 12;
+	R1 = [SP++];
+	R0 = [SP++];
+	RETS = [SP++];
+	LINK 16;
+	jump.l _vc_down_body;
+	.align 2
+_mt_vc_up_stub:
+	[--SP] = RETS;
+	[--SP] = R0;
+	SP += -12;
+	call _mt_vc_up;
+	SP += 12;
+	R0 = [SP++];
+	RETS = [SP++];
+	LINK 32;
+	jump.l _vc_up_body;
+
 /* USB 6 channels (screens/usbtrack.c) */
 	.section .hook_usbdesc,"ax"
 	.global __hook_usbdesc

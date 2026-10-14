@@ -68,9 +68,11 @@ static void restore_metro(void)
 
 /* L1 audio callback: replaces the call to metronome::render (0x019DE548) */
 extern void pu_block(void), pu_service(void);              /* tape/punch.c */
+extern void mt_block(void), mt_service(void);              /* tape/miditrack.c */
 void ci_metro_render(void)
 {
     pu_block();                                                   /* punch: marker crossings (audio thread) */
+    mt_block();                                                   /* MIDI track: notes passed in this block */
     /* will this block wrap (as the render computes it)? then set the accent pitch before the click starts */
     int restart = (TAPE_RUN == 1 || TAPE_RUN == 2) && !M_RESET;  /* the render resets the phase to 0 first */
     int32_t step = M_TAPE ? (TAPE_SPEED >> 21) * 0x4000 : 0x100000;   /* the render's own phase step */
@@ -153,6 +155,7 @@ int ci_service(int arg)
     pu_service();                                                 /* punch in / out (main loop) */
     extern void du_service(void) __attribute__((weak));
     if (du_service) du_service();                                 /* dev update over SysEx (--dev, docs/35) */
+    mt_service();                                                 /* MIDI track: load / save */
     if (ci_play_req) {
         ci_play_req = 0;
         if (TAPE_STATE == 6) {                                    /* still armed (not cancelled by the stock keys) */

@@ -10,6 +10,8 @@ static int clicks, plays, block;
 static int click_half[64], click_block[64];
 void pu_block(void) {}
 void pu_service(void) {}
+void mt_block(void) {}
+void mt_service(void) {}
 #include "../tape/countin.c"
 void host_metro_render(void)
 {
