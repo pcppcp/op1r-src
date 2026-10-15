@@ -87,7 +87,7 @@ static void tm_ready(void) { if (!tm_loaded) { tm_loaded = 1; tm_load(); } }
 
 /* ---- edits ---- */
 /* zoom (IEEE float px/s from the firmware) -> Q10 integer, clamped to 1..4096 px/s; no soft-float */
-static int32_t tm_zoom_q10(void)
+int32_t tm_zoom_q10(void)
 {
     uint32_t b = TM_ZOOM_BITS();
     int e = (int)((b >> 23) & 0xFF) - 127;
@@ -187,9 +187,11 @@ void tm_draw(void)
 /* tape screen vtable draw slot 0x01911B78: stock draw (0x01A5CF94), then the markers. Remembers the screen object so
  * the keys only act while it is the current screen. */
 void *tm_scr;
+extern void tl_draw(void);
 void tm_screen_draw(void *scr, int dt)
 {
     ((void (*)(void *, int))0x01A5CF94)(scr, dt);
     tm_scr = scr;
     tm_draw();
+    tl_draw();                                              /* tape/tapeloop.c */
 }

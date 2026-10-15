@@ -55,6 +55,7 @@ SECTIONS {
   .hook_ciservice 0x019F0A24 : { KEEP(*(.hook_ciservice)) }
   .hook_sqlcache 0x0196F942 : { KEEP(*(.hook_sqlcache)) }
   .hook_taperase 0x0191B9F0 : { KEEP(*(.hook_taperase)) }
+  .hook_tlookup 0x01A54D5C : { KEEP(*(.hook_tlookup)) }
   .hook_dpkeep 0x01A044A8 : { KEEP(*(.hook_dpkeep)) }
   .hook_dpload 0x01A04BC0 : { KEEP(*(.hook_dpload)) }
   .hook_dpbrowse 0x01977900 : { KEEP(*(.hook_dpbrowse)) }

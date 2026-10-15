@@ -352,6 +352,33 @@ __hook_ciservice:
 	.global __hook_taperase
 __hook_taperase:
 	call _fast_tape_erase;
+/* tape_c chunk lookup 0x01A54D5C (LINK 0 replaced): called from the L1 tape tick (0xFFA06A96, 0xFFA06E18) with
+ * R0 = position (samples), R1 = &direction; returns the cache entry in R0 (tape/tapeloop.c tl_lookup). The tick is
+ * compiled VisualDSP code: keep ASTAT and the hardware loop registers (gcc may use both loops). */
+	.section .hook_tlookup,"ax"
+	jump.l _tl_lookup_entry;
+	.text
+	.global _tl_lookup_entry
+	.align 2
+_tl_lookup_entry:
+	[--SP] = ASTAT;
+	[--SP] = RETS;
+	[--SP] = LC0; [--SP] = LT0; [--SP] = LB0;
+	[--SP] = LC1; [--SP] = LT1; [--SP] = LB1;
+	SP += -12;
+	call _tl_lookup;
+	SP += 12;
+	LB1 = [SP++]; LT1 = [SP++]; LC1 = [SP++];
+	LB0 = [SP++]; LT0 = [SP++]; LC0 = [SP++];
+	RETS = [SP++];
+	ASTAT = [SP++];
+	rts;
+	.global _tl_lookup_orig
+	.align 2
+_tl_lookup_orig:                              /* the stock lookup: its first instruction, then the rest */
+	link 0;
+	P0.L = 0x4d60; P0.H = 0x01a5;
+	jump (P0);
 	.section .hook_dpkeep,"ax"
 	.global __hook_dpkeep
 __hook_dpkeep:

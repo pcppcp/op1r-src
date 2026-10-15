@@ -1,7 +1,7 @@
 # op1r-src
 
 Source code of **op1r**, custom firmware for the Teenage Engineering OP-1 (firmware R246): custom synth engines and
-effects with their own screens, quad LFO, euclid and dots sequencers, USB audio track outs, tape markers, count-in,
+effects with their own screens, quad LFO, euclid and dots sequencers, USB audio track outs, tape markers, count-in, polymetric tape loops,
 punch in/out, sample editor, resource monitor and more.
 
 - **Users:** you don't need this repository. Patch your firmware with
