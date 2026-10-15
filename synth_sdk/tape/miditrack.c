@@ -650,7 +650,7 @@ static void mt_bg_save(void *self)
     uint32_t mc = IRQ_OFF();                                 /* (the list may change: a take ending) */
     o += mt_fmt_clips(o);
     IRQ_ON(mc);
-    mt_str(o, "')");
+    mt_str(o, "')")[0] = 0;                                 /* (terminate: older text / heap garbage follows) */
     bad |= op1_db_write(db, mt_sql);
     for (int i = 0; i < mt_n; i += MT_ROW, row++) {
         o = mt_str(mt_sql, "INSERT OR REPLACE INTO op1rmidi VALUES (");
@@ -659,7 +659,7 @@ static void mt_bg_save(void *self)
         uint32_t m = IRQ_OFF();                              /* a recording may insert meanwhile */
         o += mt_fmt_notes(o, i);
         IRQ_ON(m);
-        mt_str(o, "')");
+        mt_str(o, "')")[0] = 0;
         bad |= op1_db_write(db, mt_sql);
     }
     o = mt_str(mt_sql, "DELETE FROM op1rmidi WHERE id>=");
