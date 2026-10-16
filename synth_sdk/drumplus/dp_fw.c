@@ -2,6 +2,7 @@
  * make_firmware.py) point here. Pads without drum+ extras (and every pad of a stock kit) call the original
  * functions, unchanged; drum+ pads run dp_plus_* with per-voice state indexed like the 12 stock voices. */
 #include "dp_plus.h"
+#include "../preset_compat.h"
 
 #define DP_SLOTS   8                                          /* drum_slots rows */
 #define DP_PADS    24
@@ -112,6 +113,10 @@ static int32_t jv_int(const void *v)                   /* ints only, never asser
 
 static int dp_loading_slot = -1;
 
+/* Read-only scope for the shared instrument-name hook, not an engine registry
+ * or a universal indication that every nested comparison belongs to a drum. */
+int dp_is_loading_patch(void) { return dp_loading_slot >= 0; }
+
 static void dp_read_pads(int slot, void *op1r)
 {
     for (int p = 0; p < DP_PADS; p++)
@@ -145,11 +150,9 @@ void *dp_keep_op1r(void *patch, void *fresh)
 
 int dp_load_parse(void *json, int mode)
 {
-    uint32_t off = (uint32_t)json - 4 - DRUM_PATCHES;
-    dp_loading_slot = off % 0x38 == 0 && off / 0x38 < DP_SLOTS ? (int)(off / 0x38) : -1;
-    int r = PARSE_PATCH(json, mode);
-    dp_loading_slot = -1;
-    return r;
+    int slot = op1_preset_drum_slot((uint32_t)(uintptr_t)json,
+                                   DRUM_PATCHES + 4, 0x38, DP_SLOTS);
+    return op1_preset_parse_scoped(&dp_loading_slot, slot, json, mode, PARSE_PATCH);
 }
 
 /* ---- drum type browser (Shift + T1): the "drum+" row of drum_types (id DP_TYPE_ID, make_firmware.py) ----

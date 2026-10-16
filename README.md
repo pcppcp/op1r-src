@@ -39,6 +39,9 @@ python3 harness/render.py tape out.png      # plugin screen preview
 python3 harness/render_euclid.py            # other screens: harness/render_*.py
 ```
 
+For shared loader compatibility regressions (no firmware needed), see
+[harness/PRESET_COMPAT.md](synth_sdk/harness/PRESET_COMPAT.md).
+
 ## Building the firmware
 
 Requirements: Docker, Python 3, the original `op1_246.op1`, and
