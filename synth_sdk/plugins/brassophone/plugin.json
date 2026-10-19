@@ -1,0 +1,20 @@
+{
+  "name": "brassophone",
+  "author": "nvmsocool",
+  "kind": "synth",
+  "symbol": "ENGINE_brass",
+  "sources": [
+    "brass.c",
+    "horn.c"
+  ],
+  "screen": {
+    "svg": "brass-handmade.svg",
+    "symbol": "SCREEN_horn"
+  },
+  "defaults": [
+    19660,
+    16384,
+    3932,
+    7536
+  ]
+}
