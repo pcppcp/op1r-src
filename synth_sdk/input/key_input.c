@@ -22,7 +22,13 @@ static uint32_t key_cycles(void)
 #endif
 
 extern void key_event_hook(int code, int pressed); /* existing custom + stock dispatch */
-static key_debounce_t keys;
+static key_debounce_t keys = KEY_DEBOUNCE_INIT;
+
+unsigned key_input_debounce_ms(void) { return keys.interval_cycles / KEY_CYCLES_PER_MS; }
+void key_input_set_debounce_ms(unsigned ms)
+{
+    key_debounce_set_ms(&keys, ms, NOW(), key_event_hook);
+}
 
 void key_input_event(int code, int pressed)
 {

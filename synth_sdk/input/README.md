@@ -2,11 +2,21 @@
 
 `debounce.c` implements a per-key filter for the physical keyboard, front-panel buttons and encoder presses.
 The first press is delivered immediately. A release is delivered after the contact has remained released for
-5 ms; a press inside that window cancels the release without sending another press. Duplicate states are ignored.
-After a settled release, the next press is immediate again. A deliberate release/repress gap shorter than 5 ms
+the selected interval (default 5 ms); a press inside that window cancels the release without sending another press.
+Duplicate states are ignored while enabled. After a settled release, the next press is immediate again.
+A deliberate release/repress gap shorter than the selected interval
 is indistinguishable from bounce and is merged into the held note. Encoder turns are handled separately.
 
-`KEY_DEBOUNCE_CYCLES` in `debounce.h` sets the interval, using the same 400 MHz CPU-clock assumption as the
+On the clock/card screen, press **T3** and turn the **green knob** to select **OFF** or **1–30 ms** in 1 ms steps.
+The value is saved in `op1rsettings` as `debounce_ms` (0 = OFF) and restored at boot. Missing or invalid values
+use the 5 ms default. The blue count-in control is independent.
+
+**OFF** passes physical edges through immediately, including duplicate presses and releases. Turning it off
+flushes deferred releases in order; keys still held remain tracked so re-enabling does not generate extra presses
+or lose their releases. Changing between nonzero values affects subsequent releases only: each pending release
+keeps the interval captured when it arrived. MIDI/sequencer events bypass the filter in every setting.
+
+`key_input_set_debounce_ms()` sets the runtime interval, using the same 400 MHz CPU-clock assumption as the
 existing firmware code. Unsigned elapsed-time arithmetic handles a counter wrap during settling. Held keys do
 not depend on the age of their initial press. Timing is measured when the key thread processes edges, not in
 the physical scanner; long stalls of that thread can affect debounce timing.
@@ -60,13 +70,24 @@ keys, modifier ordering, all physical key codes, long holds, clock wrap, invalid
 and the wait adapter's final-release and idle behavior. The host substitutes the cycle counter, queue state and
 semaphore wait; it does not execute the stock firmware or establish hardware timing.
 
+The tests also cover OFF passthrough, disabling with releases pending, re-enabling while keys are held, runtime
+interval changes and bounds. The settings harness checks the green control, OFF persistence, invalid saved values,
+independent count-in/debounce saves and knob accumulators:
+
+```sh
+cc -std=c99 -Wall -Wextra -DOP1_HOST -fsanitize=address,undefined -g \
+  harness/settings_test.c -o harness/build/settings_test
+harness/build/settings_test
+```
+
 ## Build and device verification
 
 Build using the repository's normal `make_firmware.py --opz` workflow. Before publishing regenerated patch data,
 test a build on an original OP-1: single taps on a bouncing key, long holds and releases, fast repeated notes,
 chords, Shift shortcuts, transport buttons, encoder presses/turns, and short MIDI/sequencer gates. Check that a
-released note stops with no further input, including during busy UI/file operations. Confirm that the 5 ms window
-is sufficient for the affected hardware and that the release latency feels acceptable.
+released note stops with no further input, including during busy UI/file operations. Test OFF, 1 ms, the 5 ms default,
+and 30 ms, including switching OFF with a release pending and re-enabling while keys are held. Verify the saved
+value after reboot and tune the window for the affected hardware and acceptable release latency.
 
 After the device check, build with `--opz --release` and run the patcher repository's `build_patch.py` against the
 original image and rebuilt `op1_246_custom` tree. Firmware images, unpacked stock files and build products stay

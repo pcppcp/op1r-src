@@ -33,7 +33,7 @@ static void poll(key_debounce_t *d, uint32_t now) { key_debounce_poll(d, now, ke
 
 static void bounce(void)
 {
-    key_debounce_t d = {0}; count = 0;
+    key_debounce_t d = KEY_DEBOUNCE_INIT; count = 0;
     edge(&d, 39, 0, 0);                         /* stray release at startup */
     assert(count == 0);
     edge(&d, 39, 1, 0);
@@ -59,7 +59,7 @@ static void bounce(void)
 
 static void short_and_repeated_notes(void)
 {
-    key_debounce_t d = {0}; count = 0;
+    key_debounce_t d = KEY_DEBOUNCE_INIT; count = 0;
     edge(&d, 13, 1, 0);
     edge(&d, 13, 0, MS(1));                     /* very short real tap still gets an off */
     poll(&d, MS(6));
@@ -75,7 +75,7 @@ static void short_and_repeated_notes(void)
 
 static void independent_keys(void)
 {
-    key_debounce_t d = {0}; count = 0;
+    key_debounce_t d = KEY_DEBOUNCE_INIT; count = 0;
     edge(&d, 38, 1, 0);                        /* Shift */
     edge(&d, 13, 1, MS(1));
     edge(&d, 38, 0, MS(2));
@@ -101,7 +101,7 @@ static void independent_keys(void)
 
 static void clock_wrap_and_bounds(void)
 {
-    key_debounce_t d = {0}; count = 0;
+    key_debounce_t d = KEY_DEBOUNCE_INIT; count = 0;
     uint32_t t = UINT32_MAX - MS(2);
     edge(&d, 62, 1, t - MS(20));
     edge(&d, 62, 0, t);
@@ -164,6 +164,68 @@ static void firmware_adapter(void)
     assert(waited == 0);
 }
 
+static void adjustable_window(void)
+{
+    key_debounce_t d = KEY_DEBOUNCE_INIT; count = 0;
+    edge(&d, 39, 1, 0);
+    edge(&d, 39, 0, MS(1));
+    key_debounce_set_ms(&d, 30, MS(2), key_event_hook);
+    poll(&d, MS(6));                            /* increasing doesn't extend a pending release */
+    assert(count == 2 && d.pending == 0);
+    edge(&d, 39, 1, MS(7));
+    edge(&d, 39, 0, MS(8));
+    key_debounce_set_ms(&d, 1, MS(9), key_event_hook);
+    poll(&d, MS(37));                           /* decreasing doesn't shorten one either */
+    assert(count == 3);
+    poll(&d, MS(38));
+    assert(count == 4);
+    edge(&d, 39, 1, MS(39));
+    edge(&d, 39, 0, MS(40));
+    poll(&d, MS(41) - 1);
+    assert(count == 5);
+    poll(&d, MS(41));
+    assert(count == 6);
+    key_debounce_set_ms(&d, 999, MS(42), key_event_hook);
+    assert(d.interval_cycles == MS(30));
+}
+
+static void off_and_on(void)
+{
+    count = 0; clock_now = MS(100);
+    assert(key_input_debounce_ms() == KEY_DEBOUNCE_DEFAULT_MS);
+    key_input_event(38, 1);
+    key_input_event(13, 1);
+    key_input_event(14, 1);                      /* stays held across OFF/ON */
+    clock_now = MS(101); key_input_event(38, 0);
+    clock_now = MS(102); key_input_event(13, 0);
+    key_input_set_debounce_ms(0);
+    assert(key_input_debounce_ms() == 0 && count == 5);
+    expect(3, 38, 0); expect(4, 13, 0);           /* OFF flushes releases immediately, in order */
+    key_input_wait(7, 0); assert(waited == 0);
+    key_input_event(13, 0);                      /* stray/duplicate releases pass through */
+    key_input_event(13, 1);
+    key_input_event(13, 1);                      /* duplicate presses also pass through */
+    key_input_event(13, 0);
+    key_input_event(13, 1);
+    key_input_event(13, 0);                      /* rapid bounce is deliberately unfiltered */
+    assert(count == 11);
+    expect(5, 13, 0); expect(6, 13, 1); expect(7, 13, 1);
+    expect(8, 13, 0); expect(9, 13, 1); expect(10, 13, 0);
+    key_input_event(15, 1);                      /* press while OFF, release after ON */
+    key_input_set_debounce_ms(10);
+    assert(count == 12 && key_input_debounce_ms() == 10);
+    key_input_event(14, 1); key_input_event(15, 1);
+    assert(count == 12);                        /* re-enabling doesn't manufacture attacks */
+    key_input_event(14, 0); key_input_event(15, 0);
+    clock_now += MS(10) - 1;
+    key_input_wait(7, 0); assert(count == 12 && waited == 0x80000001u);
+    ++clock_now;
+    key_input_wait(7, 0); assert(count == 14 && waited == 0);
+    expect(12, 14, 0); expect(13, 15, 0);
+    key_input_set_debounce_ms(0);                /* OFF with no pending keys emits nothing */
+    assert(count == 14);
+}
+
 int main(void)
 {
     bounce();
@@ -171,6 +233,8 @@ int main(void)
     independent_keys();
     clock_wrap_and_bounds();
     firmware_adapter();
+    adjustable_window();
+    off_and_on();
     puts("debounce: all tests passed");
     return 0;
 }
