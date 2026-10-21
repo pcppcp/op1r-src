@@ -13,6 +13,7 @@
  * targets (I instrument, S sequencer, M1..M16 MIDI); red press / Shift + red / Shift + red turn: tape markers as on the tape screen. TAPE alone or another mode key leaves the view (the device keeps playing with the tape). */
 #pragma GCC optimize ("Os", "no-tree-loop-distribute-patterns")
 #include "../op1_synth.h"
+#include "../input/debounce.h"
 #include "../seq/seq_text.h"
 #include "ms_core.h"
 #include "ms_draw.h"
@@ -99,14 +100,15 @@ static int32_t e_pos(void) { return TAPE_POS >> 6; }
 static int e_playing(void) { int st = TAPE_STATE; return st == 10 || st == 9 || st == 4 || st == 5; }
 static int e_loop(int32_t *a, int32_t *b) { *a = LOOP_IN; *b = LOOP_OUT; return LOOP_ON; }
 /* built-in sequencer: the note as a keyboard key (key i plays 53 + i at octave 0), through the KeyHandler queue like a
- * physical key, so the active stock sequencer gets it in order with the real keys */
+ * physical key, so the active stock sequencer gets it in order with the real keys. KEY_SYNTHETIC bypasses debounce
+ * so short sequenced gates and repeated notes retain their timing. */
 static const uint8_t kb_keys[24] = { 39, 13, 40, 14, 41, 15, 42, 28, 32, 29, 22, 30, 31, 23, 48, 24, 49, 25, 50, 51, 26, 52, 27, 53 };
 static uint8_t kb_down[24];
 static void kb_push(int code, int down)
 {
     volatile uint32_t *rd = (volatile uint32_t *)0x01DD5244, *wr = (volatile uint32_t *)0x01DD5248;
     uint32_t m = irq_off(), w = *wr, n = (w + 1) & 0xFF;
-    if (n != *rd && !*(volatile uint8_t *)0x01DD524D) ((volatile uint16_t *)0x01DD5044)[w] = (uint16_t)(code | down << 8), *wr = n;
+    if (n != *rd && !*(volatile uint8_t *)0x01DD524D) ((volatile uint16_t *)0x01DD5044)[w] = (uint16_t)(code | KEY_SYNTHETIC | down << 8), *wr = n;
     irq_on(m);
     ((void (*)(void))0x019C2F04)();                               /* wake KeyHandler */
 }

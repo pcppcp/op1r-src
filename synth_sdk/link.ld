@@ -34,6 +34,7 @@ SECTIONS {
   .hook_rfp019e832c 0x019E832C : { KEEP(*(.hook_rfp019e832c)) }
   .hook_rfp01a1cfd2 0x01A1CFD2 : { KEEP(*(.hook_rfp01a1cfd2)) }
   .hook_rfp01a33fb2 0x01A33FB2 : { KEEP(*(.hook_rfp01a33fb2)) }
+  .hook_keywait 0x019C2CF4 : { KEEP(*(.hook_keywait)) }
   .hook_keyev 0x019C2D3E : { KEEP(*(.hook_keyev)) }
   .hook_midicc 0x01A85C8A : { KEEP(*(.hook_midicc)) }
   .hook_midistart 0x019E39D6 : { KEEP(*(.hook_midistart)) }

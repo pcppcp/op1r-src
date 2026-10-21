@@ -4,6 +4,11 @@ Source code of **op1r**, custom firmware for the Teenage Engineering OP-1 (firmw
 effects with their own screens, quad LFO, euclid and dots sequencers, USB audio track outs, tape markers, count-in,
 punch in/out, sample editor, resource monitor and more.
 
+Physical keys use per-key debounce: presses respond immediately, and releases settle to suppress double triggers.
+On the clock/card screen, press **T3** and turn **green** to select **OFF** or **1–30 ms** (default **5 ms**);
+the setting is saved across restarts. MIDI and sequencer events bypass the filter. Implementation, tests and hardware checks:
+[key debounce](synth_sdk/input/README.md).
+
 - **Users:** you don't need this repository. Patch your firmware with
   [op1r](https://github.com/pcppcp/op1r) (also in the browser).
 - **Plugin authors** (new synths / effects): read [synth_sdk/PLUGINS.md](synth_sdk/PLUGINS.md). You can write and

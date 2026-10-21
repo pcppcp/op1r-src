@@ -71,6 +71,7 @@ HOOKS = {0x019B975C: ('hook_namecmp', bytes.fromhex('18300b32')),      # instr_t
          0x019E832C: ('hook_rfp019e832c', bytes.fromhex('02e33a05')),   # CALL read_fx_param
          0x01A1CFD2: ('hook_rfp01a1cfd2', bytes.fromhex('00e3e75e')),   # CALL read_fx_param
          0x01A33FB2: ('hook_rfp01a33fb2', bytes.fromhex('ffe3f7a6')),    # CALL read_fx_param
+         0x019C2CF4: ('hook_keywait', bytes.fromhex('09e1e8b649e1a0ff6100')),  # KeyHandler: semaphore wait -> debounce poll
          0x019C2D3E: ('hook_keyev', bytes.fromhex('ffe39b9f')),          # KeyHandler: key event dispatch
          0x019C2E94: ('hook_knobev', bytes.fromhex('ffe3bc9e')),         # KeyHandler: encoder step dispatch
          0x01A042A2: ('hook_lforange', bytes.fromhex('00e37dce')),       # parse_patch_json: LFO word range check
@@ -209,6 +210,7 @@ def build(engs, fxs):
     os.makedirs(os.path.join(HERE, 'build'), exist_ok=True)
     gen_table(engs, fxs)
     srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/usbtrack.c', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'screens/overlay.c', 'plugload/plugload.c', 'plugload/op1p_load.c', 'screens/settings.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c'] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
+    srcs += ['input/debounce.c', 'input/key_input.c']
     objs = []
     cmds = []
     for s in srcs:

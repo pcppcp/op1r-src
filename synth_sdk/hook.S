@@ -148,9 +148,15 @@ _opz_hostmode_other:
 	.section .hook_rfp01a33fb2,"ax"
 	call _read_fx_param_safe;
 
-/* KeyHandler::process_queue dispatch -> encoder press / turn handling for custom FX pages (dispatcher.c) */
+/* KeyHandler: service debounce before the semaphore wait, filter physical edges,
+ * then dispatch through the custom handlers. The wait hook replaces P1.L / P1.H / CALL (P1), 10 bytes. */
+	.section .hook_keywait,"ax"
+	call _key_input_wait;
+	nop;
+	nop;
+	nop;
 	.section .hook_keyev,"ax"
-	call _key_event_hook;
+	call _key_input_event;
 	.section .hook_knobev,"ax"
 	call _knob_event_hook;
 /* midi_rx_parse FA (MIDI START) branch: CALL 0x01A5E7D0 (reset beat counters) -> midi_start_hook (dispatcher.c) */
