@@ -1,0 +1,36 @@
+{
+  "preset_names": [
+    "asteroid swarm",
+    "breath choir",
+    "cavern flute",
+    "deep pressure",
+    "pink surf",
+    "porcelain orbit",
+    "sub lantern",
+    "a fifth tide",
+    "holy dust",
+    "XFIN",
+    "ice chapel",
+    "last light",
+    "moon choir",
+    "stone hall",
+    "tidal arc"
+  ],
+  "character_order": [
+    "warm",
+    "swarm",
+    "breath",
+    "flute",
+    "pressure",
+    "surf",
+    "porcelain",
+    "sub",
+    "velvet",
+    "cathedral",
+    "nebula",
+    "aurora",
+    "oceanic",
+    "glassveil"
+  ],
+  "policy": "User-approved core set. Preserve these sounds and saved Character assignments; add future sounds without remapping existing indices."
+}

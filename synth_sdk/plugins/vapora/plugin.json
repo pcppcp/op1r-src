@@ -1,0 +1,27 @@
+{
+  "name": "vapora",
+  "kind": "synth",
+  "symbol": "ENGINE_vapora",
+  "sources": [
+    "vapora.c",
+    "vapora_dsp.c",
+    "vapora_screen.c"
+  ],
+  "defaults": [
+    9000,
+    26000,
+    18500,
+    12500
+  ],
+  "page2_defaults": [
+    8192,
+    8192,
+    8192
+  ],
+  "screen": {
+    "svg": "vapora.svg",
+    "symbol": "SCREEN_vapora"
+  },
+  "author": "AiAAAA",
+  "version": "1.2.3"
+}
