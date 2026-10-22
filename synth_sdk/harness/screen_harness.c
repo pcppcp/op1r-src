@@ -26,7 +26,7 @@ void    *host_fx_scratch[3];
 volatile uint8_t op1_fx_page[3][4];
 volatile uint8_t op1_eng_page[4];
 
-#define MAXN 64
+#define MAXN 512
 static char node_id[MAXN][32]; static int32_t node_m[MAXN][9]; static uint8_t node_hid[MAXN]; static int nnodes;
 #define MAXL 4096
 static struct { int32_t x0, y0, x1, y1, w; uint8_t c[4]; } lines[MAXL]; static int nlines;
@@ -44,6 +44,7 @@ void *host_find_node(void *scr, const char *id)
 {
     (void)scr;
     for (int i = 0; i < nnodes; i++) if (!strcmp(node_id[i], id)) return (void *)(intptr_t)(i + 1);
+    if (nnodes == MAXN) { fprintf(stderr, "more than %d nodes\n", MAXN); exit(1); }
     snprintf(node_id[nnodes], 32, "%s", id);
     static const int32_t ident[9] = { 1024, 0, 0, 0, 1024, 0, 0, 0, 1024 };
     memcpy(node_m[nnodes], ident, sizeof ident);
@@ -51,11 +52,13 @@ void *host_find_node(void *scr, const char *id)
 }
 void host_node_set_transform(void *node, const int32_t *m9) { memcpy(node_m[(intptr_t)node - 1], m9, 36); }
 void host_node_set_visible(void *node, int on) { node_hid[(intptr_t)node - 1] = !on; }
-static char style_id[32][16]; static uint8_t style_c[32][4]; static int nstyles;   /* recoloured nodes: render.py */
+#define MAXS 128
+static char style_id[MAXS][16]; static uint8_t style_c[MAXS][4]; static int nstyles;   /* recoloured nodes: render.py */
 uint8_t *host_node_style_rgba(void *scr, const char *id)
 {
     (void)scr;
     for (int i = 0; i < nstyles; i++) if (!strcmp(style_id[i], id)) return style_c[i];
+    if (nstyles == MAXS) { fprintf(stderr, "more than %d recoloured nodes\n", MAXS); exit(1); }
     snprintf(style_id[nstyles], 16, "%s", id); memset(style_c[nstyles], 0xFF, 4);
     return style_c[nstyles++];
 }

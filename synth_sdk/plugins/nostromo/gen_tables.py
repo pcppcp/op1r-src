@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""Generate nostromo_tables.h for nostromo.c: per tank clock (44.1 kHz for HIFI, 22.05 kHz for STD and LOFI) the
+delay layout of each type (Dattorro's lengths from 29.761 kHz; room x0.6, plate x1, hall x1.5), the one-poles, LFOs,
+wander and room reflections; knob tables (129 points, interpolated), 2^-x, diffusion, the STD half-band, LOFI's
+clock.
+
+    python3 plugins/nostromo/gen_tables.py
+"""
+import math, os
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+FS = 44100
+RATES = (44100, 22050)                                  # tank clocks: HIFI; STD and LOFI
+SIZES = (0.6, 1.0, 1.5)                                  # room, plate, hall
+# ap1..ap4; half 1: modulated allpass, delay, allpass, delay; half 2: the same (Deluge Digital::process)
+LEN = (142, 107, 379, 277, 672, 4453, 1800, 3720, 908, 4217, 2656, 3163)
+MODULATED = (4, 8)
+GUARD = 122                                              # largest excursion (120) + the interpolation's 2nd read + 1
+TAPS = ((9, 266, 1), (9, 2974, 1), (10, 1913, -1), (11, 1996, 1), (5, 1990, -1), (6, 187, -1), (7, 1066, -1),
+        (5, 353, 1), (5, 3627, 1), (6, 1228, -1), (7, 2673, 1), (9, 2111, -1), (10, 335, -1), (11, 121, -1))
+RING, PD, LOFI_PD = 65536, 22050, 4096                   # tank ring, pre-delay line (500 ms), LOFI's pre-delay
+DIFF = ((0, 0), (0.75, 0.625), (0.85, 0.75))             # input allpasses 1-2 / 3-4: low (none), med (Dattorro's), high
+REGEN = 0.5                                              # diffusion HIGH: the pre-delay's regeneration, through the allpasses
+MOD = ((0.5, 0.3, 48), (0.9, 0.7, 120), (6.2, 5.7, 28))   # tank mod low / med / high: LFO Hz, Hz, depth (samples)
+FLOOR = (340, 550, 800)                                  # shortest mid decay per type, ms: the tank's own ring
+XO_W = 16299                                             # the crossover: 700 Hz on the 100 Hz .. 5 kHz curve
+WANDER = ((600, 773, 8), (300, 386, 7))                  # tank mod LOW per clock: LFO steps per target, glide shift
+ER_MS = (4.3, 6.9, 9.7, 13.1, 17.7, 23.3, 29.9)          # room reflections behind the pre-delay
+ER_G = (0.54, -0.456, 0.396, -0.336, 0.288, -0.24, 0.204)   # their gains, output level
+SP_MS = (-18, -9, 6, 14, 23, 34, 47, 62)                  # hall, diffusion LOW (sparse): soft taps around the pre-delay
+SP_G = (0.16, -0.22, 0.26, -0.22, 0.19, -0.16, 0.13, -0.1)   # their gains, output level
+HB_BETA = 5.0                                            # STD half-band: 31 taps, Kaiser window
+
+
+def q15(x):
+    return max(-32768, min(32767, round(x * 32768)))
+
+
+def layout(size, fs):
+    R = fs / 29761
+    lens = [round(n * R * size) for n in LEN]
+    base, at = [], 0
+    for i, n in enumerate(lens):
+        base.append(at)
+        at += n + 1 + (GUARD if i in MODULATED else 0)
+    assert at <= RING, at
+    taps = [round(off * R * size) for _, off, _ in TAPS]
+    for (line, _, _), t in zip(TAPS, taps):
+        assert t < lens[line], (line, t)
+    # loop gain for an RT60 of rt ms: 10^(-3 T / rt) = 2^-(k / rt), k = 3 log2(10) T, T = the half's delay in ms
+    k16 = [round(3 * math.log2(10) * sum(lens[a:a + 4]) / (fs / 1000) * 65536) for a in (4, 8)]
+    return lens, base, at, taps, k16
+
+
+def knob(f):                                             # value at knob position q = i << 8, v = i / 128
+    return [f(i / 128) for i in range(129)]
+
+
+def emit(out, decl, comment, vals):
+    def body(v, ind):
+        if isinstance(v[0], (list, tuple)):
+            return (',\n' + ind).join('{ ' + body(x, ind + '  ') + ' }' for x in v)
+        return (',\n' + ind).join(', '.join(str(x) for x in v[i:i + 12]) for i in range(0, len(v), 12))
+    out.append(f'static const {decl} = {{   /* {comment} */\n    {body(vals, "    ")}\n}};')
+
+
+def halfband():
+    """31-tap half-band (Kaiser): the 8 odd taps either side of the centre (0.5), Q15; 50 dB down past 13.5 kHz"""
+    def i0(x):
+        s, t, k = 1.0, 1.0, 1
+        while t > 1e-12 * s:
+            t *= (x / (2 * k)) ** 2
+            s += t
+            k += 1
+        return s
+    w = lambda n: i0(HB_BETA * math.sqrt(1 - (n / 15) ** 2)) / i0(HB_BETA)
+    c = [q15(math.sin(math.pi * n / 2) / (math.pi * n) * w(n)) for n in range(1, 16, 2)]
+    h = {0: 0.5, **{n: c[j] / 32768 for j, n in enumerate(range(1, 16, 2))}}
+    resp = lambda f: abs(sum(v * (1 if n == 0 else 2 * math.cos(2 * math.pi * f / FS * n)) for n, v in h.items()))
+    stop = min(-20 * math.log10(resp(f) / resp(0) + 1e-12) for f in range(13500, 22051, 25))
+    assert stop >= 50, stop                                # the alias band, past 13.5 kHz
+    assert sum(abs(x) for x in c) < 24576, c               # 16384 x + sum c (x + x) stays in int32
+    return c
+
+
+def main():
+    lay = [[layout(s, fs) for s in SIZES] for fs in RATES]
+    treb = knob(lambda v: round(500 * 32 ** v))
+    xo = knob(lambda v: round(100 * 50 ** v))
+    pole = lambda hz, fs: [q15(math.exp(-2 * math.pi * f / fs)) for f in hz]
+    o = ['/* generated by plugins/nostromo/gen_tables.py - do not edit */',
+         f'#define NT_RING {RING}', f'#define NT_PD {PD}', f'#define NT_LOFI_PD {LOFI_PD}', f'#define NT_LINES {len(LEN)}',
+         f'#define NT_TAPS {len(TAPS)}', f'#define NT_ERS {len(ER_MS)}', f'#define NT_SPS {len(SP_MS)}', f'#define NT_REGEN {q15(REGEN)}',
+         f'#define NT_DD1 {q15(0.70)}   /* decay diffusion 1 */',
+         f'#define NT_GMAX {q15(0.97)}   /* loop gain cap */']
+    emit(o, 'int32_t nt_len[2][3][NT_LINES]', 'line lengths per clock: room, plate, hall', [[l[0] for l in r] for r in lay])
+    emit(o, 'int32_t nt_base[2][3][NT_LINES]', 'line starts in the ring', [[l[1] for l in r] for r in lay])
+    emit(o, 'int32_t nt_used[2][3]', 'ring words in use', [[l[2] for l in r] for r in lay])
+    emit(o, 'int32_t nt_tap[2][3][NT_TAPS]', 'output tap offsets: left 7, right 7', [[l[3] for l in r] for r in lay])
+    emit(o, 'int8_t nt_tap_line[NT_TAPS]', 'their lines', [t[0] for t in TAPS])
+    emit(o, 'int8_t nt_tap_sign[NT_TAPS]', 'their signs', [t[2] for t in TAPS])
+    emit(o, 'int32_t nt_k16[2][3][2]', '3 log2(10) T_half / ms, Q16: gain = 2^-(k / RT60 ms)', [[l[4] for l in r] for r in lay])
+    emit(o, 'int32_t nt_rt[3][129]', 'mid RT60 per type, ms: floor * (10000 / floor)^v',
+         [knob(lambda v, f=f: round(f * (10000 / f) ** v)) for f in FLOOR])
+    emit(o, 'int32_t nt_wg[3][129]', 'wet level per type, Q15: min(1, sqrt(2.4 s / RT60)), a held sound builds up no louder than at 2.4 s',
+         [knob(lambda v, f=f: round(32768 * min(1, (2400 / (f * (10000 / f) ** v)) ** 0.5))) for f in FLOOR])
+    emit(o, 'int32_t nt_treb_hz[129]', 'treble decay, Hz: 500 * 32^v', treb)
+    emit(o, 'int32_t nt_treb_b[2][129]', 'its one-pole per clock, Q15 e^(-2 pi f / fs)', [pole(treb, fs) for fs in RATES])
+    lut = lambda t, q: t[q >> 8] + ((t[(q >> 8) + 1] - t[q >> 8]) * (q & 255) >> 8)    # as nt_lut
+    emit(o, 'int32_t nt_xo_b[2]', f'crossover one-pole per clock, fixed at {lut(xo, XO_W)} Hz',
+         [lut(pole(xo, fs), XO_W) for fs in RATES])
+    emit(o, 'int32_t nt_dc_b[2]', 'low cut at 20 Hz per clock', [q15(math.exp(-2 * math.pi * 20 / fs)) for fs in RATES])
+    emit(o, 'int16_t nt_exp2[256]', '2^(-i / 256), Q15', [q15(2 ** (-i / 256)) for i in range(256)])
+    emit(o, 'int16_t nt_diff[3][2]', 'diffusion low / med / high: input allpasses 1-2, 3-4',
+         [[q15(a), q15(b)] for a, b in DIFF])
+    emit(o, 'int32_t nt_mod[2][3][3]', 'tank mod low / med / high per clock: LFO steps per 32 samples, depth (Q8)',
+         [[[round(f1 * 32 / fs * 2 ** 32), round(f2 * 32 / fs * 2 ** 32), round(d * 256 * fs / FS)] for f1, f2, d in MOD]
+          for fs in RATES])
+    emit(o, 'int32_t nt_wander[2][3]', 'tank mod LOW per clock: LFO steps per target (two LFOs), glide shift', WANDER)
+    emit(o, 'int32_t nt_er_t[2][NT_ERS]', 'room reflections per clock, samples behind the pre-delay',
+         [[round(ms * fs / 1000) for ms in ER_MS] for fs in RATES])
+    emit(o, 'int32_t nt_er_g[NT_ERS]', 'their gains, Q15 at output level', [q15(g) for g in ER_G])
+    emit(o, 'int32_t nt_sp_t[2][NT_SPS]', 'hall sparse taps per clock, samples from the pre-delay (- before it)',
+         [[round(ms * fs / 1000) for ms in SP_MS] for fs in RATES])
+    emit(o, 'int32_t nt_sp_g[NT_SPS]', 'their gains, Q15 at output level', [q15(g) for g in SP_G])
+    emit(o, 'int32_t nt_hb[8]', 'STD half-band, Q15: taps 1, 3 .. 15 either side of the centre (0.5)', halfband())
+    emit(o, 'int32_t nt_lofi_inc[129]', 'LOFI clock, Q16 tank samples per sample: 22.05 kHz * 8^-v', knob(lambda v: round(32768 * 8 ** -v)))
+    path = os.path.join(HERE, 'nostromo_tables.h')
+    open(path, 'w').write('\n'.join(o) + '\n')
+    print('->', path, 'ring words in use:', [[l[2] for l in r] for r in lay])
+
+
+if __name__ == '__main__':
+    main()

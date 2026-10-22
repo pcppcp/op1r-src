@@ -64,5 +64,7 @@ static inline volatile int16_t *op1_fx_meter(int pos) { return &host_fx_meter[po
 static inline int op1_fx_screen_pos(void) { return 0; }
 static inline const int16_t *op1_fx_knobs(int pos) { return host_fx_knobs[pos % 3]; }
 static inline int32_t op1_fx_param_q15(const int16_t *p, int i) { return p[i] < 0 ? 0 : p[i]; }
-static inline void op1_fx_knobs_live(int16_t out[4]) { for (int i = 0; i < 4; i++) out[i] = host_fx_knobs[0][i]; }
+__attribute__((weak)) int16_t host_fx_lfo[4];   /* added to the live FX knobs only, as an OP-1 LFO (tests) */
+static inline void op1_fx_knobs_live(int16_t out[4])
+{ for (int i = 0; i < 4; i++) { int32_t x = host_fx_knobs[0][i] + host_fx_lfo[i]; out[i] = (int16_t)(x < 0 ? 0 : (x > 32767 ? 32767 : x)); } }
 #endif
