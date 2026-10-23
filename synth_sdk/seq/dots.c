@@ -31,6 +31,8 @@
  *   fx1..4  parameter locks: -- (off, default) or 0..100 % for knob 1..4 (blue..red) of the mode's instrument FX.
  *           When the step plays (chance / cond / nudge apply) the knob jumps to the value; it reverts to the knob's own
  *           setting after the gate (% of a step; TIE: until the slot's next trigger). Last lock wins a shared knob.
+ *   sy1..4  the same for knob 1..4 of the synth engine of the instrument (synth mode only; not in drum mode). Knobs of
+ *           an engine without a plain range (sample start / end) are not locked.
  * Lock triggers (no note): blue press in record mode on an empty step creates one (all locks off = does nothing
  * until a lock is set), on a lock trigger removes it. A key on a lock trigger adds a note and keeps the locks.
  * New triggers get the defaults (50 %, 1, 100 %, ALL, 0, OFF); recording over a trigger only changes its note.
@@ -47,13 +49,17 @@
 #define DT_TIE      101                                 /* gate value: hold until the next note */
 #define DT_NONOTE   0xFF                                /* note of a lock trigger (no note) */
 #define DT_NFX      4                                   /* locks: instrument FX knobs 1..4 */
-enum { DT_P_GATE, DT_P_RATCH, DT_P_CHANCE, DT_P_COND, DT_P_NUDGE, DT_P_RAMP, DT_P_FX1, DT_NPARAMS = DT_P_FX1 + DT_NFX };
+#define DT_NSY      4                                   /* locks: synth engine knobs 1..4 (synth mode) */
+#define DT_NLK      (DT_NFX + DT_NSY)                   /* lock index: 0..3 FX, 4..7 synth engine */
+enum { DT_P_GATE, DT_P_RATCH, DT_P_CHANCE, DT_P_COND, DT_P_NUDGE, DT_P_RAMP, DT_P_FX1, DT_P_SY1 = DT_P_FX1 + DT_NFX,
+       DT_NPARAMS = DT_P_SY1 + DT_NSY };
+#define DT_NPAR(pos) ((pos) ? DT_P_SY1 : DT_NPARAMS)    /* drum mode has no synth engine */
 static const uint8_t dt_cond_ab[10][2] = { {0,0}, {1,2}, {2,2}, {1,3}, {2,3}, {3,3}, {1,4}, {2,4}, {3,4}, {4,4} };
 
 typedef struct {                                        /* vel 0 = no trigger */
     uint8_t note, key, vel, gate, ratch, chance, cond;
     int8_t  nudge, ramp;
-    uint8_t fx[DT_NFX];                                 /* 0 = off, 1..101 = 0..100 % */
+    uint8_t fx[DT_NLK];                                 /* 0 = off, 1..101 = 0..100 % */
 } dt_step_t;
 #define DT_STEP_BYTES 9                                 /* saved fields of the step row (locks: own row) */
 typedef struct {
@@ -63,7 +69,7 @@ typedef struct {
 typedef struct {                                        /* a decided step: its hits, in time order */
     uint8_t  on, ratch, j, note, key, vel, gate;        /* j: next hit */
     int8_t   ramp;
-    uint8_t  fx[DT_NFX];
+    uint8_t  fx[DT_NLK];
     int32_t  s;                                         /* step (counted from start) */
     uint64_t t0, sub;                                   /* first hit, hit spacing (Q16 ticks) */
 } dt_plan_t;
@@ -101,7 +107,7 @@ void host_dt_note_on(int pos, int note, int vel);
 void host_dt_note_off(int pos, int note);
 #define DT_NOTE_ON(pos, n, k, v) (host_dt_note_on((pos), (n), (v)), (n))
 #define DT_NOTE_OFF(pos, n)      host_dt_note_off((pos), (n))
-void host_dt_fx_lock(int pos, int knob, int pc);
+void host_dt_fx_lock(int pos, int knob, int pc);       /* knob: lock index 0..7 */
 void host_dt_fx_restore(int pos, int knob);
 #define DT_FX_LOCK(pos, k, pc)   host_dt_fx_lock((pos), (k), (pc))
 #define DT_FX_RESTORE(pos, k)    host_dt_fx_restore((pos), (k))
@@ -123,7 +129,7 @@ static dt_cfg_t *dt_q(dt_bank_t *b, int k) { return &b->pats[b->pat][k]; }
 static void dt_step_default(dt_step_t *s)
 {
     s->gate = 50; s->ratch = 1; s->chance = 100; s->cond = 0; s->nudge = 0; s->ramp = 0;
-    for (int i = 0; i < DT_NFX; i++) s->fx[i] = 0;
+    for (int i = 0; i < DT_NLK; i++) s->fx[i] = 0;
 }
 /* byte loops instead of struct copies: the firmware build has no memcpy / memset */
 static void dt_cfg_copy(dt_cfg_t *d, const dt_cfg_t *c)
@@ -148,17 +154,17 @@ static void dt_bank_init(dt_bank_t *b)
 }
 
 /* locks: the knob owner per mode (slot + 1); the base value is kept by the glue until the owner reverts */
-static uint8_t dt_lk_owner[2][DT_NFX];
+static uint8_t dt_lk_owner[2][DT_NLK];
 static void dt_unlock(int pos, int slot, dt_run_t *r)
 {
-    for (int i = 0; i < DT_NFX; i++)
+    for (int i = 0; i < DT_NLK; i++)
         if (r->locks >> i & 1 && dt_lk_owner[pos][i] == slot + 1) { DT_FX_RESTORE(pos, i); dt_lk_owner[pos][i] = 0; }
     r->locks = 0;
 }
 static void dt_lock(int pos, int slot, dt_run_t *r, const uint8_t *fx)
 {
-    for (int i = 0; i < DT_NFX; i++)
-        if (fx[i]) { DT_FX_LOCK(pos, i, fx[i] - 1); dt_lk_owner[pos][i] = (uint8_t)(slot + 1); r->locks |= (uint8_t)(1 << i); }
+    for (int i = 0; i < DT_NLK; i++)
+        if (fx[i] && !(pos && i >= DT_NFX)) { DT_FX_LOCK(pos, i, fx[i] - 1); dt_lk_owner[pos][i] = (uint8_t)(slot + 1); r->locks |= (uint8_t)(1 << i); }
 }
 static int dt_slot_of(int pos, const dt_run_t *r) { return (int)(r - dt[pos & 1].rt); }
 
@@ -222,7 +228,7 @@ static void dt_param_turn(dt_step_t *s, int par, int st)
     case DT_P_COND:   s->cond = (uint8_t)dt_clampi(s->cond + st, 0, 9); break;
     case DT_P_NUDGE:  s->nudge = (int8_t)dt_clampi(s->nudge + st, -12, 12); break;
     case DT_P_RAMP:   s->ramp = (int8_t)dt_clampi(s->ramp + st, -1, 1); break;
-    default: {                                          /* fx lock: off below 0 %, 2 % per detent */
+    default: {                                          /* fx / synth lock: off below 0 %, 2 % per detent */
         uint8_t *v = &s->fx[par - DT_P_FX1];
         int pc = *v ? *v - 1 : -1;
         pc = pc < 0 ? (st > 0 ? (st - 1) * 2 : -1) : pc + st * 2;
@@ -287,7 +293,7 @@ void dt_turn(int pos, int knob, int delta, int shift)
     }
     if (knob == 2) {                                    /* white, record mode: parameter value / selection */
         if (!b->rec) return;
-        if (b->page) { b->par = (uint8_t)((b->par + st % DT_NPARAMS + DT_NPARAMS) % DT_NPARAMS); return; }
+        if (b->page) { int n = DT_NPAR(pos & 1); b->par = (uint8_t)((b->par + st % n + n) % n); return; }
         dt_step_t *s = &q->st[b->cur[k]];
         if (s->vel) { dt_param_turn(s, b->par, st); DT_CHANGED(); }
         return;
@@ -433,8 +439,9 @@ void dt_clip(int pos, int op, int all)
 /* ---- persistence: one hex text per (mode, pattern): "v2" "pp ss" (current pattern, selected slot), then per slot
  * "len muted" + 64 steps x 9 fields (note key vel gate ratch chance cond nudge ramp, 2 hex digits each; "v2").
  * Old texts (no prefix, 3 fields: note key vel) still load with default parameters.
- * Parameter locks are a second text per (mode, pattern): "L1" + 6 slots x 64 steps x fx1..fx4 (3074 chars): the firmware
- * formats every SQL statement into an 8 KB buffer (db2.cpp, te_vsnprintf 0x2000), one text with both is too long. ---- */
+ * Parameter locks are a second text per (mode, pattern): "L1" + 6 slots x 64 steps x fx1..fx4 (3074 chars), the synth
+ * locks a third: "S1" + the same x sy1..sy4. The firmware formats every SQL statement into an 8 KB buffer (db2.cpp,
+ * te_vsnprintf 0x2000), one text with all of them is too long. ---- */
 #define DT_TEXT1_LEN (4 + DT_SLOTS * (4 + DT_STEPS * 6))
 #define DT_TEXT_LEN  (2 + 4 + DT_SLOTS * (4 + DT_STEPS * DT_STEP_BYTES * 2))
 #define DT_LOCK_LEN  (2 + DT_SLOTS * DT_STEPS * DT_NFX * 2)
@@ -495,27 +502,31 @@ int dt_parse(int pos, int p, const char *s, int len)    /* 0 = rejected (wrong s
     return 1;
 }
 
-int dt_serialize_locks(int pos, int p, char *out)       /* out: DT_LOCK_LEN + 1 */
+static int dt_ser_locks(int pos, int p, char *out, int f0, char tag)
 {
     dt_bank_t *b = &dt[pos & 1]; dt_bank_init(b);
-    char *o = out; *o++ = 'L'; *o++ = '1';
+    char *o = out; *o++ = tag; *o++ = '1';
     for (int k = 0; k < DT_SLOTS; k++)
         for (int i = 0; i < DT_STEPS; i++)
-            for (int f = 0; f < DT_NFX; f++) o = dt_hex(o, b->pats[p][k].st[i].fx[f]);
+            for (int f = f0; f < f0 + DT_NFX; f++) o = dt_hex(o, b->pats[p][k].st[i].fx[f]);
     *o = 0;
     return (int)(o - out);
 }
-int dt_parse_locks(int pos, int p, const char *s, int len)   /* after dt_parse of the same pattern */
+static int dt_parse_lk(int pos, int p, const char *s, int len, int f0, char tag)   /* after dt_parse of the same pattern */
 {
-    if (len != DT_LOCK_LEN || s[0] != 'L' || s[1] != '1' || p < 0 || p >= DT_PATS) return 0;
+    if (len != DT_LOCK_LEN || s[0] != tag || s[1] != '1' || p < 0 || p >= DT_PATS) return 0;
     for (int i = 2; i < len; i += 2) if (dt_unhex(s + i) < 0) return 0;
     dt_bank_t *b = &dt[pos & 1]; dt_bank_init(b);
     s += 2;
     for (int k = 0; k < DT_SLOTS; k++)
         for (int i = 0; i < DT_STEPS; i++)
-            for (int f = 0; f < DT_NFX; f++, s += 2) b->pats[p][k].st[i].fx[f] = (uint8_t)dt_clampi(dt_unhex(s), 0, 101);
+            for (int f = f0; f < f0 + DT_NFX; f++, s += 2) b->pats[p][k].st[i].fx[f] = (uint8_t)dt_clampi(dt_unhex(s), 0, 101);
     return 1;
 }
+int dt_serialize_locks(int pos, int p, char *out) { return dt_ser_locks(pos, p, out, 0, 'L'); }      /* out: DT_LOCK_LEN + 1 */
+int dt_parse_locks(int pos, int p, const char *s, int len) { return dt_parse_lk(pos, p, s, len, 0, 'L'); }
+int dt_serialize_sy(int pos, int p, char *out) { return dt_ser_locks(pos, p, out, DT_NFX, 'S'); }
+int dt_parse_sy(int pos, int p, const char *s, int len) { return dt_parse_lk(pos, p, s, len, DT_NFX, 'S'); }
 
 /* ---- clock: advance by inc ticks (Q16, 24 per beat) ----
  * Each step is decided half a step before its grid time (nudge reaches half a step early): cond (loop of the slot),
@@ -538,7 +549,7 @@ static void dt_decide(dt_run_t *r, const dt_cfg_t *q, int32_t s, uint64_t grid)
     p->t0 = t0 < 0 ? 0 : (uint64_t)t0; p->sub = L / t->ratch;
     p->ratch = t->ratch; p->j = 0; p->note = t->note; p->key = t->key; p->vel = t->vel; p->gate = t->gate;
     p->ramp = t->ramp; p->s = s; p->on = 1;
-    for (int i = 0; i < DT_NFX; i++) p->fx[i] = t->fx[i];
+    for (int i = 0; i < DT_NLK; i++) p->fx[i] = t->fx[i];
 }
 
 static void dt_advance(int pos, uint64_t inc)
@@ -645,7 +656,7 @@ static void dt_screen_draw(void *r, int pos)
         const dt_step_t *s = &q->st[i];
         int32_t x = dt_x(i), y = dt_y(i);
         int lk = s->vel && s->note == DT_NONOTE, any = 0;
-        for (int f = 0; f < DT_NFX; f++) any |= s->fx[f];
+        for (int f = 0; f < DT_NLK; f++) any |= s->fx[f];
         const uint8_t *c = q->muted ? dt_dimgreen : dt_green;
         if (i == play) c = s->vel && !q->muted ? dt_white : dt_grey;
         if (lk) {                                       /* lock trigger: hollow square */
@@ -665,7 +676,7 @@ static void dt_screen_draw(void *r, int pos)
     sf_text(r, OP1_Q10(DT_PAT_X), OP1_Q10(DT_INFO_Y), OP1_Q10(2), t, 0x400, dt_white);
     const dt_step_t *s = &q->st[b->cur[k]];
     int lks = s->vel && s->note == DT_NONOTE;
-    if (lks) { t[0] = 'F'; t[1] = 'X'; t[2] = 0; }
+    if (lks) { t[0] = 'L'; t[1] = 'K'; t[2] = 0; }
     else if (s->vel) dnote(t, s->note); else { t[0] = '-'; t[1] = '-'; t[2] = 0; }
     int32_t nx = sf_text(r, OP1_Q10(DT_NOTE_X), OP1_Q10(DT_INFO_Y), OP1_Q10(2), t, 0x400, s->vel ? dt_green : dt_grey);
     if (s->vel && !lks) { dnum(t, s->vel); sf_text(r, nx + OP1_Q10(10), OP1_Q10(DT_INFO_Y), OP1_Q10(2), t, 0x400, b->rec ? dt_col[3] : dt_grey); }
@@ -676,10 +687,10 @@ static void dt_screen_draw(void *r, int pos)
         sf_text(r, OP1_Q10(b->live ? DT_REC_X - 12 : DT_REC_X), OP1_Q10(DT_SLOT_Y), OP1_Q10(2),
                 b->live ? "LIVE" : "REC", 0x400, dt_col[3]);
         static const char *const names[DT_NPARAMS] = { "GATE", "RATCH", "CHANCE", "COND", "NUDGE", "RAMP",
-                                                       "FX1", "FX2", "FX3", "FX4" };
-        int fxp = b->par >= DT_P_FX1;                   /* fx names in their knob colour on page 2 */
+                                                       "FX1", "FX2", "FX3", "FX4", "SY1", "SY2", "SY3", "SY4" };
+        int fxp = b->par >= DT_P_FX1;                   /* lock names in their knob colour on page 2 */
         int32_t px = sf_text(r, OP1_Q10(DT_PAR_X), OP1_Q10(DT_INFO_Y), OP1_Q10(2), names[b->par], 0x400,
-                             b->page ? (fxp ? dt_col[b->par - DT_P_FX1] : dt_white) : dt_grey);
+                             b->page ? (fxp ? dt_col[(b->par - DT_P_FX1) & 3] : dt_white) : dt_grey);
         char *e = t; t[0] = '-'; t[1] = '-'; t[2] = 0;
         if (s->vel) switch (b->par) {
             case DT_P_GATE:   if (s->gate == DT_TIE) { t[0] = 'T'; t[1] = 'I'; t[2] = 'E'; t[3] = 0; }
@@ -736,24 +747,48 @@ extern volatile uint8_t eu_rec_play;                    /* seq/euclid.c, handled
 #define DT_DRUM_OCT()  (((const int *)0x01DFE500)[*(volatile int *)0xFF8016D8 & 7])
 /* parameter locks on the instrument FX of the mode (docs/17): knob words synth 0xFF801444 / drum 0xFF8015C4 + slot*16,
  * FX type synth 0xFF801734[slot] / drum 0xFF801754[slot], raw range per type/knob in the table 0x01DE5C50 + type*0x30 +
- * knob*6 {min, max, ?} (filled at boot; read_fx_param asserts outside it, so values always stay in [min, max]). */
-static int16_t *dt_lk_ptr[2][DT_NFX];
-static int16_t  dt_lk_base[2][DT_NFX];
+ * knob*6 {min, max, ?} (filled at boot; read_fx_param asserts outside it, so values always stay in [min, max]).
+ * Synth engine locks (lock index 4..7, synth mode): knob words 0xFF8013C4 + slot*16, engine 0xFF8016E4[slot], range
+ * 0x01DE5890 + engine*0x40 + knob*8 {min, max, scale, mode} (as midi/mx.c; mode 2 / 3 = linked sample start / end:
+ * not locked). Only the live word is written, not the patch (set_knobs), so a lock is never saved with the sound;
+ * the base is restored the same way. The words are reloaded from the patch on an instrument switch. */
+static int16_t *dt_lk_ptr[2][DT_NLK];
+static int16_t  dt_lk_base[2][DT_NLK];
+static int      dt_lk_eng[DT_NSY], dt_lk_slot[DT_NSY];  /* engine / slot of the synth word when its base was taken */
 static void dt_fw_fx_lock(int pos, int knob, int pc)
 {
     int slot = *(volatile int *)(pos ? 0xFF8016D8 : 0xFF8016D4) & 7;
-    int type = ((volatile int *)(pos ? 0xFF801754 : 0xFF801734))[slot];
-    if (type < 0 || type > 7) return;
-    const int16_t *rg = (const int16_t *)(0x01DE5C50 + type * 0x30 + knob * 6);
-    int lo = rg[0], hi = rg[1];
+    int16_t *w; int lo, hi, eng = 0;
+    if (knob >= DT_NFX) {                               /* synth engine knob */
+        if (pos) return;
+        eng = ((volatile int *)0xFF8016E4)[slot];
+        if (eng < 0 || eng > 31) return;
+        const int16_t *rg = (const int16_t *)(0x01DE5890 + eng * 0x40 + (knob - DT_NFX) * 8);
+        if (rg[3] != 0 && rg[3] != 1) return;
+        lo = rg[0]; hi = rg[1];
+        w = (int16_t *)(0xFF8013C4 + slot * 16) + (knob - DT_NFX);
+    } else {
+        int type = ((volatile int *)(pos ? 0xFF801754 : 0xFF801734))[slot];
+        if (type < 0 || type > 7) return;
+        const int16_t *rg = (const int16_t *)(0x01DE5C50 + type * 0x30 + knob * 6);
+        lo = rg[0]; hi = rg[1];
+        w = (int16_t *)((pos ? 0xFF8015C4 : 0xFF801444) + slot * 16) + knob;
+    }
     if (hi <= lo) return;                               /* table not filled */
-    int16_t *w = (int16_t *)((pos ? 0xFF8015C4 : 0xFF801444) + slot * 16) + knob;
-    if (!dt_lk_ptr[pos][knob]) { dt_lk_ptr[pos][knob] = w; dt_lk_base[pos][knob] = *w; }   /* first lock: keep base */
+    if (dt_lk_ptr[pos][knob] && (dt_lk_ptr[pos][knob] != w || (knob >= DT_NFX && dt_lk_eng[knob - DT_NFX] != eng)))
+        dt_lk_ptr[pos][knob] = 0;                       /* another slot / engine since: the old base is stale */
+    if (!dt_lk_ptr[pos][knob]) {                        /* first lock: keep base */
+        dt_lk_ptr[pos][knob] = w; dt_lk_base[pos][knob] = *w;
+        if (knob >= DT_NFX) { dt_lk_eng[knob - DT_NFX] = eng; dt_lk_slot[knob - DT_NFX] = slot; }
+    }
     *w = (int16_t)(lo + (hi - lo) * pc / 100);
 }
 static void dt_fw_fx_restore(int pos, int knob)
 {
-    if (dt_lk_ptr[pos][knob]) { *dt_lk_ptr[pos][knob] = dt_lk_base[pos][knob]; dt_lk_ptr[pos][knob] = 0; }
+    if (!dt_lk_ptr[pos][knob]) return;
+    if (knob < DT_NFX || ((volatile int *)0xFF8016E4)[dt_lk_slot[knob - DT_NFX]] == dt_lk_eng[knob - DT_NFX])
+        *dt_lk_ptr[pos][knob] = dt_lk_base[pos][knob];  /* (the engine of that slot changed meanwhile: base no longer valid) */
+    dt_lk_ptr[pos][knob] = 0;
 }
 
 static int dt_nop(void *self) { (void)self; return 0; }
@@ -800,14 +835,15 @@ static void dt_bg_save(void *self)                      /* saver thread */
     (void)self;
     void *db = DT_DB_HANDLE();
     DT_DB_EXEC(db, DT_CREATE);
-    for (int id = 0; id < 4 * DT_PATS; id++) {          /* id = mode * 4 + pattern (steps), + 8 (locks) */
+    for (int id = 0; id < 6 * DT_PATS; id++) {          /* id = mode * 4 + pattern (steps), + 8 (fx locks), + 16 (synth locks) */
         static const char head[] = "INSERT OR REPLACE INTO dotsseq VALUES (";
         char *o = dt_sql;
         for (const char *h = head; *h; h++) *o++ = *h;
-        if (id >= 10) *o++ = '1';
+        if (id >= 10) *o++ = (char)('0' + id / 10);
         *o++ = (char)('0' + id % 10); *o++ = ','; *o++ = '\'';
         int m = id % (2 * DT_PATS);
-        o += id < 2 * DT_PATS ? dt_serialize(m / DT_PATS, m % DT_PATS, o) : dt_serialize_locks(m / DT_PATS, m % DT_PATS, o);
+        o += id < 2 * DT_PATS ? dt_serialize(m / DT_PATS, m % DT_PATS, o)
+           : id < 4 * DT_PATS ? dt_serialize_locks(m / DT_PATS, m % DT_PATS, o) : dt_serialize_sy(m / DT_PATS, m % DT_PATS, o);
         *o++ = '\''; *o++ = ')'; *o = 0;
         op1_db_write(db, dt_sql);                       /* (no assert: long statement, docs/17) */
     }
@@ -820,7 +856,7 @@ static void dt_load(void)
 {
     void *db = DT_DB_HANDLE();
     DT_DB_EXEC(db, DT_CREATE);
-    for (int id = 0; id < 4 * DT_PATS; id++) {          /* steps first (ids 0..7), then their locks (8..15) */
+    for (int id = 0; id < 6 * DT_PATS; id++) {          /* steps first (ids 0..7), then their locks (8..15, 16..23) */
         static char q[] = "SELECT data FROM dotsseq WHERE id=00";
         q[sizeof q - 3] = (char)('0' + id / 10); q[sizeof q - 2] = (char)('0' + id % 10);
         dt_dstr s = { 0 };
@@ -829,7 +865,8 @@ static void dt_load(void)
         int m = id % (2 * DT_PATS);
         if (s.size) {                                   /* (heap copy, once per boot, not freed) */
             if (id < 2 * DT_PATS) dt_parse(m / DT_PATS, m % DT_PATS, p, (int)s.size);
-            else dt_parse_locks(m / DT_PATS, m % DT_PATS, p, (int)s.size);
+            else if (id < 4 * DT_PATS) dt_parse_locks(m / DT_PATS, m % DT_PATS, p, (int)s.size);
+            else dt_parse_sy(m / DT_PATS, m % DT_PATS, p, (int)s.size);
         }
     }
     DT_BG_REGISTER(&dt_bg);
