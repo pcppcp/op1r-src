@@ -863,6 +863,23 @@ static int tape_page(void)
     return tm_scr && CUR_MODE_ID == 2 && id >= 0 && id < 0x40 && (SCREEN_TABLE[id] == tm_scr || ms_view_open());
 }
 
+/* Shift + Drop on the tape screen: an all-tracks lift is summed into one track (tape/mixdrop.c), then the stock
+ * Drop (without Shift) pastes it on the selected track. Anything else keeps the stock Shift + Drop. */
+extern int tape_mix_clip(void);
+static uint8_t sd_swallow;                                     /* the Drop release that belongs to our Shift + Drop */
+static int tape_shift_drop(int pressed)
+{
+    if (!pressed) { int r = sd_swallow; sd_swallow = 0; return r; }
+    if (!*(volatile uint8_t *)0x01DD7F78 || !tape_page() || !tape_mix_clip()) return 0;
+    volatile uint8_t *shift = (volatile uint8_t *)0x01DD7F78;
+    uint8_t held = *shift;
+    sd_swallow = 1;
+    *shift = 0;
+    KEY_DISPATCH(0x0B, 1); KEY_DISPATCH(0x0B, 0);
+    *shift = held;
+    return 1;
+}
+
 static void se_swap(void)                                           /* the open editor's screen into its slot, or stock */
 {
     int ed6 = se_ready && se_is_open() && se_screen_id() == 6;
@@ -945,6 +962,7 @@ void key_event_hook(int code, int pressed)
             }
         }
     }
+    if (code == 0x0B && tape_shift_drop(pressed)) return;        /* Shift + Drop: all tracks as one */
     extern int tool_key(int code, int pressed);
     if (tool_key(code, pressed)) return;                         /* tool plugins (screens/overlay.c) */
     if (code == 0x3E && tape_page()) {                         /* red press: add, Shift: remove */
