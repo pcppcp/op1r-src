@@ -22,12 +22,14 @@
  * unity peak gain, makeup gain over Q, and a soft knee at the output: linear up to 0.7 of full scale, rounded above.
  * Undertones below the audible range fade out (40 Hz full, 25 Hz silent): a 13 Hz "undertone" is not a tone but
  * 13 clicks a second, each ringing the formants - it crackles.
- * Cost: two passes per block (mixture -> stack buffer, then filters), ~102 instructions per sample, all multiplies
- * 16 x 16; per block one division (polyBLEP reciprocal). See README for the CPU estimate.
+ * Cost: two passes per block (mixture -> buffer, then filters). On the Blackfin they run as the kernels in
+ * mixtur_dsp.S (about 50 packets per sample), bit for bit the C loops in mixtur_dsp.h, which the host builds use, as
+ * does a Blackfin build with MIXTUR_C_REF. No library division per block for a held pitch. See README.
  * Copyright (C) 2026 ultralazr. GPL-3.0-or-later with the OP-1 firmware permission (see LICENSE and NOTICE).
  */
 #include "op1_plugin.h"
 #include "mixtur_tables.h"
+#include "mixtur_dsp.h"
 
 typedef struct {
     uint32_t vtable;            /* +0x00 firmware-owned, never written */
@@ -42,14 +44,10 @@ typedef char mx_size_check[sizeof(mx_voice_t) <= OP1_VOICE_SIZE ? 1 : -1];
 #define GATE     0x80
 #define FADE     64                                 /* gain step per block: 0 -> 255 in 4 blocks (11.6 ms) */
 #define SMAX     131071                             /* SVF state range: bp >> 2 fits 16 bits */
-#define F2_LEVEL 22938                              /* second formant 0.7 (vowel F2 is weaker) */
 #ifndef TUNE_LEVEL
 #define TUNE_LEVEL 5793                              /* +3 dB: peaks just reach the knee */
 #endif
 #define LEVEL    TUNE_LEVEL                         /* output level, Q12 (matched to op1r's engines) */
-#define KNEE     22938                              /* soft knee: linear below 0.7 FS */
-#define KNEE_T   19658                              /* ... reaches 32767 with zero slope 0.6 FS later */
-#define KNEE_A   27312                              /* 32768^2 / (2 KNEE_T) / 32768 in Q15 */
 #define INC_25HZ 2434896u                           /* phase increment of 25 Hz / 40 Hz (2^32 f / 44100) */
 #define INC_40HZ 3895834u
 static const uint8_t NORM[5] = { 0, 196, 132, 108, 94 };  /* per-divider gain for 0..4 distinct undertones (equal RMS) */
@@ -57,26 +55,15 @@ static const uint8_t NORM[5] = { 0, 196, 132, 108, 94 };  /* per-divider gain fo
 /* voice memory is shared with the other engines: a signature of our state, written after every render, tells a
  * voice we left (retrigger: keep phase + filters, continuous) from one another engine scribbled over (start clean) */
 static uint32_t own[OP1_VOICES];
+static mx_p1_t mx_b1;                                  /* the render's pass blocks and mixture (audio thread, */
+static mx_p2_t mx_b2;                                  /* one voice at a time), off the stack */
+static int16_t mx_xbuf[OP1_BLOCK];
 static inline uint32_t sig(const void *v_)
 {
     const uint32_t *w = (const uint32_t *)v_;
     return (w[1] ^ 0x6D697874u) + w[3] * 0x9E3779B1u + w[5] * 0x85EBCA6Bu + w[6];
 }
 
-/* 16 x 16 -> 32 bit multiplies of register halves: one MAC op on the Blackfin. Plain C makes GCC hoist the int16
- * casts out of the loop and fall back to the multi-cycle 32-bit "Rx *= Ry", so the Blackfin build spells them out.
- * Packing two 16-bit factors per register (.L / .H) also halves the live registers in the sample loops. */
-#ifdef __bfin__
-#define MAC(name, T, ha, hb, mode) static inline T name(T a, T b) \
-    { T r;__asm__("%0 = %1." #ha " * %2." #hb " (" #mode ");" : "=d"(r) : "d"(a), "d"(b)); return r; }
-MAC(mul_ll, int32_t, L, L, IS)  MAC(mul_lh, int32_t, L, H, IS)
-MAC(umul_ll, uint32_t, L, L, FU) MAC(umul_lh, uint32_t, L, H, FU)
-#else
-static inline int32_t mul_ll(int32_t a, int32_t b) { return (int16_t)a * (int16_t)b; }
-static inline int32_t mul_lh(int32_t a, int32_t b) { return (int16_t)a * (int16_t)((uint32_t)b >> 16); }
-static inline uint32_t umul_ll(uint32_t a, uint32_t b) { return (uint16_t)a * (uint32_t)(uint16_t)b; }
-static inline uint32_t umul_lh(uint32_t a, uint32_t b) { return (uint16_t)a * (b >> 16); }
-#endif
 static inline int32_t clamp(int32_t x, int32_t m) { return x > m ? m : (x < -m ? -m : x); }
 static inline int knob_n(int32_t k) { return k <= 0 ? 0 : (int)((k * 25) >> 15); }   /* 0 = off, 1..24 */
 static inline int32_t page_word(const int16_t *params, int i) { return params[i] > 0 ? params[i] : 8192; }
@@ -96,9 +83,11 @@ static void targets(const int16_t *params, uint32_t inc, int nt[4], int32_t gt[4
         nt[k] = knob_n(params[k]);
         gt[k] = nt[k] != 0 ? 256 : 0;
         for (int j = 0; j < k; j++) if (nt[j] == nt[k]) gt[k] = 0;
-        if (gt[k] && inc) {
-            uint32_t s = inc / (uint32_t)nt[k];                        /* the undertone's increment */
-            gt[k] = s >= INC_40HZ ? 256 : s <= INC_25HZ ? 0 : (int32_t)(((s - INC_25HZ) >> 4) * 256 / ((INC_40HZ - INC_25HZ) >> 4));
+        if (gt[k] && inc) {                                            /* the undertone's increment s = inc / n: */
+            uint32_t nk = (uint32_t)nt[k], s;                          /* s >= T <=> inc >= T n, s <= T <=> inc < */
+            if (inc >= INC_40HZ * nk) gt[k] = 256;                     /* (T + 1) n (T n < 2^27: no overflow), so */
+            else if (inc < (INC_25HZ + 1u) * nk) gt[k] = 0;            /* only the fade band divides */
+            else { s = inc / nk; gt[k] = (int32_t)(((s - INC_25HZ) >> 4) * 256 / ((INC_40HZ - INC_25HZ) >> 4)); }
         }
         act += gt[k] >= 128;
     }
@@ -144,8 +133,8 @@ static void mx_render(void *self, int16_t *out, const int16_t *params)
     int vi = adopt(v), nt[4];
     int32_t gt[4];
     targets(params, (uint32_t)inc[0], nt, gt);
-    uint32_t base[4], R[4], c[4], n[4];
-    int32_t gq[4], dg[4];
+    mx_p1_t *b1 = &mx_b1;
+    uint32_t c[4], n[4], gq[4], dg[4], R[4], bh[4];
     for (int k = 0; k < 4; k++) {
         uint32_t nk = v->n[k] & 31u, ck = v->c[k];
         int32_t g = v->g[k];
@@ -158,11 +147,16 @@ static void mx_render(void *self, int16_t *out, const int16_t *params)
         if (!nk || ck >= nk) ck = 0;
         int32_t tgt = nk == (uint32_t)nt[k] ? gt[k] : 0, gn = g;
         gn += clamp(tgt - g, FADE);
-        n[k] = nk; c[k] = ck; R[k] = DIV_R[nk]; base[k] = ck * DIV_D[nk];
-        gq[k] = g << 7; dg[k] = (gn - g) * 16;  /* ramp in 8 steps of 16 samples: 8 * dg = (gn - g) << 7 */
-        gq[k] -= dg[k];                         /* the first step is taken at sample 0 */
+        n[k] = nk; c[k] = ck; R[k] = DIV_R[nk]; b1->d[k] = DIV_D[nk]; bh[k] = (ck * DIV_D[nk]) >> 17;
+        gq[k] = (uint32_t)g << 7;               /* the gain at sample 0, then 7 steps of 16 samples: */
+        dg[k] = (uint32_t)(gn - g) * 16u;       /* 8 dg = (gn - g) << 7 */
         v->g[k] = (uint8_t)gn;
     }
+#define MX_PAIR(a, k) ((a)[k + 1] << 16 | ((a)[k] & 0xFFFFu))
+    b1->c01 = MX_PAIR(c, 0); b1->c23 = MX_PAIR(c, 2); b1->n01 = MX_PAIR(n, 0); b1->n23 = MX_PAIR(n, 2);
+    b1->gq01 = MX_PAIR(gq, 0); b1->gq23 = MX_PAIR(gq, 2); b1->dg01 = MX_PAIR(dg, 0); b1->dg23 = MX_PAIR(dg, 2);
+    b1->bh01 = MX_PAIR(bh, 0); b1->bh23 = MX_PAIR(bh, 2); b1->r01 = MX_PAIR(R, 0); b1->r23 = MX_PAIR(R, 2);
+    b1->fade = (dg[0] | dg[1] | dg[2] | dg[3]) != 0;
     int32_t f1 = curve(F1_COEF, page_word(params, 5)), f2 = curve(F2_COEF, page_word(params, 6));
     int32_t wr = page_word(params, 7), q = curve(RES_Q, wr);
     int32_t gain = (((curve(RES_MAKEUP, wr) * op1_voice_vel_gain(self)) >> 15) * LEVEL) >> 12;   /* Q12 makeup x vel */
@@ -170,72 +164,31 @@ static void mx_render(void *self, int16_t *out, const int16_t *params)
     /* polyBLEP fraction d = p / inc in Q15 without a per-sample division: rinv from this block's first inc */
     uint32_t inc0 = (uint32_t)inc[0] | 1u; int sh = 0;
     while ((inc0 >> sh) >= 32768u) sh++;                                 /* <= 17 steps */
-    uint32_t rinv = (1u << 29) / (inc0 >> sh);                           /* per block: one division */
+    uint32_t dd = inc0 >> sh;                                            /* 16384 .. 32767 once sh > 0 */
+    uint32_t rinv = dd > 16384u ? recip29(dd) : dd == 16384u ? 32768u : (1u << 29) / dd;   /* per block */
+
+    b1->p = v->p; b1->rinv = rinv; b1->nsh = -sh; b1->inc = inc; b1->one2 = 0x00010001u;
 
     /* pass 1: master phase, dividers, polyBLEP -> xbuf. Between two master wraps every saw is linear in p, so the
      * whole mixture is ONE ramp: sum_k gq_k * saw_k = A + (p >> 16) * B, with A = sum gq_k * (base_k >> 17) and
-     * B = sum (gq_k * R_k) >> 17 (truncation error <= 8 / 32768). A changes at wraps, A and B when the gains step. */
-    uint32_t p = v->p, A = 0, B = 0, off = 0;
-    int32_t gm = dg[0] | dg[1] | dg[2] | dg[3] ? 15 : -1;               /* gain steps: i & gm == 0 */
-    int16_t xbuf[OP1_BLOCK];                                             /* mixture / 4 (256 bytes of stack) */
-    for (int i = 0; i < OP1_BLOCK; i++) {
-        uint32_t di = (uint32_t)inc[i], pn = p + di;
-        int32_t blep = 0, upd = (i & gm) == 0;
-        if (upd) {                                                       /* gain step every 16 samples while fading */
-            _Pragma("GCC unroll 4") for (int k = 0; k < 4; k++) gq[k] += dg[k];
-            off = (uint32_t)(gq[0] + gq[1] + gq[2] + gq[3]) << 14;      /* saw offset: sum gq * 16384 */
-            B = 0;
-            _Pragma("GCC unroll 4") for (int k = 0; k < 4; k++) B += ((uint32_t)gq[k] * R[k]) >> 17;
-        }
-        if (pn < p) {                                                    /* master wrap: dividers count */
-            int32_t hg = 0;
-            _Pragma("GCC unroll 4") for (int k = 0; k < 4; k++) {
-                if (++c[k] >= n[k]) { c[k] = 0; hg += gq[k]; }          /* this divider's saw resets */
-                base[k] = c[k] * DIV_D[n[k]];
-            }
-            uint32_t d = ((pn >> sh) * rinv) >> 14; if (d > 32767) d = 32767;
-            int32_t e = 32768 - (int32_t)d, sq = (e * e) >> 15;         /* (1 - d)^2: sample after the step */
-            blep += ((hg >> 2) * sq) >> 14;
-            upd = 1;
-        }
-        if (upd) { A = 0; _Pragma("GCC unroll 4") for (int k = 0; k < 4; k++) A += (uint32_t)gq[k] * (base[k] >> 17); }
-        p = pn;
-        if (p + di < p) {                                                /* lookahead: wrap before the next sample */
-            int32_t hg = 0;
-            _Pragma("GCC unroll 4") for (int k = 0; k < 4; k++) if (c[k] + 1 >= n[k]) hg += gq[k];
-            uint32_t d = (((p + di) >> sh) * rinv) >> 14; if (d > 32767) d = 32767;
-            int32_t sq = ((int32_t)d * (int32_t)d) >> 15;                /* d^2: sample before the step */
-            blep -= ((hg >> 2) * sq) >> 14;
-        }
-        xbuf[i] = (int16_t)((((int32_t)(A + umul_ll(p >> 16, B) - off) >> 15) + blep) >> 2);   /* |x| <= 25088 */
-    }
-    /* pass 2: two formant SVFs in parallel, makeup x velocity, soft clip. fq = f1 (.L) | q (.H), f2g = f2 | gain.
-     * No clamps needed in the loop: the worst-case L1 norms of the SVF (Q 0.7, 5.6 kHz: lp 1.54, bp 2.24, hp 5.06,
-     * see README) times |in / q| <= 50176 keep bp >> 2 and hp >> 3 inside 16 bits. */
-    uint32_t fq = (uint32_t)q << 16 | (uint32_t)f1, f2g = (uint32_t)gain << 16 | (uint32_t)f2;
-    int32_t lp1 = clamp(v->lp1, SMAX), bp1 = clamp(v->bp1, SMAX), lp2 = clamp(v->lp2, SMAX), bp2 = clamp(v->bp2, SMAX);
-    for (int i = 0; i < OP1_BLOCK; i++) {
-        int32_t in = mul_lh(xbuf[i], fq) >> 12, hp, b;                  /* unity-peak band-pass input: x * q */
-        b = bp1 >> 2;                                                    /* Chamberlin SVF, Q13 coefficients */
-        lp1 += mul_ll(b, fq) >> 11;
-        hp = in - lp1 - (mul_lh(b, fq) >> 11);
-        bp1 += mul_ll(hp >> 3, fq) >> 10;
-        b = bp2 >> 2;
-        lp2 += mul_ll(b, f2g) >> 11;
-        hp = in - lp2 - (mul_lh(b, fq) >> 11);
-        bp2 += mul_ll(hp >> 3, f2g) >> 10;
-        int32_t y = (bp1 >> 2) + (mul_ll(bp2 >> 2, F2_LEVEL) >> 15);      /* <= 47600 */
-        y = clamp(mul_lh(y >> 1, f2g) >> 8, 49152);
-        int32_t ay = y < 0 ? -y : y;                                     /* soft knee: linear up to 0.7, then */
-        if (ay > KNEE) {                                                 /* t - t^2 / (2 T) up to full scale */
-            int32_t t = ay - KNEE; if (t > KNEE_T) t = KNEE_T;
-            ay = KNEE + t - ((((t * t) >> 15) * KNEE_A) >> 15);
-            y = y < 0 ? -ay : ay;
-        }
-        out[i] = op1_sat16(y);
-    }
-    v->p = p;
-    v->lp1 = lp1; v->bp1 = bp1; v->lp2 = lp2; v->bp2 = bp2;
+     * B = sum (gq_k * R_k) >> 17 (truncation error <= 8 / 32768). A changes at wraps, A and B when the gains step.
+     * pass 2: two formant SVFs in parallel, makeup x velocity, soft clip. No clamps needed in the loop: the
+     * worst-case L1 norms of the SVF (Q 0.7, 5.6 kHz: lp 1.54, bp 2.24, hp 5.06, see README) times |in / q| <= 50176
+     * keep bp >> 2 and hp >> 3 inside 16 bits. Both in mixtur_dsp.h (C) and mixtur_dsp.S (Blackfin). */
+    mx_p2_t *b2 = &mx_b2;
+    b2->f = (uint32_t)f2 << 16 | (uint32_t)f1; b2->qg = (uint32_t)gain << 16 | (uint32_t)q;
+    b2->f2l = MX_F2_LEVEL; b2->cm = MX_KNEE + MX_KNEE_T; b2->kn = MX_KNEE; b2->zero = 0; b2->ka = MX_KNEE_A;
+    b2->lp1 = clamp(v->lp1, SMAX); b2->bp1 = clamp(v->bp1, SMAX); b2->lp2 = clamp(v->lp2, SMAX); b2->bp2 = clamp(v->bp2, SMAX);
+#if defined(__bfin__) && !defined(MIXTUR_C_REF)
+    mx_pass1(b1, mx_xbuf);
+    mx_pass2(b2, mx_xbuf, out);
+#else
+    mx_pass1_c(b1, mx_xbuf);
+    mx_pass2_c(b2, mx_xbuf, out);
+#endif
+    v->p = b1->p;
+    v->lp1 = b2->lp1; v->bp1 = b2->bp1; v->lp2 = b2->lp2; v->bp2 = b2->bp2;
+    c[0] = mx_lo(b1->c01); c[1] = mx_hi(b1->c01); c[2] = mx_lo(b1->c23); c[3] = mx_hi(b1->c23);
     for (int k = 0; k < 4; k++) v->c[k] = (uint8_t)c[k];
     v->n[0] = (uint8_t)(n[0] | (v->n[0] & GATE));
     v->n[1] = (uint8_t)n[1]; v->n[2] = (uint8_t)n[2]; v->n[3] = (uint8_t)n[3];

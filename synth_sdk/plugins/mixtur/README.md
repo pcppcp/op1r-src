@@ -87,6 +87,13 @@ From `bfin-elf-objdump` of `mx_render` (-O2, bf524):
 Total: about **110 cycles per sample per voice**. With 6 voices at 44.1 kHz that is 29 Mcycles/s, **≈ 7.3 % of
 400 MHz**. The worst cases are about 7.9 % at C8, and +0.3 % while a divider fades.
 
+On the Blackfin both sample passes run as hand-scheduled kernels in `mixtur_dsp.S`. They compute the same samples,
+bit for bit, as the C loops in `mixtur_dsp.h`, which the host builds use (as does a Blackfin build with
+`-DMIXTUR_C_REF`). Pass 1 takes 8 instruction packets per sample between master wraps and pass 2 takes 42, and no
+library division runs per block for a held pitch. On bcore (packets, a lower bound for cycles; the test guest adds
+about 1.1k per call) one voice call takes 8.8k packets instead of 14.1k, and six voices with random knobs take 50k
+instead of 82k per block.
+
 ## Known limitations
 
 * The polyBLEP reciprocal comes from each block's first pitch increment. Fast pitch bends inside a block make the
