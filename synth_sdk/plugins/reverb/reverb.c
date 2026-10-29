@@ -71,7 +71,9 @@ static void reverb_init(int pos)
     r->buf = (int16_t *)op1_fx_scratch(pos);
     if (!r->buf) return;
     uint32_t *w = (uint32_t *)r->buf;                    /* init runs in the audio callback: 32-bit stores through a */
-    for (int i = 0; i < (RV_WORDS + 1) / 2; i++) w[i] = 0;   /* local pointer (r->buf was reloaded for every halfword) */
+    /* local pointer (r->buf was reloaded for every halfword). Only the 2 * RV_SIZE words reads can reach: the
+     * mirror's overhang above them is written before it is ever read */
+    for (int i = 0; i < RV_SIZE; i++) w[i] = 0;
     r->mirror = r->buf + RV_SIZE;
     r->wp = 0; r->lp1 = r->lp2 = 0;
     for (int k = 0; k < 2; k++) {                          /* 0.5 Hz, 0.3 Hz, as clouds_dsp.c */
