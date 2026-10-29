@@ -45,6 +45,16 @@ int main(int argc, char **argv)
     settings_turn(1, -4096); assert(ci_beats == 16);                             /* other knobs: nothing yet */
     settings_turn(0, -1024); settings_turn(0, -1024); settings_turn(0, -1024); assert(ci_beats == 4);
     op1r_setting_put("countin", 2); st_init(0); assert(ci_beats == 16);                 /* loaded */
+    /* green: keyboard velocity 1 .. 127, 4 steps per detent (2 events of 1024), default 127 (the stock keys) */
+    assert(kb_vel == 127);
+    settings_turn(1, 1024); settings_turn(1, 1024); assert(kb_vel == 127);              /* clamped at 127 */
+    for (int i = 0; i < 10; i++) settings_turn(1, -1024);                                /* 5 detents down */
+    settings_flush(); assert(kb_vel == 107 && op1r_setting_get("kbvel", -1) == 107);
+    frame("green left 5 detents: velocity 107", render);
+    for (int i = 0; i < 100; i++) settings_turn(1, -1024); assert(kb_vel == 1);           /* clamped at 1 */
+    settings_turn(1, 512); assert(kb_vel == 2);
+    settings_flush(); kb_vel = 127; st_init(0); assert(kb_vel == 2);                      /* loaded */
+    op1r_setting_put("kbvel", 0); kb_vel = 127; st_init(0); assert(kb_vel == 127);       /* out of range: kept */
     if (!render) printf("ok\n");
     return 0;
 }
