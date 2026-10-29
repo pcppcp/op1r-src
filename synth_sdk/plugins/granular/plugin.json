@@ -5,7 +5,8 @@
   "order": 3,
   "symbol": "ENGINE_granular",
   "sources": [
-    "granular.c"
+    "granular.c",
+    "granular_dsp.S"
   ],
   "defaults": [
     4000,
