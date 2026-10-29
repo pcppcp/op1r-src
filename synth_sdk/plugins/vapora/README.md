@@ -157,8 +157,7 @@ There is no compressor or automatic level adjustment. Offline PADsynth tables co
 broadened spectral components; these are not extra runtime oscillators. There
 are 20 endpoints and 448,800 sample bytes, including the original two long Warm
 tables and six 8,192-sample cinematic spectra. Half-rate synthesis, block-rate
-preparation, guarded table transitions and staggered telemetry remain as
-recorded in `CPU_AUDIT.md`. No device CPU percentage is inferred from host tests.
+preparation, guarded table transitions and staggered telemetry remain (see `TESTING.md`). No device CPU percentage is inferred from host tests.
 
 Animation state is not stored in hidden sound parameters. The existing secret
 remains: from normal pages, press blue → green → orange → white, then wait seven
@@ -199,5 +198,5 @@ The sweep tests actual independently phased voices, including repeated-note
 unisons. It does not guarantee arbitrary phase-aligned sums or downstream FX
 headroom. Compare on hardware before publication.
 
-See `HARDWARE_CHECKLIST.md`, `CPU_AUDIT.md`, `TOOLCHAIN.md`, `CHANGELOG.md` and
+See `TESTING.md`, `CHANGELOG.md` and
 retained license/third-party notices. PADsynth algorithm by Nasca Octavian Paul.

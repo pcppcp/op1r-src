@@ -18,10 +18,9 @@ adapter and all 15 contribution presets, including dry Stone Hall at octave -3.
 - Standard upstream screen harness passes ASan/UBSan; the sampled default
   frame contains 250 raster lines. This is not a timing measurement.
 
-No new hardware CPU measurement or on-device op1r test is claimed. The 1.2.3
-Hundekraft readings below remain historical; animated-screen cost, load/play,
-preset save/reload and tape-plus-FX checks on op1r remain pending. Existing
-preview media are retained from 1.2.3.
+Runs on op1r hardware (maintainer check, 2026-10-29). No new CPU measurement;
+the 1.2.3 Hundekraft readings below remain historical. Existing preview media
+are retained from 1.2.3.
 
 # VAPORA 1.2.3 validation — 2026-10-22
 

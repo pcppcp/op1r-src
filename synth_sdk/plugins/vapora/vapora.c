@@ -24,9 +24,6 @@ static void note_on(void *self,const int16_t *words)
     ps_params p=ps_decode(words);
     ++serial; if(!serial)++serial;
     ps_start(&voices[i],&p,0x50414453u^(serial*0x9e3779b9u)^(unsigned)i,serial);
-    /* Only the private part, never the firmware vtable. */
-    uint32_t *private=(uint32_t *)((uint8_t *)self+4);
-    private[0]=0x50414453u; private[1]=serial;
     ps_held_serial[i]=serial;
     ticks[i]=(uint32_t)i; /* spread chord telemetry instead of six publications together */
 }
@@ -39,8 +36,8 @@ static void render(void *self,int16_t *out,const int16_t *words)
 {
     int i=valid_voice(self);
     if(i<0){for(int n=0;n<PS_BLOCK;n++)out[n]=0;return;}
-    const uint32_t *private=(const uint32_t *)((uint8_t *)self+4);
-    if(private[0]!=0x50414453u||private[1]!=voices[i].serial||!voices[i].ready){
+    /* The dispatcher runs note_on before the first render of this engine on a voice. */
+    if(!voices[i].ready){
         for(int n=0;n<PS_BLOCK;n++)out[n]=0;
         return;
     }

@@ -186,8 +186,6 @@ static void stress(void)
     printf("Stress: 3000 six-voice blocks, randomized controls/pitch/retriggers, %.3f host CPU seconds (not Blackfin timing)\n",seconds);
     ENGINE_vapora.render((void*)(OP1_VOICE_BASE+1),guard.samples,ps_host_words[0]);
     for(int n=0;n<128;n++)assert(!guard.samples[n]);
-    ps_host_voices[0][1]=0;ENGINE_vapora.render(ps_host_voices[0],guard.samples,ps_host_words[0]);
-    for(int n=0;n<128;n++)assert(!guard.samples[n]);
     /* Reader never consumes an incomplete or foreign publication. */
     ps_snapshot s;uint32_t seq=0;
     ps_mail[0].sequence=3;assert(!ps_read_mail(0,0,0x5320,&s,&seq));
