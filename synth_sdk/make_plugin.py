@@ -136,7 +136,8 @@ def build(name, out_dir=OUT):
     w = f'build/plugins/{tag}'
     os.makedirs(os.path.join(HERE, w), exist_ok=True)
     objs = ' '.join(f'{w}/{os.path.basename(s)}.o' for s in srcs)
-    cc = ' && '.join(f'bfin-elf-gcc {CFLAGS} -c {s} -o {w}/{os.path.basename(s)}.o' for s in srcs)
+    flags = plugins.source_flags(e, srcs)                         # plugin.json "source_cflags": e.g. -O3 after the default -O2
+    cc = ' && '.join(f'bfin-elf-gcc {" ".join([CFLAGS, *flags[s]])} -c {s} -o {w}/{os.path.basename(s)}.o' for s in srcs)
     docker(f'{cc} && bfin-elf-ld -r {objs} $(bfin-elf-gcc -print-libgcc-file-name) -o {w}/all.r.o')
     und, called = undefined(os.path.join(HERE, w, 'all.r.o'))
     # imports: data symbols by their own name, functions via a stub that jumps to "__imp_<name>"

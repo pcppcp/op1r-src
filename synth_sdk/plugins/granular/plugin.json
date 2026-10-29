@@ -17,5 +17,8 @@
   "screen": {
     "svg": "granular.svg",
     "symbol": "SCREEN_granular"
+  },
+  "source_cflags": {
+    "granular.c": ["-O3"]
   }
 }

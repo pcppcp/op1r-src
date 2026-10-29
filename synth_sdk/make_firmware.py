@@ -213,10 +213,13 @@ def build(engs, fxs):
     srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/usbtrack.c', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'screens/overlay.c', 'plugload/plugload.c', 'plugload/op1p_load.c', 'screens/settings.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c'] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
     objs = []
     cmds = []
+    flags = {}                                       # plugin.json "source_cflags": e.g. -O3 after the default -O2
+    for e in engs + fxs:
+        flags.update(plugins.source_flags(e, [e['source']] + e.get('extra_sources', [])))
     for s in srcs:
         o = 'build/' + s.replace('/', '_').replace('.c', '.o'); objs.append(o)
         cmds.append(f'bfin-elf-gcc -O2 -mcpu=bf524 -ffreestanding -fno-builtin -nostdlib -fno-common '
-                    f'-Wall -I. -c {s} -o {o}')
+                    f'{" ".join(["-Wall -I.", *flags.get(s, [])])} -c {s} -o {o}')
     cmds.append('bfin-elf-as -mcpu=bf524 hook.S -o build/hook.o'); objs.append('build/hook.o')
     cmds.append(f'bfin-elf-ld -T link.ld {" ".join(objs)} $(bfin-elf-gcc -print-libgcc-file-name) -o build/synth.elf')
     cmds.append('bfin-elf-objcopy -O binary -j .text -j .rodata -j .data build/synth.elf build/synth.bin')

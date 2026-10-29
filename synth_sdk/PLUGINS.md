@@ -35,6 +35,7 @@ before they can crash an OP-1.
 - `symbol`: your `op1_engine_t` / `op1_fx_t` object; `sources`: C files, the first one defines `symbol`.
 - `defaults`: initial positions of the 4 knobs (blue, green, white, red), 0..32767.
 - Optional: `page2_defaults` (FX second-page knobs), `uses_sample` (synth reads the slot's sampler recording),
+  `source_cflags` (`{"file.c": ["-O3"]}`: extra optimisation flag for one source file, after the default `-O2`),
   `screen` (own screen, see below). All fields are documented in `plugins.py`.
 
 ## The API (op1_plugin.h)

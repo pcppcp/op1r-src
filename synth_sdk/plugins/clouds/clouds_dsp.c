@@ -533,18 +533,23 @@ static void reverb(clouds_t *c, int32_t *io, int n, int32_t amount, int32_t time
 void clouds_init(clouds_t *c, void *mem, int mode)
 {
     uint8_t *m = (uint8_t *)mem;
-    for (size_t i = 0; i < sizeof(*c); i++) ((uint8_t *)c)[i] = 0;
+    /* init runs in the audio callback on the first render: clear with 32-bit stores (byte and halfword loops
+     * took about 86k Blackfin packets). may_alias because the stores go through struct and buffer types alike. */
+    typedef uint32_t __attribute__((may_alias)) word_t;
+    _Static_assert(sizeof(*c) % 4 == 0 && CLOUDS_BUFFER_BYTES % 4 == 0, "clouds clear sizes");
+    for (size_t i = 0; i < sizeof(*c) / 4; i++) ((word_t *)c)[i] = 0;
     c->mode = c->prev_mode = mode;
     c->s16 = (int16_t *)m;
     c->size = CLOUDS_BUFFER_BYTES / 2 - INTERP_TAIL;
-    for (int i = 0; i < CLOUDS_BUFFER_BYTES / 2; i++) c->s16[i] = 0;
+    for (int i = 0; i < CLOUDS_BUFFER_BYTES / 4; i++) ((word_t *)m)[i] = 0;
     m += CLOUDS_BUFFER_BYTES;
     c->diff_buf = (int32_t *)m; m += 2048 * 4;
     c->rev_buf = (int16_t *)m;  m += 16384 * 2;
     c->ps_buf = (int16_t *)m;
-    for (int i = 0; i < 2048; i++) c->diff_buf[i] = 0;
-    for (int i = 0; i < 16384; i++) c->rev_buf[i] = 0;
-    for (int i = 0; i < 4096; i++) c->ps_buf[i] = 0;
+    {   /* diff_buf (2048 words), rev_buf (16384 halfwords) and ps_buf (4096 halfwords) are contiguous */
+        word_t *z = (word_t *)c->diff_buf;
+        for (int i = 0; i < 2048 + 8192 + 2048; i++) z[i] = 0;
+    }
     /* reverb LFOs: stmlib CosineOscillator::InitApproximate(f * 32), f = 0.5 Hz, 0.3 Hz (Q29) */
     for (int k = 0; k < 2; k++) {
         int64_t f = ((int64_t)(k ? 3 : 5) * 32 << 29) / (10LL * CLOUDS_SR);        /* frequency * 32 / SR */
