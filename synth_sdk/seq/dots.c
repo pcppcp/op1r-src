@@ -750,8 +750,9 @@ extern volatile uint8_t eu_rec_play;                    /* seq/euclid.c, handled
  * knob*6 {min, max, ?} (filled at boot; read_fx_param asserts outside it, so values always stay in [min, max]).
  * Synth engine locks (lock index 4..7, synth mode): knob words 0xFF8013C4 + slot*16, engine 0xFF8016E4[slot], range
  * 0x01DE5890 + engine*0x40 + knob*8 {min, max, scale, mode} (as midi/mx.c; mode 2 / 3 = linked sample start / end:
- * not locked). Only the live word is written, not the patch (set_knobs), so a lock is never saved with the sound;
- * the base is restored the same way. The words are reloaded from the patch on an instrument switch. */
+ * not locked). Only the live word is written, not the patch (set_knobs), so a lock is normally not saved with the
+ * sound (as the FX locks: a patch save while a lock holds, e.g. after a hand turn, may store it; docs/17); the base is
+ * restored the same way. The words are reloaded from the patch on an instrument switch. */
 static int16_t *dt_lk_ptr[2][DT_NLK];
 static int16_t  dt_lk_base[2][DT_NLK];
 static int      dt_lk_eng[DT_NSY], dt_lk_slot[DT_NSY];  /* engine / slot of the synth word when its base was taken */
