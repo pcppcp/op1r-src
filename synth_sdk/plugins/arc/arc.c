@@ -199,7 +199,7 @@ static int32_t ratio_of(int32_t w)
     return ARC_RR[ARC_RN - 1];
 }
 
-#ifdef __bfin__
+#if defined(__bfin__) && !defined(ARC_C_REF)
 /* arc_dsp.S: pass 2 scheduled by hand (bit-exact with the C loop below, which the host builds keep). Ring words:
  * -8192, 32767, 16383, -16383, btq, 32767, -32767, dg. The audio thread only, one voice at a time. */
 typedef struct { int32_t dc, lp, ga, k, ring[8]; } ArcShape;
@@ -224,7 +224,7 @@ static inline int32_t clampk(int32_t k) { return k < 0 ? 0 : (k > 32767 ? 32767 
  * Large eps: -3 times the Lienard variable, so the relaxation cycle shows as the squarish loop of two slow cubic
  * branches joined by fast jumps. Q12 in/out, x clipped to +-3 for the cubic. The Blackfin build runs the same in
  * arc_dsp.S (LIEN). */
-#ifndef __bfin__
+#if !defined(__bfin__) || defined(ARC_C_REF)
 static int16_t lienard(int32_t xs, int32_t v, int32_t eps12, int32_t vmul)
 {
     if (xs > 12288) xs = 12288; else if (xs < -12288) xs = -12288;
@@ -328,7 +328,7 @@ static void arc_render(void *self, int16_t *out, const int16_t *params)
 #define PACK(lo, hi) ((int32_t)(((uint32_t)(hi) << 16) | ((uint32_t)(lo) & 0xffff)))
     const int32_t O = PACK(h2k >> 2, mix);         /* hiss level | 2nd lamp mix */
     const int sh1 = A.sh, sh2 = B.sh;
-#ifdef __bfin__
+#if defined(__bfin__) && !defined(ARC_C_REF)
     {   /* ring words: CLK = 2^29 + 2048 he + 1024, E = he << 16, AMINK = 2^18 + A_MIN, G = sg | -h << 16,
          * H = -sh | h << 16 */
         ArcRun *k = &arc_run;
@@ -404,7 +404,7 @@ static void arc_render(void *self, int16_t *out, const int16_t *params)
     int32_t dc = v->dc, lp = v->lp, pk = 0;
     const int16_t cb = (int16_t)carbon, g = (int16_t)A.g, btq = (int16_t)bt;
     int32_t ga = ((gv * dip0) >> 15) << 16, dg = ((((gv * dip1) >> 15) << 16) - ga) >> 7;   /* gain ramp, Q16 */
-#ifdef __bfin__
+#if defined(__bfin__) && !defined(ARC_C_REF)
     arc_sh.dc = dc; arc_sh.lp = lp; arc_sh.ga = ga;
     arc_sh.k = (int32_t)(((uint32_t)(uint16_t)g << 16) | (uint16_t)cb); arc_sh.ring[4] = btq; arc_sh.ring[7] = dg;
     arc_shape(out, &arc_sh);

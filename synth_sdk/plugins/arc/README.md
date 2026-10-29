@@ -59,8 +59,7 @@ to use the C loops on the Blackfin too). Instruction packets per sample, as bcor
 
 The most recent voice also draws the portrait. That is one point per chunk (up to 64 per block at high notes) at 18
 packets per point and lamp, computed inside the pass-1 kernel. Six voices at C7..C8 take 52.6k packets per block with
-every knob at 0 and 68.7k with every knob at max (C: 87.8k and 125.6k). `harness/exact_check.py` checks the output
-and the portrait in 76 regimes.
+every knob at 0 and 68.7k with every knob at max (C: 87.8k and 125.6k).
 
 Divisions (`__divsi3`) only happen per block: voice index, ratio, gain, brightness and, for the traced voice, the
 portrait scale. No sample loop divides or uses 64-bit maths.
