@@ -72,3 +72,13 @@ the pre-delay in the FX position's scratch buffer. STD and LOFI run the tank at 
 less than HIFI. Built from Dattorro, "Effect Design, Part 1" (1997), with the Deluge's Digital model (Katherine
 Whitlock, GPL-3.0) as the reference and the fixed-point helpers of `plugins/reverb` (Mutable Instruments Elements,
 Émilie Gillet, MIT).
+
+## Blackfin kernels
+
+On the OP-1 the inner loops run in `nostromo_kern.S`, bit for bit the C in `nostromo.c`: the tank's stages
+(allpasses, modulated allpasses, damping and crossover, delays, the 14 output taps), the pre-delay front with its
+crossfade, regeneration and ADC, the reflections, and STD's half-band filters. Each kernel walks the rings with
+circular I registers, so the C's wrap splits go away. Host builds assemble the file empty and keep the C, and so does a
+Blackfin build with `-DNT_C_REF` (the reference to check the kernels against). With the kernels an FX call costs about
+half as many instruction packets: HIFI averages 59k -> 31k over the 27 programs, the worst block with the pre-delay
+knob turned every block 84k -> 39k.

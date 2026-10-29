@@ -148,8 +148,32 @@ typedef struct {
     uint8_t tk[OP1_FX_BLOCK];                                     /* LOFI: the samples that tick */
     int32_t rg[OP1_FX_BLOCK], rgn, rgg, spg;                      /* diffusion HIGH: the last block's diffused input, its
                                                                      count, the regeneration; LOW: the hall's sparse taps */
+#if defined(__bfin__) && !defined(NT_C_REF)
+    int16_t kp[8]; int32_t kok; nt_par kq;                        /* the last words, their nt_params, blocks left */
+#endif
 } nt_t;
 static nt_t nt[3];                                                /* synth, drum, master */
+
+/* on the Blackfin the innermost loops run in nostromo_kern.S, bit for bit the C below, which the host builds (and a
+ * Blackfin build with NT_C_REF, the reference to check the kernels against) keep */
+#if defined(__bfin__) && !defined(NT_C_REF)
+#define NT_KERN 1
+_Static_assert(__builtin_offsetof(nt_t, hbx) % 4 == 0, "nt_k_dec reads hbx as words");
+void nt_k_filt(int32_t *x, int n, int32_t *k);
+void nt_k_ap(int32_t *x, int n, const int32_t *a);
+void nt_k_map(int32_t *x, int n, const int32_t *a);
+void nt_k_taps(int32_t *sum, int n, const int32_t *a);
+void nt_k_dl(int32_t *x, int n, const int32_t *a);
+void nt_k_add(int32_t *x, int n, const int32_t *a);
+void nt_k_wr(const int32_t *x, int n, const int32_t *a);
+void nt_k_front(int32_t *x, int n, int32_t *a);
+static int32_t nt_kd[96];                                         /* nt_k_int's linear history; the kernels' block */
+static int32_t nt_ke[OP1_FX_BLOCK], nt_kt[2][5 + 3 * NT_SPS];     /* arrays (renders never overlap: not on the stack): */
+                                                                  /* reflections, the two tap passes, the wet */
+void nt_k_er(int32_t *e, int n, const int32_t *a);
+void nt_k_dec(int32_t *x, const int16_t *buf, const int32_t *a);
+void nt_k_int(int32_t *wet, const int32_t *x, int32_t *a);
+#endif
 
 /* ---- the tank, a block of ticks at a time: each stage runs over the block on pointers that step back a sample a tick
  * (the ring counts down) and wrap at its start; per tick, the arithmetic of one tick at a time. Half 1 reads half 2's
@@ -163,6 +187,11 @@ static inline int nt_span(const int16_t *ring, const int16_t *p, int m)   /* tic
 static inline int16_t *nt_wrap(int16_t *ring, int16_t *p) { return p < ring ? p + NT_RING : p; }
 static inline void nt_ap_b(int16_t *ring, int32_t w, int32_t kh, int32_t kt, int32_t *x, int n, int32_t g, int soft)
 {                                                                 /* allpass, tail at len - 1 (FxEngine); soft: bends */
+#ifdef NT_KERN
+    const int32_t a[5] = { (int32_t)ring, (w + kh) & NT_MASK, (w + kt) & NT_MASK, g, soft };
+    if (n > 0) nt_k_ap(x, n, a);
+    return;
+#endif
     int16_t *ph = NT_AT(kh), *pt = NT_AT(kt);
     for (int j = 0; j < n; ph = nt_wrap(ring, ph), pt = nt_wrap(ring, pt))
         for (int e = j + nt_span(ring, pt, nt_span(ring, ph, n - j)); j < e; j++) {
@@ -173,6 +202,11 @@ static inline void nt_ap_b(int16_t *ring, int32_t w, int32_t kh, int32_t kt, int
 }
 static inline void nt_map_b(int16_t *ring, int32_t w, int32_t kh, int32_t len, int32_t amp, const int32_t *lfo, int32_t *x, int n)
 {                                                                 /* modulated allpass, decay diffusion 1 (-0.70) */
+#ifdef NT_KERN
+    const int32_t a[5] = { (int32_t)ring, (w + kh) & NT_MASK, len << 15, amp, (int32_t)lfo };
+    if (n > 0) nt_k_map(x, n, a);
+    return;
+#endif
     int16_t *ph = NT_AT(kh);
     for (int j = 0; j < n; ph = nt_wrap(ring, ph))
         for (int e = j + nt_span(ring, ph, n - j); j < e; j++) {
@@ -185,18 +219,33 @@ static inline void nt_map_b(int16_t *ring, int32_t w, int32_t kh, int32_t len, i
 }
 static inline void nt_dl_b(int16_t *ring, int32_t w, int32_t kh, int32_t kr, int32_t *x, int n)
 {                                                                 /* delay: in at the head, out len back */
+#ifdef NT_KERN
+    const int32_t a[3] = { (int32_t)ring, (w + kh) & NT_MASK, (w + kr) & NT_MASK };
+    if (n > 0) nt_k_dl(x, n, a);
+    return;
+#endif
     int16_t *ph = NT_AT(kh), *pr = NT_AT(kr);
     for (int j = 0; j < n; ph = nt_wrap(ring, ph), pr = nt_wrap(ring, pr))
         for (int e = j + nt_span(ring, pr, nt_span(ring, ph, n - j)); j < e; j++) { *ph-- = nt_s16(x[j]); x[j] = *pr--; }
 }
 static inline void nt_add_b(int16_t *ring, int32_t w, int32_t k, int32_t *x, int n)   /* x += the line at offset k */
 {
+#ifdef NT_KERN
+    const int32_t a[2] = { (int32_t)ring, (w + k) & NT_MASK };
+    if (n > 0) nt_k_add(x, n, a);
+    return;
+#endif
     int16_t *p = NT_AT(k);
     for (int j = 0; j < n; p = nt_wrap(ring, p))
         for (int e = j + nt_span(ring, p, n - j); j < e; j++) x[j] += *p--;
 }
 static inline void nt_wr_b(int16_t *ring, int32_t w, int32_t k, const int32_t *x, int n)   /* the line at offset k = x */
 {
+#ifdef NT_KERN
+    const int32_t a[2] = { (int32_t)ring, (w + k) & NT_MASK };
+    if (n > 0) nt_k_wr(x, n, a);
+    return;
+#endif
     int16_t *p = NT_AT(k);
     for (int j = 0; j < n; p = nt_wrap(ring, p))
         for (int e = j + nt_span(ring, p, n - j); j < e; j++) *p-- = nt_s16(x[j]);
@@ -209,6 +258,12 @@ static inline void nt_tap_b(int16_t *ring, int32_t w, int32_t k, int32_t *sum, i
 }
 static inline void nt_filt_b(int32_t *x, int n, int32_t *lp, int32_t *xo, int32_t *xo2, int32_t *ef, int32_t bt, int32_t bx, int32_t gm, int32_t gb)
 {                                                                 /* damping, then mid / bass gains split by the crossover; */
+#ifdef NT_KERN
+    int32_t k[11] = { *lp, *xo, *xo2, ef[0], ef[1], ef[2], ef[3], bt, bx, gm, gb };
+    if (n > 0) nt_k_filt(x, n, k);
+    *lp = k[0]; *xo = k[1]; *xo2 = k[2]; ef[0] = k[3]; ef[1] = k[4]; ef[2] = k[5]; ef[3] = k[6];
+    return;
+#endif
     int32_t l = *lp, x1 = *xo, x2 = *xo2, e = ef[0], e1 = ef[1], e2 = ef[2], e3 = ef[3];   /* what each product drops carries */
     for (int j = 0; j < n; j++) {                                 /* on to the next tick: a quiet tail decays and filters as */
         int32_t p = nt_c17(l - x[j]) * bt + e1;                   /* a loud one */
@@ -268,6 +323,92 @@ static inline __attribute__((always_inline)) int32_t nt_er(nt_t *s, int sh, cons
     return e;
 }
 
+static inline void nt_front_c(nt_t *s, int r, int ty, int sh, int32_t *x, int n, int lfo)   /* the ticks' front: LFOs */
+{                                                                 /* (lfo), pre-delay, reflections, ADC */
+    int32_t w = s->wp - 1, cv = s->cvn, *te = s->te;
+    for (int j = 0; j < n; j++) {                                 /* per tick: the LFOs, pre-delay, reflections, ADC */
+        if (lfo) {
+            if (((w - j) & 31) == 0) nt_lfo(s, r);
+            s->tl[0][j] = s->lfo[1]; s->tl[1][j] = s->lfo[0];
+        }
+        int32_t in = sh ? nt_tz(x[j], 1) : x[j];                  /* pre-delay, crossfading to a new time; diffusion HIGH: */
+        if (s->rgg && j < s->rgn) in += nt_m15(s->rg[j] * 4 >> sh, s->rgg);   /* regenerated, the last block's diffused out */
+        s->pd[s->pw] = nt_s16(in);
+        int32_t v = s->pd[nt_pdi(s->pw - s->pd_cur)] * (1 << sh);
+        te[j] = ty ? 0 : nt_er(s, sh, nt_er_t[r], nt_er_g, NT_ERS);
+        if (ty == 2 && s->spg) te[j] += nt_m15(nt_er(s, sh, nt_sp_t[r], nt_sp_g, NT_SPS), s->spg);   /* hall, LOW: sparse */
+        if (s->ein) { te[j] = te[j] * (NT_OUT - s->ein) >> 8; s->ein--; }   /* a room's reflections: no click */
+        if (s->pd_fade) {
+            v += nt_m15(s->pd[nt_pdi(s->pw - s->pd_next)] * (1 << sh) - v, s->pd_fade << 5);
+            if (++s->pd_fade > NT_FADE) { s->pd_fade = 0; s->pd_cur = s->pd_next; }
+        }
+        if (++s->pw == NT_PD) s->pw = 0;
+        if (r) {                                                  /* the ADC: 12 bits at the last 32 samples' gain */
+            int32_t a = v < 0 ? -v : v;
+            if (a > s->apk) s->apk = a;
+            v = nt_q12(v, s->ask);
+            if (++cv == 32) { cv = 0; s->ask = nt_gstep(s->apk); s->apk = 0; }
+        }
+        x[j] = nt_m15(v, 8192);                                   /* 0.25 in (6 dB of room in the lines), 4 allpasses */
+    }
+}
+
+#ifdef NT_KERN
+/* nostromo_kern.S's front: the pre-delay, its crossfade, regeneration and the ADC per tick in segments over which the
+ * fade, the ADC's gain step and the read positions hold (nt_k_front); the reflections as passes over the block, one
+ * per tap (nt_k_er), before the pre-delay's writes when a tap reads at least n ticks back (it then sees what the
+ * per-tick order reads: older samples), after them when it reads less far back (the samples this block wrote). */
+static void nt_front_k(nt_t *s, int r, int ty, int sh, int32_t *x, int n)
+{
+    int32_t *te = s->te, *er = nt_ke, *b = nt_kt[1];
+    int nA = s->pd_fade ? NT_FADE + 1 - s->pd_fade : 0, ok = 1, room = ty == 0, sparse = ty == 2 && s->spg, cv = s->cvn;
+    if (nA > n) nA = n;
+    const int32_t *t = room ? nt_er_t[r] : nt_sp_t[r], *g = room ? nt_er_g : nt_sp_g;
+    int taps = room ? NT_ERS : NT_SPS, post = 0;
+    if (room || sparse) {                                         /* the passes before the writes (and b set up) */
+        int32_t *a = nt_kt[0];
+        a[0] = (int32_t)s->pd; a[1] = nA; a[2] = s->pd_fade << 5; a[3] = sh; a[4] = 0;
+        b[0] = a[0]; b[1] = nA; b[2] = a[2]; b[3] = sh; b[4] = 0;
+        for (int i = 0; i < taps && ok; i++) {
+            int32_t dc = nt_pdc(s->pd_cur + t[i]), dn = s->pd_fade ? nt_pdc(s->pd_next + t[i]) : dc;
+            int32_t lo = dc < dn ? dc : dn, hi = dc < dn ? dn : dc, *q;
+            if (lo >= n) q = a + 5 + 3 * a[4]++;                  /* every read older than the block: before */
+            else if (hi <= NT_PD - n) q = b + 5 + 3 * b[4]++;     /* none reaches what the block writes later: after */
+            else { ok = 0; break; }
+            q[0] = nt_pdi(s->pw - dc); q[1] = nt_pdi(s->pw - dn); q[2] = g[i];
+        }
+        if (ok) {
+            for (int j = 0; j < n; j++) er[j] = 0;
+            if (a[4]) nt_k_er(er, n, a);
+            post = b[4];
+        }
+    }
+    if (!ok) {                                                    /* a fade between reads in and beyond the block: the C */
+        nt_front_c(s, r, ty, sh, x, n, 0);
+        return;
+    }
+    for (int j = s->rgn; j < n; j++) s->rg[j] = 0;                /* past the last block's: no regeneration (rewritten below) */
+    for (int j = 0; j < n;) {                                     /* the pre-delay, in segments */
+        int m = n - j, fa = s->pd_fade;
+        if (fa && m > NT_FADE + 1 - fa) m = NT_FADE + 1 - fa;
+        if (r && m > 32 - cv) m = 32 - cv;
+        int32_t a[11] = { (int32_t)s->pd, s->pw, nt_pdi(s->pw - s->pd_cur), fa ? nt_pdi(s->pw - s->pd_next) : nt_pdi(s->pw - s->pd_cur),
+                          fa << 5, sh, (int32_t)(s->rg + j), s->rgg, r ? ~((16 >> s->ask) - 1) : -1, s->apk,
+                          sh || r ? 0 : !fa && !s->rgg ? 1 : 2 };   /* the general loop, fast, HIFI with fade or regeneration */
+        nt_k_front(x + j, m, a);
+        s->pw += m; if (s->pw >= NT_PD) s->pw -= NT_PD;
+        if (fa && (s->pd_fade = fa + m) > NT_FADE) { s->pd_fade = 0; s->pd_cur = s->pd_next; }
+        if (r) { s->apk = a[9]; if ((cv += m) == 32) { cv = 0; s->ask = nt_gstep(s->apk); s->apk = 0; } }
+        j += m;
+    }
+    if (post) nt_k_er(er, n, b);
+    if (room) for (int j = 0; j < n; j++) te[j] = er[j];
+    else if (sparse) for (int j = 0; j < n; j++) te[j] = nt_m15(er[j], s->spg);
+    else for (int j = 0; j < n; j++) te[j] = 0;
+    for (int j = 0; j < n && s->ein; j++) { te[j] = te[j] * (NT_OUT - s->ein) >> 8; s->ein--; }
+}
+#endif
+
 static void nt_snap(nt_t *s, const nt_par *q)
 {
     for (int k = 0; k < 2; k++) {
@@ -324,30 +465,18 @@ static __attribute__((noinline)) void nt_tank(nt_t *s, int r, int ty, int sh, in
 {
     const int32_t *base = nt_base[r][ty], *len = nt_len[r][ty], *tap = nt_tap[r][ty];
     int16_t *ring = s->ring;
-    int32_t w = s->wp - 1, cv = s->cvn, wk = s->wk, *ta = s->ta, *te = s->te;
-    for (int j = 0; j < n; j++) {                                 /* per tick: the LFOs, pre-delay, reflections, ADC */
-        if (((w - j) & 31) == 0) nt_lfo(s, r);
-        s->tl[0][j] = s->lfo[1]; s->tl[1][j] = s->lfo[0];
-        int32_t in = sh ? nt_tz(x[j], 1) : x[j];                  /* pre-delay, crossfading to a new time; diffusion HIGH: */
-        if (s->rgg && j < s->rgn) in += nt_m15(s->rg[j] * 4 >> sh, s->rgg);   /* regenerated, the last block's diffused out */
-        s->pd[s->pw] = nt_s16(in);
-        int32_t v = s->pd[nt_pdi(s->pw - s->pd_cur)] * (1 << sh);
-        te[j] = ty ? 0 : nt_er(s, sh, nt_er_t[r], nt_er_g, NT_ERS);
-        if (ty == 2 && s->spg) te[j] += nt_m15(nt_er(s, sh, nt_sp_t[r], nt_sp_g, NT_SPS), s->spg);   /* hall, LOW: sparse */
-        if (s->ein) { te[j] = te[j] * (NT_OUT - s->ein) >> 8; s->ein--; }   /* a room's reflections: no click */
-        if (s->pd_fade) {
-            v += nt_m15(s->pd[nt_pdi(s->pw - s->pd_next)] * (1 << sh) - v, s->pd_fade << 5);
-            if (++s->pd_fade > NT_FADE) { s->pd_fade = 0; s->pd_cur = s->pd_next; }
-        }
-        if (++s->pw == NT_PD) s->pw = 0;
-        if (r) {                                                  /* the ADC: 12 bits at the last 32 samples' gain */
-            int32_t a = v < 0 ? -v : v;
-            if (a > s->apk) s->apk = a;
-            v = nt_q12(v, s->ask);
-            if (++cv == 32) { cv = 0; s->ask = nt_gstep(s->apk); s->apk = 0; }
-        }
-        x[j] = nt_m15(v, 8192);                                   /* 0.25 in (6 dB of room in the lines), 4 allpasses */
+    int32_t w = s->wp - 1, wk = s->wk, *ta = s->ta, *te = s->te;
+#ifdef NT_KERN
+    for (int j = 0; j < n;) {                                     /* the LFOs (every 32 ticks); the rest of the tick */
+        if (((w - j) & 31) == 0) nt_lfo(s, r);                    /* in nostromo_kern.S */
+        int e = j + 1 + ((w - j - 1) & 31);
+        if (e > n) e = n;
+        for (int32_t l1 = s->lfo[1], l0 = s->lfo[0]; j < e; j++) { s->tl[0][j] = l1; s->tl[1][j] = l0; }
     }
+    nt_front_k(s, r, ty, sh, x, n);
+#else
+    nt_front_c(s, r, ty, sh, x, n, 1);
+#endif
     nt_ap_b(ring, w, base[0], base[0] + len[0] - 1, x, n, s->id[0], 0);
     nt_ap_b(ring, w, base[1], base[1] + len[1] - 1, x, n, s->id[0], 0);
     nt_ap_b(ring, w, base[2], base[2] + len[2] - 1, x, n, s->id[1], 0);
@@ -366,9 +495,27 @@ static __attribute__((noinline)) void nt_tank(nt_t *s, int r, int ty, int sh, in
     nt_filt_b(x, n, &s->lp[1], &s->xo[1], &s->xo2[1], s->ef[1], s->bt, s->bx, s->gm[1], s->gb[1]);
     nt_ap_b(ring, w, base[10], base[10] + len[10] - 1, x, n, s->dd2, 1);
     nt_wr_b(ring, w, base[11], x, n);
+#ifdef NT_KERN
+    int32_t ka[25];                                               /* nostromo_kern.S: four taps a pass */
+    ka[0] = (int32_t)ring;
+    for (int p = 0; p < 4; p++) {
+        int32_t *q = ka + 1 + 6 * p;
+        for (int i = 0; i < 4; i++) {
+            int t = 4 * p + i;
+            q[i] = t < NT_TAPS ? (w + base[nt_tap_line[t]] + tap[t]) & NT_MASK : 0;
+        }
+        for (int i = 0; i < 2; i++) {
+            int t = 4 * p + 2 * i;
+            int32_t s0 = t < NT_TAPS ? nt_tap_sign[t] : 0, s1 = t + 1 < NT_TAPS ? nt_tap_sign[t + 1] : 0;
+            q[4 + i] = (int32_t)((uint32_t)(uint16_t)s1 << 16 | (uint16_t)s0);
+        }
+    }
+    if (n > 0) nt_k_taps(ta, n, ka);
+#else
 #pragma GCC unroll 14
     for (int i = 0; i < NT_TAPS; i++)                             /* 7 left + 7 right taps; unrolled: the tables fold */
         nt_tap_b(ring, w, base[nt_tap_line[i]] + tap[i], ta, n, nt_tap_sign[i] < 0);
+#endif
     for (int j = 0; j < n; j++) {                                 /* per tick: the wet's level, low cut, the DAC */
         int32_t wet = nt_c17(ta[j]) * wk;                         /* clamped where the output clips anyway */
         wet = nt_tz(wet, 13) + te[j];                             /* x2 for the 0.25 in */
@@ -394,6 +541,13 @@ static __attribute__((noinline)) int32_t nt_run(nt_t *s, int16_t *buf, const nt_
     int32_t peak = 0, *x = s->tx;
     if (clock == NT_HIFI) for (; n < OP1_FX_BLOCK; n++) x[n] = buf[n];
     else if (clock == NT_STD)                                     /* 22.05 kHz between half-band filters: decimate */
+#ifdef NT_KERN
+        if (!s->half && !(s->hbi & 1)) {                          /* nostromo_kern.S (the phases it assumes) */
+            const int32_t a[2] = { (int32_t)s->hbx, s->hbi };
+            nt_k_dec(x, buf, a);
+            s->hbi += OP1_FX_BLOCK; n = OP1_FX_BLOCK / 2;
+        } else
+#endif
         for (int t = 0, h = s->half; t < OP1_FX_BLOCK; t++) {
             s->hbx[s->hbi++ & 31] = (int16_t)buf[t];
             if (!(h ^= 1)) {
@@ -406,9 +560,21 @@ static __attribute__((noinline)) int32_t nt_run(nt_t *s, int16_t *buf, const nt_
         for (int t = 0; t < OP1_FX_BLOCK; t++)
             if ((s->tk[t] = (s->acc += (uint32_t)s->linc) >= 65536u)) { s->acc -= 65536u; x[n++] = buf[t]; }
     nt_tank(s, r, ty, clock == NT_STD, x, n);
+#ifdef NT_KERN
+    int32_t *wv = nt_ke;                                          /* (the reflections' array: done with by now) */
+    const int kw = clock == NT_STD && !s->half && n == OP1_FX_BLOCK / 2;   /* nostromo_kern.S: the interpolator */
+    if (kw) {
+        int32_t a[4] = { (int32_t)s->hbw, s->hbj, s->hbo, (int32_t)nt_kd };
+        nt_k_int(wv, x, a);
+        s->hbj += OP1_FX_BLOCK / 2; s->hbo = a[2];
+    }
+#endif
     for (int t = 0, j = 0; t < OP1_FX_BLOCK; t++) {
         int32_t in = buf[t], wet;
         if (clock == NT_HIFI) wet = x[t];
+#ifdef NT_KERN
+        else if (kw) wet = wv[t];
+#endif
         else if (clock == NT_STD) {
             if ((s->half ^= 1)) wet = s->hbo;                     /* the interpolator's odd sample */
             else {
@@ -451,7 +617,20 @@ static void nt_render(int pos, int16_t *buf, const int16_t *p)
     nt_t *s = &nt[pos % 3];
     if (!s->ring) return;
     nt_par q;
+#ifdef NT_KERN
+    /* reuse nt_params while the words hold, but redo it every 64 blocks: it also reads the firmware's range table
+     * (op1_fx_param_q15), which can change (or be filled) without the words changing */
+    int same = s->kok > 0;
+    for (int i = 0; i < 8; i++) same &= p[i] == s->kp[i];
+    if (same) { q = s->kq; s->kok--; }
+    else {
+        nt_params(p, &q);
+        for (int i = 0; i < 8; i++) s->kp[i] = p[i];
+        s->kq = q; s->kok = 63;
+    }
+#else
     nt_params(p, &q);
+#endif
     if (s->fresh) { s->fresh = 0; s->wmod = q.mod; nt_snap(s, &q); }
     else {
         nt_ramps(s, &q);
