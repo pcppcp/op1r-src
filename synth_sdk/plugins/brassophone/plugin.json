@@ -5,7 +5,8 @@
   "symbol": "ENGINE_brass",
   "sources": [
     "brass.c",
-    "horn.c"
+    "horn.c",
+    "brass_dsp.S"
   ],
   "screen": {
     "svg": "brass-handmade.svg",
