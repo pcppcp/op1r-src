@@ -13,7 +13,7 @@ volatile uint8_t op1_fx_page[3][4];
 static int n_on, n_off, last_on, last_vel, active; static long now, last_on_at;
 void host_dt_note_on(int pos, int n, int v) { (void)pos; n_on++; last_on = n; last_vel = v; active++; last_on_at = now; }
 void host_dt_note_off(int pos, int n) { (void)pos; (void)n; n_off++; active--; }
-static int fx_val[2][4] = { { -1, -1, -1, -1 }, { -1, -1, -1, -1 } }, n_lock; static long lock_at, restore_at;   /* -1 = base */
+static int fx_val[2][DT_NLK] = { { -1, -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1, -1 } }, n_lock; static long lock_at, restore_at;   /* -1 = base */
 void host_dt_fx_lock(int pos, int k, int pc) { fx_val[pos][k] = pc; n_lock++; lock_at = now; }
 void host_dt_fx_restore(int pos, int k) { fx_val[pos][k] = -1; restore_at = now; }
 
@@ -313,7 +313,36 @@ int main(int argc, char **argv)
         dt_parse(0, 1, t3, DT_TEXT_LEN);
         CHECK(!dt_q(b, 4)->st[0].fx[1], "steps row alone: no locks");
         CHECK(!dt_parse_locks(0, 1, tl, DT_LOCK_LEN - 2), "short lock text rejected");
-        b->rec = 0;
+        /* synth engine locks: sy1..4 follow fx1..4 in the parameter list, synth mode only */
+        dt_cfg_clear(dt_q(b, 4), 16); b->cur[4] = 0; b->page = 1; b->par = DT_P_FX1 + 3;
+        dt_press(0, 0); s0 = &dt_q(b, 4)->st[0];
+        turn(2, 1, 0); CHECK(b->par == DT_P_SY1, "white page 2: fx4 -> sy1 (%d)", b->par);
+        b->page = 0; turn(2, 3, 0);                     /* sy1: off -> 0 %, then 4 % */
+        CHECK(s0->fx[DT_NFX] == 5 && !s0->fx[0], "sy1 sets lock index 4 only (%d)", s0->fx[DT_NFX]);
+        b->page = 1; b->par = DT_P_SY1 + DT_NSY - 1; turn(2, 1, 0); CHECK(b->par == DT_P_GATE, "synth list wraps after sy4");
+        b->par = DT_P_SY1; b->page = 0;
+        if (render) frame("lock trigger with a synth engine lock: SY1 = 4 %");
+        for (int k = 0; k < DT_SLOTS; k++) dt_halt(0, &b->rt[k]);
+        fx_val[0][DT_NFX] = -1; n_lock = 0; dt_start(b, &b->rt[4], dt_next_step(b)); run(step / 4);
+        CHECK(fx_val[0][DT_NFX] == 4 && fx_val[0][0] == -1 && n_lock == 1, "sy1 lock applied to lock index 4 (%d %d)", fx_val[0][DT_NFX], n_lock);
+        run(step); CHECK(fx_val[0][DT_NFX] == -1, "sy1 reverts after the gate");
+        dt_halt(0, &b->rt[4]);
+        static char ts[DT_LOCK_LEN + 1];
+        CHECK(dt_serialize_sy(0, 1, ts) == DT_LOCK_LEN && ts[0] == 'S' && 64 + DT_LOCK_LEN < 0x2000, "sy text length");
+        CHECK(dt_serialize_locks(0, 1, tl) == DT_LOCK_LEN && !dt_parse_sy(0, 1, tl, DT_LOCK_LEN), "fx text is not an sy text");
+        dt_cfg_clear(dt_q(b, 4), 16);
+        CHECK(dt_parse_sy(0, 1, ts, DT_LOCK_LEN) && dt_q(b, 4)->st[0].fx[DT_NFX] == 5 && !dt_q(b, 4)->st[0].fx[0], "sy save / load");
+        CHECK(!dt_parse_sy(0, 1, ts, DT_LOCK_LEN - 2), "short sy text rejected");
+        {                                               /* drum mode: no synth locks (list and playback) */
+            dt_bank_t *d = &dt[1]; dt_bank_init(d); d->rec = 1; d->page = 1; d->par = DT_P_SY1 - 1;
+            dt_turn(1, 2, 1024, 0); CHECK(d->par == DT_P_GATE, "drum list ends at fx4 (%d)", d->par);
+            dt_cfg_clear(dt_q(d, 0), 16); dt_q(d, 0)->st[0].vel = 100; dt_q(d, 0)->st[0].note = DT_NONOTE; dt_q(d, 0)->st[0].fx[DT_NFX] = 51; dt_q(d, 0)->st[0].fx[1] = 21;
+            fx_val[1][DT_NFX] = fx_val[1][1] = -1;
+            dt_start(d, &d->rt[0], dt_next_step(d)); for (long t = 0; t < step * 5 / 4; t += 64) { dt_tick(1, 64, 12000); now += 64; }
+            CHECK(fx_val[1][DT_NFX] == -1 && fx_val[1][1] == 20, "drum ignores sy locks, fx lock plays (%d %d)", fx_val[1][DT_NFX], fx_val[1][1]);
+            dt_halt(1, &d->rt[0]); d->rec = 0; d->page = 0; d->par = 0;
+        }
+        b->rec = 0; b->page = 0; b->par = 0;
     }
 
     if (render) {                                       /* README screenshot: melody, lock triggers, a locked note, running */
