@@ -19,6 +19,7 @@ uint8_t  host_voice_mem[6 * 0x24];
 int16_t  host_voice_vel[6]; int16_t host_voice_env[128]; int16_t host_accel[3] = { 0, 0, 16384 };
 int16_t  host_knobs[8][8];
 int      host_slot;
+int      host_shift;                                         /* Shift held (op1_shift_held) */
 const uint8_t *host_sample_buffer[8];
 int16_t  host_fx_knobs[3][8];
 int16_t  host_fx_meter[3];

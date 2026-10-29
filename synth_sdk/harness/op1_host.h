@@ -53,6 +53,8 @@ void  host_text_draw(void *t, void *r, const int32_t *m9);
 #define OP1_SCREEN_SLOT                   host_slot
 
 static inline int op1_current_slot(void) { return host_slot; }
+extern int host_shift;                                   /* Shift held (screens: op1_shift_held) */
+static inline int op1_shift_held(void) { return host_shift; }
 static inline const uint8_t *op1_sample_buffer(int slot) { return host_sample_buffer[slot & 7]; }
 static inline const int16_t *op1_sample_data(const uint8_t *sb) { return *(int16_t *const *)sb + 8; }
 static inline const int16_t *op1_sample_peaks(const uint8_t *sb) { return (const int16_t *)(sb + sizeof(void *)); }

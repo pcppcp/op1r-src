@@ -1158,6 +1158,16 @@ void midi_start_hook(void)
     for (int k = 0; k < op1_seq_count; k++) op1_seqs[k]->midi_start();   /* sequencer plugins */
 }
 
+/* the preset word a turn of an engine knob edits instead of params[knob]: page 2 (OP1_PRESS_PAGE, toggled by a press)
+ * or Shift + turn (OP1_PRESS_SHIFT, blue .. white); -1 = the knob itself */
+static int eng_turn_word(int n, int knob)
+{
+    uint8_t m = op1_engines[n]->press[knob];
+    if (m == OP1_PRESS_PAGE && op1_eng_page[knob]) return OP1_ENG_PAGE_WORD(knob);
+    if (m == OP1_PRESS_SHIFT && knob < 3 && *(volatile uint8_t *)0x01DD7F78) return OP1_ENG_PAGE_WORD(knob);
+    return -1;
+}
+
 void knob_event_hook(int knob, int16_t *delta)
 {
     if (knob >= 0 && knob < 4 && se_is_open()) { se_knob(knob, *delta); return; }   /* sample editor */
@@ -1189,10 +1199,11 @@ void knob_event_hook(int knob, int16_t *delta)
     }
     int n = custom_engine_page();
     if (sb_knob(n, knob, *delta)) return;                        /* engine sample browser: white scrolls */
+    int pw = n && knob >= 0 && knob < 4 ? eng_turn_word(n, knob) : -1;   /* page 2 / Shift + turn: a preset word */
     if (n && knob >= 0 && knob < 4 && (op1_engine_coarse[n] >> knob & 1)) {   /* coarse knob: 8 steps over the range */
         static int32_t acc[4];
         int16_t *w = (int16_t *)op1_synth_knobs(*(volatile int *)0xFF8016D4 & 7);
-        int wi = op1_eng_page[knob] && op1_engines[n]->press[knob] == OP1_PRESS_PAGE ? OP1_ENG_PAGE_WORD(knob) : knob;
+        int wi = pw >= 0 ? pw : knob;
         if ((acc[knob] > 0 && *delta < 0) || (acc[knob] < 0 && *delta > 0)) acc[knob] = 0;
         acc[knob] += *delta;
         int st = acc[knob] / 2048;                               /* a detent is 2 events of 1024 (emulator) */
@@ -1204,12 +1215,12 @@ void knob_event_hook(int knob, int16_t *delta)
         }
         return;
     }
-    if (n && knob >= 0 && knob < 4 && op1_eng_page[knob] && op1_engines[n]->press[knob] == OP1_PRESS_PAGE) {
+    if (pw >= 0) {
         int16_t *w = (int16_t *)op1_synth_knobs(*(volatile int *)0xFF8016D4 & 7);   /* this slot's words */
         /* shortcut: 0 (unset word of older patches) starts at 8192 = granular's 1x gain; per-engine default if
          * another engine pages a word whose neutral value is not 8192 */
-        int32_t v = (w[OP1_ENG_PAGE_WORD(knob)] > 0 ? w[OP1_ENG_PAGE_WORD(knob)] : 8192) + *delta / 4;
-        w[OP1_ENG_PAGE_WORD(knob)] = (int16_t)(v < 1 ? 1 : (v > 32767 ? 32767 : v));
+        int32_t v = (w[pw] > 0 ? w[pw] : 8192) + *delta / 4;
+        w[pw] = (int16_t)(v < 1 ? 1 : (v > 32767 ? 32767 : v));
         PATCH_SET_KNOBS(PATCH_OBJ(0, *(volatile int *)0xFF8016D4), w);   /* else lost on the next slot switch */
         return;
     }

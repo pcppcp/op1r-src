@@ -65,7 +65,8 @@ Include only `op1_plugin.h`.
   still get `render` (their bus is mono).
 
 **Helpers**: `OP1_SINE_TABLE` (8192 x int16), `op1_sat16`, `op1_mul16` (Q15). Second knob pages and latching
-presses: the `press` field (see the comments in `op1_plugin.h`).
+presses: the `press` field (see the comments in `op1_plugin.h`); synth engines can use Shift + turn instead of a
+page (`OP1_PRESS_SHIFT`, op1r 48 cores), `op1_shift_held()` tells a screen that Shift is down.
 
 **Coarse knobs** (synth engines): `"coarse": [0]` in plugin.json turns knob 0 (both pages) in 8 steps over its
 range instead of the stock ~50 (a selector, a mode); firmware op1r 44 and later.

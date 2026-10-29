@@ -78,11 +78,16 @@ typedef struct {
     uint8_t press[4];   /* encoder press per knob on the engine screen: OP1_PRESS_PAGE toggles page 2, where the
                          * knob edits preset word OP1_ENG_PAGE_WORD(k) (saved with the patch) instead of params[k];
                          * OP1_PRESS_BROWSE (engines with "uses_sample") opens the core's sample browser: the sampler
-                         * presets as in sampler+, white loads one into the slot's sample buffer, the patch stays */
+                         * presets as in sampler+, white loads one into the slot's sample buffer, the patch stays;
+                         * OP1_PRESS_SHIFT: no page, Shift + turn edits OP1_ENG_PAGE_WORD(k) (k = 0..2), the press
+                         * stays stock (op1r 48; older cores: Shift + turn edits params[k]) */
 } op1_engine_t;
 /* page-2 word per knob: blue 5, green 6, white 7, red 7 (white and red share word 7: page one of them only) */
 #define OP1_ENG_PAGE_WORD(k) ((k) < 3 ? 5 + (k) : 7)
 extern volatile uint8_t op1_eng_page[4];   /* synth engine screen: page 2 on per knob (blue..red) */
+#ifndef OP1_HOST
+static inline int op1_shift_held(void) { return *(volatile uint8_t *)0x01DD7F78 != 0; }   /* any thread, read only */
+#endif
 
 /* ---- access to the built-in sampler's per-slot sample (record it with the "sampler" engine) ----
  * 0x01DF6F78[slot] -> { SampleBuffer *sb; rate }   SampleBuffer: +0 int16 *data (8 guard samples,
@@ -156,7 +161,7 @@ typedef struct {
  *  OP1_PRESS_LATCH: press toggles a flag (not saved), e.g. freeze
  * State per FX position (0 synth, 1 drum, 2 master): op1_fx_page[pos][k] = 1 while page 2 / latch is on.
  * FX state must be kept per position 0..2 (the master can run the same custom FX as an instrument). */
-enum { OP1_PRESS_NONE = 0, OP1_PRESS_PAGE = 1, OP1_PRESS_LATCH = 2, OP1_PRESS_BROWSE = 3 };   /* BROWSE: synth engines */
+enum { OP1_PRESS_NONE = 0, OP1_PRESS_PAGE = 1, OP1_PRESS_LATCH = 2, OP1_PRESS_BROWSE = 3, OP1_PRESS_SHIFT = 4 };   /* BROWSE, SHIFT: synth engines */
 extern volatile uint8_t op1_fx_page[3][4];
 
 /* ---- beat clock (read-only; read it once per render block, never per sample) ----
