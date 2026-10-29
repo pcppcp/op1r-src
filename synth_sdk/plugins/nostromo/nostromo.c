@@ -149,18 +149,16 @@ typedef struct {
     int32_t rg[OP1_FX_BLOCK], rgn, rgg, spg;                      /* diffusion HIGH: the last block's diffused input, its
                                                                      count, the regeneration; LOW: the hall's sparse taps */
 #if defined(__bfin__) && !defined(NT_C_REF)
-    int16_t kp[8]; int32_t kok; nt_par kq;                        /* the last words and their nt_params */
+    int16_t kp[8]; int32_t kok; nt_par kq;                        /* the last words, their nt_params, blocks left */
 #endif
 } nt_t;
 static nt_t nt[3];                                                /* synth, drum, master */
-#ifdef NT_KERN
-typedef char nt_hbx_words[__builtin_offsetof(nt_t, hbx) % 4 == 0 ? 1 : -1];   /* nt_k_dec reads it as words */
-#endif
 
 /* on the Blackfin the innermost loops run in nostromo_kern.S, bit for bit the C below, which the host builds (and a
  * Blackfin build with NT_C_REF, the reference to check the kernels against) keep */
 #if defined(__bfin__) && !defined(NT_C_REF)
 #define NT_KERN 1
+_Static_assert(__builtin_offsetof(nt_t, hbx) % 4 == 0, "nt_k_dec reads hbx as words");
 void nt_k_filt(int32_t *x, int n, int32_t *k);
 void nt_k_ap(int32_t *x, int n, const int32_t *a);
 void nt_k_map(int32_t *x, int n, const int32_t *a);
@@ -620,13 +618,15 @@ static void nt_render(int pos, int16_t *buf, const int16_t *p)
     if (!s->ring) return;
     nt_par q;
 #ifdef NT_KERN
-    int same = s->kok;                                            /* nt_params is a function of the words: reuse it */
+    /* reuse nt_params while the words hold, but redo it every 64 blocks: it also reads the firmware's range table
+     * (op1_fx_param_q15), which can change (or be filled) without the words changing */
+    int same = s->kok > 0;
     for (int i = 0; i < 8; i++) same &= p[i] == s->kp[i];
-    if (same) q = s->kq;
+    if (same) { q = s->kq; s->kok--; }
     else {
         nt_params(p, &q);
         for (int i = 0; i < 8; i++) s->kp[i] = p[i];
-        s->kq = q; s->kok = 1;
+        s->kq = q; s->kok = 63;
     }
 #else
     nt_params(p, &q);
