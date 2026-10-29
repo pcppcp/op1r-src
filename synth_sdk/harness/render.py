@@ -35,6 +35,14 @@ STATES_BY_NAME['dddd'] = [
     ('everything max', (32767, 32767, 32767, 32767), 1, 50, -1),
     ('page 2 on blue / green / white', (6000, 24000, 20000, 8000), 1, 40, -1, 0b0111, 20000, 16000, 12000),
 ]
+STATES_BY_NAME['blot'] = [                       # the acid smiley: blue eyes, green smile, white mouth, red drips
+    ('defaults, idle', None, 0, 10, -1),
+    ('defaults, note (accent): mouth open, wink', None, 1, 3, -1),
+    ('Shift + white (drive) half: wiggly face', None, 0, 10, -1, 0, 0, 0, 16384),
+    ('drive max, all max, note', (32767, 32767, 32767, 32767), 1, 3, -1, 0, 0, 0, 32767),
+    ('drive max, reso 0, env max, note: mouth inside', (16000, 0, 32767, 32767), 1, 3, -1, 0, 0, 0, 32767),
+    ('note released: mouth closing', None, 1, 20, 4),
+]
 STATES_BY_NAME['aether'] = [                     # HOST_ACCEL: sensor X,Y,Z after the note-on (home = flat)
     ('flat (home), note held', None, 1, 40, -1),
     ('front edge up 20 deg: pitch up', None, 1, 60, -1, 0, 0, 0, 0, {'HOST_ACCEL': '0,-5604,15396'}),
