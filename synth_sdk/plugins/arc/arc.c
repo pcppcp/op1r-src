@@ -21,7 +21,8 @@
  * of blowing up, which also keeps aliasing down) and the per-step damping factor is clamped at -0.75.
  * Cost: all products are 16 x 16 bit (one MAC on the Blackfin): x, v enter them as Q12 / Q11 views, h as a Q15
  * mantissa with one per-block shift per lamp. Pass 1 runs the lamps and writes the raw arc current into out[],
- * pass 2 shapes it (carbon, DC blocker, tilt, gain), so neither loop runs out of registers.
+ * pass 2 shapes it (carbon, DC blocker, tilt, gain), so neither loop runs out of registers. On the Blackfin both
+ * passes and the portrait points run in arc_dsp.S (hand-scheduled, bit-exact with the C loops, which the host builds and -DARC_C_REF keep).
  * Voice state: 2 x (x, v) + rng + DC + tilt + strike env + gate = 32 bytes.
  * Copyright (C) 2026 ultralazr. GPL-3.0-or-later with the OP-1 firmware permission (see LICENSE and NOTICE).
  */
@@ -68,7 +69,8 @@ static inline int32_t SHL3(int32_t a) { return a > 0x0FFFFFFF ? 0x7fffffff : (a 
 
 /* ---- shared with the screen (written by render, read by the GUI thread) ---- */
 #define ARC_TN 256                                  /* phase portrait ring buffer (decimated) */
-int16_t arc_trace[ARC_TN][4];                       /* x1, v1, x2, v2: Q12, v scaled ~ 1 / (1 + 0.6 eps) */
+int16_t arc_trace[ARC_TN][4] __attribute__((aligned(8)));   /* x1, v1, x2, v2: Q12, v scaled ~ 1 / (1 + 0.6 eps);
+                                                               aligned: arc_dsp.S writes a point as two words */
 volatile uint16_t arc_tpos;                         /* next write index */
 volatile uint8_t arc_tvoice = 0xff;                 /* voice that writes the trace (most recent note) */
 volatile int16_t arc_level[OP1_VOICES];             /* output peak per voice (arc flicker) */
@@ -197,11 +199,32 @@ static int32_t ratio_of(int32_t w)
     return ARC_RR[ARC_RN - 1];
 }
 
+#if defined(__bfin__) && !defined(ARC_C_REF)
+/* arc_dsp.S: pass 2 scheduled by hand (bit-exact with the C loop below, which the host builds keep). Ring words:
+ * -8192, 32767, 16383, -16383, btq, 32767, -32767, dg. The audio thread only, one voice at a time. */
+typedef struct { int32_t dc, lp, ga, k, ring[8]; } ArcShape;
+void arc_shape(int16_t *out, ArcShape *s);
+static ArcShape arc_sh = { 0, 0, 0, 0, { -8192, 32767, 16383, -16383, 0, 32767, -32767, 0 } };
+/* arc_dsp.S: pass 1 (the lamps), the same arithmetic as the loops in arc_render. k: the state in / out, xs / xt of the
+ * last step for the portrait, scratch, and the per-block ring words (filled by arc_render, see arc_dsp.S) */
+typedef struct {
+    int32_t x1, v1, x2, v2; uint32_t r; int32_t s[5], n, m;
+    int16_t *tp, *tb; int32_t tl;                   /* the portrait ring: next point, start, bytes */
+    int32_t ring3[7], ring1[6], ring2[19];
+} ArcRun;
+void arc_lamp1(ArcRun *k, int16_t *out);            /* one lamp: m chunks of n samples */
+void arc_lamp2(ArcRun *k, int16_t *out);            /* both lamps: m chunks of n sample pairs */
+static int16_t arc_tdummy[4] __attribute__((aligned(8)));   /* an untraced voice's portrait points */
+static ArcRun arc_run = { .ring3 = { 12288, -12288, 10923, 0, 0, 32767, -32767 } };
+#endif
+
 static inline int32_t clampk(int32_t k) { return k < 0 ? 0 : (k > 32767 ? 32767 : k); }
 
 /* portrait ordinate (trace points only): (v - eps (x - x^3/3)) / (1 + eps/3). Small eps: v, the circle of a sine.
  * Large eps: -3 times the Lienard variable, so the relaxation cycle shows as the squarish loop of two slow cubic
- * branches joined by fast jumps. Q12 in/out, x clipped to +-3 for the cubic. */
+ * branches joined by fast jumps. Q12 in/out, x clipped to +-3 for the cubic. The Blackfin build runs the same in
+ * arc_dsp.S (LIEN). */
+#if !defined(__bfin__) || defined(ARC_C_REF)
 static int16_t lienard(int32_t xs, int32_t v, int32_t eps12, int32_t vmul)
 {
     if (xs > 12288) xs = 12288; else if (xs < -12288) xs = -12288;
@@ -209,6 +232,7 @@ static int16_t lienard(int32_t xs, int32_t v, int32_t eps12, int32_t vmul)
     int32_t y = (((v >> 15) - ((eps12 * F) >> 12)) * vmul) >> 12;
     return (int16_t)(y > 32767 ? 32767 : (y < -32767 ? -32767 : y));
 }
+#endif
 
 static void arc_note_on(void *self, const int16_t *params)
 {
@@ -290,18 +314,53 @@ static void arc_render(void *self, int16_t *out, const int16_t *params)
         int k = 32 - msb32(im | 1) - 6;
         chunk = k < 1 ? 2 : (k > 7 ? OP1_BLOCK : 1 << k);
     }
-    /* portrait with the effective eps (h eps is capped at 0.3 at high notes); per-block divisions */
-    int32_t epsd = A.he >= HE_MAX && (A.h >> A.sh) > 0 ? (HE_MAX * 4096) / (A.h >> A.sh) : eps12;
-    if (epsd > eps12) epsd = eps12;
-    int32_t vmul = (4096 * 4096) / (4096 + epsd / 3);                     /* portrait scale, see lienard() */
+    /* portrait with the effective eps (h eps is capped at 0.3 at high notes); per-block divisions, traced voice only */
+    int32_t epsd = 0, vmul = 0;
+    if (traced) {
+        epsd = A.he >= HE_MAX && (A.h >> A.sh) > 0 ? (HE_MAX * 4096) / (A.h >> A.sh) : eps12;
+        if (epsd > eps12) epsd = eps12;
+        vmul = (4096 * 4096) / (4096 + epsd / 3);                         /* portrait scale, see lienard() */
+    }
 
     /* pass 1: the lamps -> raw arc current y (Q12) + plasma hiss riding on |x| (no onset click) into out[] */
     int32_t x1 = v->x1, v1 = v->v1, x2 = v->x2, v2 = v->v2;
     uint32_t r = v->rng;
 #define PACK(lo, hi) ((int32_t)(((uint32_t)(hi) << 16) | ((uint32_t)(lo) & 0xffff)))
-    const int32_t K1 = PACK(A.h, A.he), N1 = PACK(A.sg, A.hk), K2 = PACK(B.h, B.he), N2 = PACK(B.sg, B.hk);
     const int32_t O = PACK(h2k >> 2, mix);         /* hiss level | 2nd lamp mix */
     const int sh1 = A.sh, sh2 = B.sh;
+#if defined(__bfin__) && !defined(ARC_C_REF)
+    {   /* ring words: CLK = 2^29 + 2048 he + 1024, E = he << 16, AMINK = 2^18 + A_MIN, G = sg | -h << 16,
+         * H = -sh | h << 16 */
+        ArcRun *k = &arc_run;
+        const int32_t amk = (1 << 18) + A_MIN, clk1 = (1 << 29) + 2048 * A.he + 1024, e1 = PACK(-sh1, A.he),
+                      g1 = PACK(A.sg, -A.h), h1 = PACK(-sh1, A.h);
+        const int m = OP1_BLOCK >> msb32((uint32_t)chunk);
+        k->x1 = x1; k->v1 = v1; k->x2 = x2; k->v2 = v2; k->r = r; k->m = m;
+        if (traced) {
+            k->tp = arc_trace[arc_tpos]; k->tb = arc_trace[0]; k->tl = (int32_t)sizeof arc_trace;
+            k->ring3[3] = epsd; k->ring3[4] = vmul;
+        } else {
+            k->tp = k->tb = arc_tdummy; k->tl = (int32_t)sizeof arc_tdummy;
+        }
+        if (!dual) {
+            int32_t *w = k->ring1;
+            w[0] = O; w[1] = clk1; w[2] = e1; w[3] = amk; w[4] = g1; w[5] = h1;
+            k->n = chunk;
+            arc_lamp1(k, out);
+        } else {
+            int32_t *w = k->ring2;
+            w[0] = PACK(-B.hk, 0); w[1] = (1 << 29) + 2048 * B.he + 1024; w[2] = PACK(-sh2, B.he); w[3] = amk;
+            w[4] = PACK(B.sg, -B.h); w[5] = PACK(-sh2, B.h); w[6] = PACK(A.hk, 0);
+            w[7] = w[14] = clk1; w[8] = w[15] = e1; w[9] = w[16] = amk; w[10] = w[17] = g1; w[11] = w[18] = h1;
+            w[12] = O; w[13] = (int32_t)0xFFFEFFFE;
+            k->n = chunk >> 1;
+            arc_lamp2(k, out);
+        }
+        if (traced) arc_tpos = (uint16_t)((arc_tpos + m) & (ARC_TN - 1));
+        x1 = k->x1; v1 = k->v1; x2 = k->x2; v2 = k->v2; r = k->r;
+    }
+#else
+    const int32_t K1 = PACK(A.h, A.he), N1 = PACK(A.sg, A.hk), K2 = PACK(B.h, B.he), N2 = PACK(B.sg, B.hk);
     for (int16_t *o = out; o < out + OP1_BLOCK; ) {
         int32_t xs = 0, xt = 0;
         int16_t *e = o + chunk;
@@ -337,6 +396,7 @@ static void arc_render(void *self, int16_t *out, const int16_t *params)
             arc_tpos = (uint16_t)((t + 1) & (ARC_TN - 1));
         }
     }
+#endif
     v->x1 = x1; v->v1 = v1; v->x2 = x2; v->v2 = v2; v->rng = r;
 
     /* pass 2: carbon (y += carbon/2 (y^2 - 2): a 2nd harmonic for a sine), DC blocker ~7 Hz, key-tracked tilt
@@ -344,6 +404,12 @@ static void arc_render(void *self, int16_t *out, const int16_t *params)
     int32_t dc = v->dc, lp = v->lp, pk = 0;
     const int16_t cb = (int16_t)carbon, g = (int16_t)A.g, btq = (int16_t)bt;
     int32_t ga = ((gv * dip0) >> 15) << 16, dg = ((((gv * dip1) >> 15) << 16) - ga) >> 7;   /* gain ramp, Q16 */
+#if defined(__bfin__) && !defined(ARC_C_REF)
+    arc_sh.dc = dc; arc_sh.lp = lp; arc_sh.ga = ga;
+    arc_sh.k = (int32_t)(((uint32_t)(uint16_t)g << 16) | (uint16_t)cb); arc_sh.ring[4] = btq; arc_sh.ring[7] = dg;
+    arc_shape(out, &arc_sh);
+    dc = arc_sh.dc; lp = arc_sh.lp;
+#else
     for (int n = 0; n < OP1_BLOCK; n++) {
         const int16_t gq = (int16_t)(ga >> 16); ga += dg;
         int32_t y = out[n];
@@ -356,6 +422,7 @@ static void arc_render(void *self, int16_t *out, const int16_t *params)
         if (o > 32767) o = 32767; else if (o < -32767) o = -32767;
         out[n] = (int16_t)(SHL3(M16(o, gq)) >> 16);   /* = op1_sat16(o * gq >> 13), branch-free */
     }
+#endif
     v->dc = dc; v->lp = lp;
     for (int n = 0; n < OP1_BLOCK; n += 8) { int32_t a = out[n] < 0 ? -out[n] : out[n]; if (a > pk) pk = a; }
     arc_level[vi] = (int16_t)pk;

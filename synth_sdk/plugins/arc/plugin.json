@@ -5,7 +5,8 @@
   "order": 9,
   "symbol": "ENGINE_arc",
   "sources": [
-    "arc.c"
+    "arc.c",
+    "arc_dsp.S"
   ],
   "defaults": [
     12000,
