@@ -72,7 +72,7 @@ int main(void)
     play(k, 55, 64, SR / 2, 1);
     double b0 = bright(0, 1323), b1 = bright(13230, 14553);
     printf("sweep: brightness %.0f Hz -> %.0f Hz\n", b0, b1);
-    assert(b0 > 1.5 * b1);
+    assert(b0 > 1.2 * b1);                   /* blot: darker overall (the 303 ladder is ~10x below its cutoff at -3 dB), a smaller sweep */
 
     /* accent: brighter at the start and louder */
     play(k, 55, 64, SR / 4, 1); double bn = bright(0, 1323); int pn = peak(0, 4410);
@@ -85,6 +85,12 @@ int main(void)
     k[3] = 32767; play(k, 55, 64, SR / 4, 1); double dl = bright(6615, 7938);
     printf("decay: brightness at 150 ms %.0f Hz (short) vs %.0f Hz (long)\n", ds, dl);
     assert(dl > 1.3 * ds);
+
+    /* decay knob on accented notes (the keys play at velocity 127): short decay is darker 60 ms in than long decay */
+    k[3] = 0; play(k, 55, 127, SR / 4, 1); double as = bright(2646, 3969);
+    k[3] = 32767; play(k, 55, 127, SR / 4, 1); double al = bright(2646, 3969);
+    printf("accent decay: brightness at 60 ms %.0f Hz (short) vs %.0f Hz (long)\n", as, al);
+    assert(al > 1.2 * as);
 
     /* resonance: the harmonic it lifts most (high vs no resonance, env mod 0) sits near the cutoff knob's frequency */
     k[2] = 0; k[3] = 9000;
@@ -117,9 +123,9 @@ int main(void)
     /* extremes: all knobs and page-2 words at max, notes C0 .. C8 with jumps, accents: bounded, no DC run-away */
     int16_t kx[8] = { 32767, 32767, 32767, 32767, 0x5301, 32767, 32767, 32767 };
     for (int n = 0; n < 40; n++) {
-        play(kx, 16.35 * pow(2, (n * 7 % 97) / 12.0), n & 1 ? 127 : 1, SR / 20, n % 3 == 0);
-        double m = 0; for (int i = 0; i < SR / 20; i++) m += buf[i];
-        assert(fabs(m / (SR / 20)) < 8000);
+        play(kx, 16.35 * pow(2, (n * 7 % 97) / 12.0), n & 1 ? 127 : 1, SR / 5, n % 3 == 0);
+        double m = 0; for (int i = 0; i < SR / 5; i++) m += buf[i];
+        assert(fabs(m / (SR / 5)) < 8000);
     }
     printf("extremes: ok\n");
 
