@@ -1,9 +1,8 @@
-/* BLOT's sample loop on the Blackfin: blot.c's bl_loop (the C, kept for host builds and -DBLOT_C_REF), bit for bit.
- * Every product is one 16 x 16 MAC (the C's operands are 16-bit by construction: see blot.c); no 32-bit multiply.
+/* BLOT's oscillator pass on the Blackfin: pass 1 of blot's bl_loop (blot.c / blot_dsp.S), unchanged, bit for bit the C
+ * bl_osc in blot.c (which host builds and -DBLOT_C_REF use). The ladder (pass 2 of blot's loop) is C in blot.c.
  *
- * void bl_loop(bl_blk *b)    b: 0 p, 4 y[4], 20 inc, 24 out, 28 k, 32 wave, 36 cd, 40 gain, 44 rinv, 48 sh, 52 g[16],
- *                               84 w
- * pass 1: per sample p += inc[n]; out[n] = osc >> 1, osc = saw(p) (- saw(p + 2^31) wave >> 15 when wave != 0).
+ * void bl_osc(bl_blk *b)    b: 0 p, 20 inc, 24 out, 32 wave, 44 rinv, 48 sh, 84 w
+ * per sample p += inc[n]; out[n] = osc >> 1, osc = saw(p) (- saw(p + 2^31) wave >> 15 when wave != 0).
  *   saw(q) = clip((q ^ 2^31) >>> 16 + (e e >> 15) - (t t >> 15), +-32767), e = 32768 - frac(q), t = 32768 - frac(-q),
  *   frac(x) = min(min(x >> sh, 65535) rinv >> 14, 32767) (unsigned products: FU, the integer product).
  *   Fast path (w != 0): while q is >= w from a wrap (q + w >= 2 w unsigned; for square also q + 2^31: the test on
@@ -11,13 +10,6 @@
  *   (q ^ 2^31) >>> 17 for saw; saw(q + 2^31) = q >>> 16 (never -32768 there), s1 wave >> 15 as one truncating
  *   fractional product. Near a wrap the loop jumps out to the full saw(s) and back to its last instruction (the store).
  *   Fast loops: R0 p, R3 w, R4 2 w, R5 wave. Near a wrap and in the full loops: R7 {rinv : -sh}, R6 32767.
- * pass 2, in place: u = soft(out[n] - (k y3 >>> 12)); y_i += sat16((x g - y_i g) >>> 14), four stages, each one
- *   fractional MAC chain on 2 g with a truncated 16-bit result (A0 = 2 x (2g), A0 -= 2 y (2g), its high half = the
- *   step, saturated); o = clip(o + (o >>> 1), 32767), o = soft(y3 cd >>> 12) (soft peaks at +-21846); out[n] = o gain
- *   >> 15 (truncating fractional, 16 x 16). soft(x) = x - (((x x >> 15) x >> 15) 10923 >> 15) on x clipped to
- *   +-32767: three truncating fractional products (no operand is -32768). Stages packed R6 = {y1 : y0}, R5 =
- *   {y3 : y2} (16-bit: each stays between its input and its state); R4 = {k : 2 g}, R3 = {gain : cd}, R7 =
- *   {-32767 : 10923} (the clips: saturating << 16, then MAX with R7: the value in the high half); g per 8 samples.
  * Callee-saved R4..R7, P3..P5 are saved; no circular addressing (L0..L3 stay 0), no M registers. The fast loops leave
  * the hardware loop and come back to its last instruction near a wrap (the loop runs on, LC0 untouched).
  * Host builds assemble it empty.
@@ -59,28 +51,10 @@
 	\d = MAX(\d, \t3);                  /* +-32767 */
 .endm
 
-/* R0 = soft(R0) in R0.L (R0.H undefined), temp R1; R7 = {-32767 : 10923}. The clip: a saturating << 16 puts
- * sat16(x) in R0.H (low half 0), the MAX with R7 (= -32767 << 16 | 10923) lifts -32768 to -32767 */
-.macro SOFT
-	R0 = R0 << 16 (S);
-	R0 = MAX(R0, R7);                   /* x in R0.H, +-32767 */
-	R1.L = R0.H * R0.H (T);             /* x x >> 15 */
-	R1.L = R1.L * R0.H (T);             /* .. x >> 15 */
-	R1.L = R1.L * R7.L (T);             /* .. 10923 >> 15 */
-	R0.L = R0.H - R1.L (NS);
-.endm
-
-/* y += sat16((x g - y g) >> 14): x, y register halves; R4.L = 2 g; temp R2 */
-.macro STAGE x, y
-	A0 = \x * R4.L;
-	R2.L = (A0 -= \y * R4.L) (T);
-	\y = \y + R2.L (NS);
-.endm
-
 	.align 4
-	.global _bl_loop
-	.type _bl_loop, STT_FUNC
-_bl_loop:
+	.global _bl_osc
+	.type _bl_osc, STT_FUNC
+_bl_osc:
 	[--SP] = (R7:4, P5:3);
 	P5 = R0;
 
@@ -115,7 +89,7 @@ _bl_loop:
 	R1 >>>= 17;                         /* osc >> 1 */
 .Lsf_e:
 	W[P4++] = R1;
-	JUMP .Lpass2;
+	JUMP .Lend;
 .Lsf_near:
 	SAW R1, R0, R2, R3, R4
 	R1 >>>= 1;
@@ -133,7 +107,7 @@ _bl_loop:
 	R1 >>>= 1;
 .Lsu_e:
 	W[P4++] = R1;
-	JUMP .Lpass2;
+	JUMP .Lend;
 
 .Lsq:
 	CC = R3 == 0;
@@ -158,7 +132,7 @@ _bl_loop:
 	R1 >>>= 1;
 .Lqf_e:
 	W[P4++] = R1;
-	JUMP .Lpass2;
+	JUMP .Lend;
 .Lqf_near:
 	SAW R1, R0, R2, R3, R4              /* saw(p) */
 	W[P4] = R1;
@@ -195,67 +169,9 @@ _bl_loop:
 .Lqu_e:
 	W[P4++] = R1;
 
-.Lpass2:
+.Lend:
 	[P5] = R0;
-
-	/* ---- pass 2: the ladder and the output stage, in place ---- */
-	R0 = [P5 + 4];
-	R1 = [P5 + 8];
-	R6 = PACK(R1.L, R0.L);              /* {y1 : y0} */
-	R0 = [P5 + 12];
-	R1 = [P5 + 16];
-	R5 = PACK(R1.L, R0.L);              /* {y3 : y2} */
-	R0 = [P5 + 28];
-	R4 = PACK(R0.L, R4.L);              /* {k : (2 g)} */
-	R0 = [P5 + 40];
-	R1 = [P5 + 36];
-	R3 = PACK(R0.L, R1.L);              /* {gain : cd} */
-	R7.H = 0x8001;
-	R7.L = 10923;                       /* {-32767 : 10923} */
-	P4 = [P5 + 24];
-	P2 = P5;
-	P2 += 52;                           /* g[] */
-	P1 = 16;
-	P0 = 8;
-	LSETUP (.Lo_b, .Lo_e) LC1 = P1;
-.Lo_b:
-	R1 = W[P2++] (X);
-	R1 <<= 1;
-	R4 = PACK(R4.H, R1.L);              /* 2 g of these 8 samples */
-	LSETUP (.Li_b, .Li_e) LC0 = P0;
-.Li_b:
-	R0 = W[P4] (X);                     /* osc >> 1 */
-	R1 = R5.H * R4.H (IS);
-	R1 >>>= 12;                         /* k y3 >> 12 */
-	R0 = R0 - R1;
-	SOFT                                /* u */
-	STAGE R0.L, R6.L
-	STAGE R6.L, R6.H
-	STAGE R6.H, R5.L
-	STAGE R5.L, R5.H
-	R0 = R5.H * R3.L (IS);
-	R0 >>>= 12;                         /* y3 cd >> 12 */
-	SOFT
-	R0 = R0.L (X);
-	R1 = R0 >>> 1;
-	R0 = R0 + R1;
-	R0 = R0 << 16 (S);                  /* soft() peaks at +-21846: +-32769, clipped to +-32767 in R0.H */
-	R0 = MAX(R0, R7);
-	R0.L = R0.H * R3.H (T);             /* x gain >> 15 */
-.Li_e:
-	W[P4++] = R0;
-.Lo_e:
-	NOP;
-
-	R0 = R6.L (X);
-	[P5 + 4] = R0;
-	R0 = R6 >>> 16;
-	[P5 + 8] = R0;
-	R0 = R5.L (X);
-	[P5 + 12] = R0;
-	R0 = R5 >>> 16;
-	[P5 + 16] = R0;
 	(R7:4, P5:3) = [SP++];
 	RTS;
-	.size _bl_loop, .-_bl_loop
+	.size _bl_osc, .-_bl_osc
 #endif

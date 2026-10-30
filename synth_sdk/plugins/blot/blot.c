@@ -1,13 +1,18 @@
-/* "blot" (BLOT) - a TB-303 style bass voice: saw / square into a resonant 4-pole ladder low-pass with a decaying filter
- * envelope and accent.
+/* "blot" (BLOT) - a TB-303 style synth: saw / square into a resonant 4-pole low-pass whose stages load
+ * each other, a feedback high-pass that keeps the bass under the resonance, a decaying filter envelope and accent.
  *   knob 0 (blue)  : cutoff, 30 Hz .. 15 kHz        Shift + turn: waveform, saw .. square
  *   knob 1 (green) : resonance (squelch)             Shift + turn: accent amount
  *   knob 2 (white) : envelope mod, 0 .. 5 octaves    Shift + turn: drive
  *   knob 3 (red)   : decay, 40 .. 640 ms (time constant)
- * Accent: notes with velocity >= 100 sweep the filter further (+ accent x 2 octaves), decay fast and play louder.
+ * Accent: notes with velocity >= 100 sweep the filter further (+ accent x 2 octaves), decay faster (about a third of the
+ * decay knob's time, 42 .. 230 ms) and play louder.
  * Slide: the OP-1's own portamento (mono / legato play mode); the pitch increments already include the glide.
- * Cost: per sample a polyBLEP saw pair, four one-pole stages and a soft-clipped feedback, all 16 x 16 multiplies;
- * the envelope and the cutoff coefficient every 8 samples; one division per block (polyBLEP reciprocal, decay).
+ * Filter: the TB-303 mode of Open303's TeeBeeFilter (Robin Schmidt, MIT License, (c) 2009 Robin Schmidt, rs-met.com): the
+ * coefficients b0 (rational) and k (polynomial) of the cutoff, the stage updates, the 150 Hz feedback high-pass and the
+ * gain g; the tables are made by gen_tables.py. Added here: a soft clip in the feedback, 32-bit states, the output stage.
+ *   y0 = in - hp(k y4);  y1 += 2 b0 (y0 - y1 + y2);  y2 += b0 (y1 - 2 y2 + y3);  y3 += b0 (y2 - 2 y3 + y4);  y4 += b0 (y3 - 2 y4)
+ * Cost: the oscillator is a hand-written Blackfin pass (blot_dsp.S); the ladder is C (2 multiplies per 32 x 16 bit
+ * product, 4 stages + high-pass + feedback + output per sample); the envelope and the coefficients every 8 samples.
  * Copyright (C) 2026 pcppcp. GPL-3.0-or-later with the OP-1 firmware permission (see LICENSE and NOTICE).
  */
 #include "op1_plugin.h"
@@ -16,16 +21,20 @@
 typedef struct {
     uint32_t vtable;            /* +0x00 firmware-owned, never written */
     uint32_t ph;                /* oscillator phase (2^32 = one cycle) */
-    int32_t  y[4];              /* ladder stages */
+    int32_t  y[4];              /* ladder stages y1 .. y4, Q20 (1.0 = 2^20) */
     int32_t  env;               /* filter envelope, Q24 */
+    int32_t  hp;                /* feedback high-pass state, Q20 */
     uint8_t  gate, acc;         /* key held (screen), accented note */
 } ac_voice_t;
 typedef char ac_size_check[sizeof(ac_voice_t) <= OP1_VOICE_SIZE ? 1 : -1];
 
 #define AC_ACCENT_VEL (100 * 258)   /* op1_voice_vel_gain of velocity 100 */
-#define AC_ACCENT_TAU 50            /* ms: an accented note's decay */
+#define AC_ACCENT_TAU(t) (30 + (((t) * 5) >> 4))   /* ms: an accented note's decay follows the knob's: 42 .. 230 ms (about 55 ms at the default) */
+#define AC_HP_C 1371                /* feedback high-pass, Q16: c / (1 + c), c = 2 pi 150 Hz / 44100 */
+#define AC_R_MAX 32440              /* resonance cap, Q15 (0.99) */
+#define AC_STATE_MAX (1 << 27)      /* clamp for a state left by another engine */
 
-volatile int16_t ac_level[OP1_VOICES];   /* filter envelope per voice, Q15 (screen) */
+volatile int16_t ac_level[OP1_VOICES];  /* filter envelope per voice, Q15 (screen) */
 
 static void ac_note_on(void *self, const int16_t *params)
 {
@@ -43,27 +52,37 @@ static inline int32_t soft(int32_t x)    /* x - x^3 / 3 on +-32767: +-21845 at t
     int32_t x2 = (x * x) >> 15;
     return x - ((((x2 * x) >> 15) * 10923) >> 15);
 }
+/* d c / 65536 for a 32-bit d and a 16-bit unsigned c, exact (floor), in two 16-bit products */
+static inline int32_t mq16(int32_t d, uint32_t c)
+{
+    return (d >> 16) * (int32_t)c + (int32_t)((((uint32_t)d & 0xFFFFu) * c) >> 16);
+}
 
-/* ---- the sample loop: everything per sample works on 16-bit values, so every product is one 16 x 16 MAC on the
- * Blackfin (blot_dsp.S, bit for bit this C, which host builds and -DBLOT_C_REF use). The cutoff coefficient per
- * 8 samples (g[]) and the gains are worked out per block. */
+/* ---- the sample loop, two passes: the oscillator (osc >> 1 into out[], blot_dsp.S or the C below), then the ladder
+ * and the output stage in place (C). The coefficients per 8 samples (b0, k, g) and the gains are worked out per block.
+ * bl_blk keeps blot's layout up to w: blot_dsp.S reads p, inc, out, wave, rinv, sh and w by offset. */
 typedef struct {
     uint32_t p;                 /*  0 oscillator phase (in / out) */
-    int32_t  y[4];              /*  4 ladder stages, +-32767 (in / out) */
+    int32_t  y[4];              /*  4 ladder stages y1 .. y4, Q20 (in / out) */
     const int32_t *inc;         /* 20 OP1_PITCH_INC */
     int16_t *out;               /* 24 */
-    int32_t  k;                 /* 28 feedback, Q12, 0 .. 15974 */
+    int32_t  k;                 /* 28 (unused) */
     int32_t  wave;              /* 32 saw .. square, Q15 (0: the 2nd saw is skipped) */
-    int32_t  cd;                /* 36 comp x drive, Q12, <= 24267 */
+    int32_t  cd;                /* 36 (unused) */
     int32_t  gain;              /* 40 output gain, Q15 */
     int32_t  rinv;              /* 44 polyBLEP reciprocal, 16384 .. 32768 */
     int32_t  sh;                /* 48 its shift */
-    int16_t  g[16];             /* 52 ladder coefficient per 8 samples, Q14 */
+    int16_t  g[16];             /* 52 (unused) */
     uint32_t w;                 /* 84 fast path (blot_dsp.S): both polyBLEP terms are 0 and the clip idle while the phase
                                  *    is >= w from a wrap; 0: no fast path (high notes) */
+    int32_t  hp;                /* 88 feedback high-pass state, Q20 (in / out) */
+    uint16_t b0[16];            /* 92 stage coefficient per 8 samples, Q16 */
+    uint16_t kq[16];            /* 124 feedback k = kp r, Q8 */
+    uint16_t gg[16];            /* 156 output gain g x drive, Q12 (<= 65535) */
 } bl_blk;
 #ifdef __bfin__
-_Static_assert(sizeof(bl_blk) == 88 && __builtin_offsetof(bl_blk, g) == 52 && __builtin_offsetof(bl_blk, w) == 84, "bl_blk layout (blot_dsp.S)");
+_Static_assert(__builtin_offsetof(bl_blk, inc) == 20 && __builtin_offsetof(bl_blk, wave) == 32 && __builtin_offsetof(bl_blk, rinv) == 44 &&
+               __builtin_offsetof(bl_blk, w) == 84, "bl_blk layout (blot_dsp.S)");
 #endif
 
 /* q / di in Q15 (rinv = 2^29 / (di >> sh) of the block's first increment), capped at 32767; the operand is capped at
@@ -85,10 +104,9 @@ static inline int32_t bl_saw(uint32_t q, int sh, uint32_t rinv)
 }
 
 #if defined(__bfin__) && !defined(BLOT_C_REF)
-void bl_loop(bl_blk *b);                                                /* blot_dsp.S */
+void bl_osc(bl_blk *b);                                                 /* blot_dsp.S */
 #else
-/* two passes, as blot_dsp.S: the oscillator (osc >> 1) into out[], then the ladder and the output stage in place */
-static void bl_loop(bl_blk *b)
+static void bl_osc(bl_blk *b)
 {
     uint32_t p = b->p;
     const int32_t sh = b->sh, wave = b->wave;
@@ -100,24 +118,37 @@ static void bl_loop(bl_blk *b)
         b->out[n] = (int16_t)(osc >> 1);                                /* +-32767 */
     }
     b->p = p;
-    int32_t y0 = b->y[0], y1 = b->y[1], y2 = b->y[2], y3 = b->y[3];
-    const int32_t k = b->k, cd = b->cd, gain = b->gain;
-    for (int n = 0; n < OP1_BLOCK; n++) {
-        const int32_t g = b->g[n >> 3];
-        /* ladder: soft-clipped input minus feedback, four one-pole stages; (a - b) g as a g - b g: 16-bit factors; the
-         * step saturated to 16 bits (it only gets larger from a garbage state, blot_dsp.S takes it as a 16-bit half) */
-        int32_t u = soft(b->out[n] - ((k * y3) >> 12));
-        y0 += op1_sat16((u * g - y0 * g) >> 14);
-        y1 += op1_sat16((y0 * g - y1 * g) >> 14);
-        y2 += op1_sat16((y1 * g - y2 * g) >> 14);
-        y3 += op1_sat16((y2 * g - y3 * g) >> 14);
-        int32_t o = soft((y3 * cd) >> 12);                              /* drive 1x: a plain saw stays below the knee */
-        o = clip(o + (o >> 1), 32767);                                  /* soft() peaks at +-21846: +-32769 here */
-        b->out[n] = (int16_t)((o * gain) >> 15);                       /* 16 x 16 bits, no saturation needed */
-    }
-    b->y[0] = y0; b->y[1] = y1; b->y[2] = y2; b->y[3] = y3;
 }
 #endif
+
+/* the ladder and the output stage, in place on out[] (the oscillator's osc >> 1, +-16383; 1.0 = 32768 = 2^20 in a state) */
+static void bl_ladder(bl_blk *b)
+{
+    int32_t y1 = b->y[0], y2 = b->y[1], y3 = b->y[2], y4 = b->y[3], hp = b->hp;
+    const int32_t gain = b->gain;
+    for (int j = 0; j < OP1_BLOCK / 8; j++) {
+        const uint32_t c1 = b->b0[j], c2 = 2 * c1;
+        const int32_t kq = b->kq[j], gg = b->gg[j];
+        for (int i = 0; i < 8; i++) {
+            const int n = j * 8 + i;
+            /* feedback k y4 (in Q20: 16-bit units << 5), high-passed, soft clipped at +-2.0 */
+            int32_t s4 = clip(y4 >> 5, 65535);
+            int32_t o = ((s4 * kq) >> 3) - hp;
+            hp += mq16(o, AC_HP_C);
+            int32_t u = (int32_t)b->out[n] * 32 - soft(clip(o >> 6, 32767)) * 64;
+            y1 += mq16(u - y1 + y2, c2);
+            y2 += mq16(y1 - 2 * y2 + y3, c1);
+            y3 += mq16(y2 - 2 * y3 + y4, c1);
+            y4 += mq16(y3 - 2 * y4, c1);
+            /* output: g y4 (the filter's 2 g y4 at half level) x drive, soft clipped */
+            int32_t v = clip(y4 >> 5, 32767);
+            int32_t q = soft((v * gg) >> 12);
+            q = clip(q + (q >> 1), 32767);                              /* soft() peaks at +-21846: +-32769 here */
+            b->out[n] = (int16_t)((q * gain) >> 15);
+        }
+    }
+    b->y[0] = y1; b->y[1] = y2; b->y[2] = y3; b->y[3] = y4; b->hp = hp;
+}
 
 static bl_blk bl_b;                                                     /* the audio thread only, one voice at a time */
 
@@ -129,18 +160,21 @@ static void ac_render(void *self, int16_t *out, const int16_t *params)
     v->acc = vg >= AC_ACCENT_VEL;
     int32_t acc = v->acc ? (params[6] > 0 ? params[6] : 20000) : 0;   /* accent amount, Q15 (word 0: a new sound) */
 
-    /* per block: cutoff / env mod in Q12 octaves, feedback, decay step, waveform, gains */
+    /* per block: cutoff / env mod in Q12 octaves, resonance, decay step, waveform, gains */
     bl_blk *b = &bl_b;
     int32_t base = (params[0] * (9 * 4096)) >> 15;                      /* 30 Hz .. 15 kHz */
     int32_t em = ((params[2] * (5 * 4096)) >> 15) + ((acc * (2 * 4096)) >> 15);
-    b->k = (params[1] * 15974) >> 15;                                   /* feedback 0 .. 3.9, Q12 */
+    int32_t rk = params[1] < 0 ? 0 : params[1], rd = rk >> 11, rf = rk & 2047;
+    int32_t r = ac_rsk[rd] + (((ac_rsk[rd + (rd < 16)] - ac_rsk[rd]) * rf) >> 11);   /* resonance, Q15 */
+    if (r > AC_R_MAX) r = AC_R_MAX;
     int32_t kd = params[3] < 0 ? 0 : params[3] >> 11, kf = params[3] < 0 ? 0 : params[3] & 2047;
-    int32_t tau = v->acc ? AC_ACCENT_TAU : ac_tau_ms[kd] + (((ac_tau_ms[kd + (kd < 16)] - ac_tau_ms[kd]) * kf) >> 11);
+    int32_t tau = ac_tau_ms[kd] + (((ac_tau_ms[kd + (kd < 16)] - ac_tau_ms[kd]) * kf) >> 11);
+    if (v->acc) tau = AC_ACCENT_TAU(tau);
     int32_t dstep = (int32_t)(1342177280 / (441 * tau));                /* 8 / (44.1 tau) per 8 samples, Q24 */
     b->wave = params[5] > 0 ? params[5] : 0;                            /* saw .. square, Q15 */
     int32_t drive = 4096 + ((params[7] > 0 ? params[7] : 0) >> 2);      /* 1x .. 3x, Q12 */
     b->gain = 19661 + ((acc * 13106) >> 15);                            /* 0.6, accent up to 1.0 */
-    b->cd = ((4096 + (b->k >> 2)) * drive) >> 12;                       /* (some bass back with resonance) x drive */
+    b->hp = clip(v->hp, AC_STATE_MAX);
 
     /* polyBLEP fraction t = p / inc in Q15 without a per-sample division: rinv from this block's first inc */
     uint32_t inc0 = (uint32_t)inc[0] < 16384u ? 16384u : (uint32_t)inc[0];
@@ -153,27 +187,36 @@ static void ac_render(void *self, int16_t *out, const int16_t *params)
     b->w = inc0 < (1u << 28) ? (2 * inc0 > 65536u ? 2 * inc0 : 65536u) : 0;
 
     /* the voice object keeps the previous engine's bytes (note_on keeps the filter for legato): clamp the states to
-     * their range, else the ladder's products overflow and it locks into a clipped oscillation */
+     * their range, else the ladder runs away */
     b->p = v->ph;
-    for (int i = 0; i < 4; i++) b->y[i] = clip(v->y[i], 32767);
+    for (int i = 0; i < 4; i++) b->y[i] = clip(v->y[i], AC_STATE_MAX);
     int32_t env = v->env < 0 ? 0 : (v->env > (1 << 24) ? 1 << 24 : v->env);
-    for (int j = 0; j < OP1_BLOCK / 8; j++) {                           /* envelope and cutoff every 8 samples */
+    for (int j = 0; j < OP1_BLOCK / 8; j++) {                           /* envelope and coefficients every 8 samples */
         env -= (env >> 12) * (dstep >> 4) >> 8;
         int32_t o = base + ((env >> 9) * em >> 15);                     /* env Q15 x em (<= 7 octaves) */
         if (o > (AC_G_N - 1) * 512 - 1) o = (AC_G_N - 1) * 512 - 1;
         int32_t i = o >> 9, f = o & 511;
-        b->g[j] = (int16_t)(ac_g[i] + (((ac_g[i + 1] - ac_g[i]) * f) >> 9));
+        int32_t kp = ac_kp[i] + (((ac_kp[i + 1] - ac_kp[i]) * f) >> 9);     /* Q8 */
+        b->b0[j] = (uint16_t)(ac_b0[i] + (((ac_b0[i + 1] - ac_b0[i]) * f) >> 9));
+        b->kq[j] = (uint16_t)((kp * r) >> 15);                          /* k = kp r */
+        int32_t g = (kp * 15421) >> 14;                                 /* kp / 17, Q12 */
+        g = (((g - 4096) * r) >> 15) + 4096;                            /* (g - 1) r + 1 */
+        g = (g * (32768 + r)) >> 15;                                    /* x (1 + r) */
+        g = (g * drive) >> 12;
+        b->gg[j] = (uint16_t)(g > 65535 ? 65535 : g);
     }
     b->inc = inc; b->out = out;
-    bl_loop(b);
+    bl_osc(b);
+    bl_ladder(b);
     v->ph = b->p; for (int i = 0; i < 4; i++) v->y[i] = b->y[i];
+    v->hp = b->hp;
     v->env = env;
     unsigned vi = (unsigned)op1_voice_index(self);
-    if (vi < OP1_VOICES) ac_level[vi] = (int16_t)(env >> 9);           /* (a voice object outside the 6: no screen) */
+    if (vi < OP1_VOICES) ac_level[vi] = (int16_t)(env >> 9);          /* (a voice object outside the 6: no screen) */
 }
 
 const op1_engine_t ENGINE_blot = { ac_note_on, ac_render, ac_note_off,
-                                   { OP1_PRESS_SHIFT, OP1_PRESS_SHIFT, OP1_PRESS_SHIFT, OP1_PRESS_NONE } };
+                                    { OP1_PRESS_SHIFT, OP1_PRESS_SHIFT, OP1_PRESS_SHIFT, OP1_PRESS_NONE } };
 
 /* ======================= screen (GUI thread) =======================
  * An acid house smiley in lines, standing still (blot.svg is empty), and dddd's bottom row. Each knob changes one part,
