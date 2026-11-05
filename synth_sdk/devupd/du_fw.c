@@ -241,7 +241,15 @@ void du_rx_poll(void)
         for (int i = 0; i < k; i++) rx_byte(p[1 + i]);
         extern void ms_midi_rx(const volatile uint8_t *pk);
         ms_midi_rx(p);                                             /* MIDI sequencer: input M<channel> (any channel) */
+        extern void cc_rx(volatile uint8_t *pk);
+        cc_rx(p);                                                  /* CC groups: keys / params channels (midi/ccmap.c) */
+        extern void pc_filter(volatile uint8_t *pk);
+        pc_filter(p);                                              /* pulse clock in: MIDI clock dropped (midi/pclk.c) */
     }
+    extern void pc_poll(void);
+    pc_poll();                                                     /* pulse clock in: ticks, start / stop */
+    extern void cc_tx_poll(void);
+    cc_tx_poll();                                                  /* CC feedback (midi/ccmap.c) */
     RX_PARSE();
 }
 

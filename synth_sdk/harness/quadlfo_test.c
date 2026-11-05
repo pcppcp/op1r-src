@@ -21,6 +21,7 @@ static int n_drum, drum_eng, drum_idx;
 void host_knob_range_drum(int k, int16_t *m, int e, void *p) { (void)m; (void)p; n_drum++; drum_eng = e; drum_idx = k; }
 void host_knob_range_synth(int k, int16_t *m, int e, void *p) { (void)e; (void)p; n_synth++; last_idx = k; last_mod = *m; if (abs(*m) > max_mod) max_mod = (int16_t)abs(*m); }
 int16_t host_fx_range[8][3], host_fx_params[8];
+int16_t host_stage[8]; int host_eng_plugin = 1, host_fx_plugin = 1;
 void host_fx_knob_mod(int16_t *m, const int16_t *rg, int16_t *p) { n_fx++; last_idx = (int)(p - host_fx_params); last_mod = *m; (void)rg; }
 void host_env_mod(int k, int16_t *m, void *p) { (void)p; n_env++; last_idx = k; last_mod = *m; if (abs(*m) > max_mod) max_mod = (int16_t)abs(*m); }
 
@@ -122,11 +123,17 @@ int main(int argc, char **argv)
         for (int i = 0; i < 70; i++) ql_turn(e, 0, 0, 1024, 0);
         CHECK(D(e, 2).rate == 63 && D(e, 0).rate == e0.rate && D(e, 0).tgt == e0.tgt && D(e, 3).amt == e3.amt && D(e, 3).type == e3.type && ql_is_quad(e), "rate edit of LFO 3 only");
         ql_turn(e, 0, 1, -40 * 1024, 0); CHECK(D(e, 2).amt == -31, "amount clamp %d", D(e, 2).amt);
-        int seq[22], own = 0; for (int k = 0; k < 22; k++) { seq[k] = D(e, 2).tgt; own |= seq[k] >= 18 && seq[k] <= 20; ql_turn(e, 0, 2, 1024, 0); }
-        CHECK(seq[0] == 0 && seq[17] == 17 && seq[18] == 21 && seq[20] == 23 && seq[21] == 0 && !own,
-              "LFO 3: 21 targets, its own 18..20 skipped (%d %d %d %d)", seq[17], seq[18], seq[20], seq[21]);
+        static const int want[28] = { 0, 1, 2, 3, 24, 25, 26, 4, 5, 6, 7, 8, 9, 10, 11, 27, 28, 29, 12, 13, 14, 15, 16, 17, 21, 22, 23, 0 };
+        int seq[28], ok = 1; for (int k = 0; k < 28; k++) { seq[k] = D(e, 2).tgt; ok &= seq[k] == want[k]; ql_turn(e, 0, 2, 1024, 0); }
+        CHECK(ok, "LFO 3: 27 targets, page 2 after its page 1, own 18..20 skipped (%d %d %d %d %d)", seq[4], seq[7], seq[15], seq[18], seq[24]);
         ql_turn(e, 0, 2, -2048, 0); CHECK(D(e, 2).tgt == 23, "target wraps back (%d)", D(e, 2).tgt);
         ql_turn(e, 0, 2, -3 * 1024, 0); CHECK(D(e, 2).tgt == 17, "backwards skips its own too (%d)", D(e, 2).tgt);
+        {   /* drum page: 24 targets, no engine page 2 (24..26) */
+            int16_t dw[8]; for (int k = 0; k < 8; k++) dw[k] = e[k];
+            int dseq[25], dp2 = 0;
+            for (int k = 0; k < 25; k++) { dseq[k] = D(dw, 2).tgt; dp2 |= dseq[k] >= 24 && dseq[k] <= 26; ql_turn(dw, 1, 2, 1024, 0); }
+            CHECK(!dp2 && dseq[24] == dseq[0], "drum page: 24 targets, engine page 2 skipped");
+        }
         for (int k = 0; k < 6; k++) ql_turn(e, 0, 3, 1024, 0);
         CHECK(D(e, 2).type == QT_VOICE, "type wraps after 6");
         ql_turn(e, 0, 3, -1024, 0); CHECK(D(e, 2).type == QT_RAND, "type wraps back -> RAND");
@@ -211,6 +218,28 @@ int main(int argc, char **argv)
         CHECK(L[0].inc == inc0, "a stored self target is ignored");
         n_synth = 0; for (int b = 0; b < 200; b++) { host_cycles += cpb; ql_apply_synth(host_lfo_obj[0], self, 0); }
         CHECK(n_synth == 0, "LFO targets never touch knobs (%d calls)", n_synth);
+        /* page 2: engine words 5..7 (plugin engines, unset 0 = 8192), FX words 5..7 (plugin FX), clamped 0..32767 */
+        int16_t p2[8] = { fq(31,0,0,0,0), fq(31,0,0,0,0), fq(31,0,0,0,0), fq(31,0,0,0,0),
+                          ct(QT_FREE, 24 + 1, 31), ct(QT_FREE, 27 + 2, -31), ct(QT_FREE, 0, 0), ct(QT_FREE, 0, 0) }; pk(p2);
+        int mx_eng = 0, mn_eng = 32767, mx_fx = 0, mn_fx = 32767, n_other = n_synth + n_fx;
+        for (int b = 0; b < 400; b++) {
+            host_cycles += cpb;
+            for (int k = 0; k < 8; k++) host_stage[k] = 0, host_fx_params[k] = 16000;   /* the firmware copies the words per block */
+            ql_apply_synth(host_lfo_obj[0], p2, 0); ql_apply_fx(0, p2, 2);
+            if (host_stage[6] > mx_eng) mx_eng = host_stage[6]; if (host_stage[6] < mn_eng) mn_eng = host_stage[6];
+            if (host_fx_params[7] > mx_fx) mx_fx = host_fx_params[7]; if (host_fx_params[7] < mn_fx) mn_fx = host_fx_params[7];
+            CHECK(host_stage[5] == 0 && host_stage[7] == 0 && host_fx_params[5] == 16000 && host_fx_params[6] == 16000, "page 2: only the target word");
+        }
+        CHECK(mn_eng >= 1 && mn_eng < 8192 && mx_eng > 8192 && mx_eng <= 32767, "engine page 2 around the unset 8192 (%d..%d)", mn_eng, mx_eng);
+        CHECK(mn_fx >= 0 && mn_fx < 16000 && mx_fx > 16000 && mx_fx <= 32767, "FX page 2 around its value (%d..%d)", mn_fx, mx_fx);
+        CHECK(n_synth + n_fx == n_other, "page 2 never calls the knob range functions");
+        host_eng_plugin = host_fx_plugin = 0;
+        for (int k = 0; k < 8; k++) host_stage[k] = 0, host_fx_params[k] = 16000;
+        for (int b = 0; b < 50; b++) { host_cycles += cpb; ql_apply_synth(host_lfo_obj[0], p2, 0); ql_apply_fx(0, p2, 2); }
+        CHECK(host_stage[6] == 0 && host_fx_params[7] == 16000, "stock engine / FX: page 2 targets do nothing");
+        host_eng_plugin = host_fx_plugin = 1;
+        int nd = n_drum; for (int b = 0; b < 50; b++) { host_cycles += cpb; ql_apply_drum(0, p2, 3); }
+        CHECK(n_drum == nd && host_stage[6] == 0, "drums: no engine page 2");
         /* round trip: every field of every LFO */
         int16_t rt[8] = { 0 }; ql_lfo q[4];
         for (int i = 0; i < 4; i++) { q[i].rate = (uint8_t)(10 + i * 13); q[i].sync = 0; q[i].wave = (uint8_t)(i + 1); q[i].smooth = (uint8_t)(7 - i);
@@ -244,6 +273,9 @@ int main(int argc, char **argv)
         { "LFO targets: LFO1 -> freq of LFO2 (F, green dot), LFO3 -> amount of LFO4 (A), LFO4 -> offset of LFO1 (O)", 0, 0,
           { fq(12,0,0,0,0), fq(40,0,0,0,0), fq(20,3,0,0,0), fq(45,0,0,0,0),
             ct(QT_FREE, 12 + 3 * 1 + 0, 25), ct(QT_FREE, 0, 20), ct(QT_FREE, 12 + 3 * 3 + 1, -20), ct(QT_VOICE, 12 + 3 * 0 + 2, 31) }, 70 },
+        { "page 2: LFO1 -> engine page 2 green, LFO2 -> engine knob green, LFO3 -> FX page 2 white, LFO4 -> FX white", 0, 0,
+          { fq(25,0,0,0,0), fq(36,0,0,0,0), fq(18,0,0,0,0), fq(44,0,0,0,0),
+            ct(QT_FREE, 24 + 1, 25), ct(QT_VOICE, 1, 20), ct(QT_FREE, 27 + 2, -18), ct(QT_FREE, 10, 31) }, 55 },
         { "SHIFT: offset / smoothing / waveform / sync; LFO2 selected", 0, 1, { fq(30,0,0,0,0), fq(7,1,1,2,2), fq(50,4,0,5,4), fq(63,5,0,0,7),
           ct(QT_FREE, 0, 25), ct(QT_GATE, 4, -12), ct(QT_MONO, 11, 31), ct(QT_1SHT, 6, 18) }, 60 } };
     host_tempo_rate = 1662149u * 120;

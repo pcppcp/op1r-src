@@ -76,6 +76,7 @@ void ci_metro_render(void)
 {
     { extern void fr_capture(void); fr_capture(); }               /* master FX source: instrument part (docs/54) */
     pu_block();                                                   /* punch: marker crossings (audio thread) */
+    { extern void pc_block(void); pc_block(); }                   /* pulse clock in: edges on the input (midi/pclk.c) */
     inst_fade_block();                                            /* tools: instrument fade (screens/overlay.c) */
 #ifndef OP1_HOST
     ms_fw_block();                                                /* MIDI sequencer device (docs/39) */
@@ -166,13 +167,14 @@ void ci_cancel(void)
 }
 
 /* main loop: replaces CALL tape_c::service(0) at 0x019F0A24; presses PLAY once the count is over */
+int tape_service(int arg);
 int ci_service(int arg)
 {
     int r =
 #ifdef OP1_HOST
         host_tape_service(arg);
 #else
-        ((int (*)(int))0x01A54710)(arg);
+        tape_service(arg);                                        /* tape_c::service, throttled saves (safewrite.c) */
 #endif
     pu_service();                                                 /* punch in / out (main loop) */
 #ifndef OP1_HOST

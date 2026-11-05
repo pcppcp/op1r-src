@@ -102,7 +102,7 @@ int main(int argc, char **argv)
     for (int i = 0; i < 40; i++) fr_send_turn(0, 1024);                            /* track 1 send 40 */
     assert(fr_send[0] == 40 && fr_aux_live);
     fr_send_turn(1, 1024 * 200); assert(fr_send[1] == 100);                        /* clamped */
-    { extern uint8_t fr_host_mfx; fr_host_mfx = 0; assert(!fr_tracks_needed()); fr_host_mfx = 1; assert(fr_tracks_needed()); }   /* no plugin master FX: no track work */
+    { extern uint8_t fr_host_mfx; fr_host_mfx = 0; assert(!fr_tracks_needed()); fr_host_mfx = 1; assert(fr_tracks_needed()); }   /* master FX off: no track work */
     fr_send_turn(1, -1024 * 50); assert(fr_send[1] == 50);
     fr_host_mute[1] = 0;                                                           /* track 2 muted: no send */
     fr_route(fx_gain2, 0, l, r, 0);                                                /* aux = 1000 * 0.4 = ~400, +aux */

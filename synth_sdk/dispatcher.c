@@ -25,6 +25,8 @@ static uint8_t voice_engine[OP1_VOICES];
 /* selector word -> engine / FX order, 0 if this build has no plugin with that order (stock iter / filter) */
 static int engine_index(int n) { return (n > 0 && n < op1_engine_count && op1_engines[n]) ? n : 0; }
 static int fx_index(int n)     { return (n > 0 && n < op1_fx_count && op1_fxs[n]) ? n : 0; }
+int mx_engine_plugin(int n) { return engine_index(n); }          /* midi/mx.c: page 2 words only for plugins */
+int mx_fx_plugin(int n) { return fx_index(n); }
 
 static int engine_of(const int16_t *params)
 {
@@ -767,6 +769,8 @@ void screens_load_hook(void *table)
         drum_screen = SCREEN_TABLE[0x10];
         if (se_ready && sd_scr[0] && drum_screen) sd_ready = 1;  /* (texts shared, made once) */
     }
+    { extern void pc_load(void); pc_load(); }                    /* pulse clock in: source setting (midi/pclk.c) */
+    { extern void cc_load(void); cc_load(); }                    /* CC channels / feedback (midi/ccmap.c) */
     dpu_ui_load();                                               /* drum+ plugin: load its pages, take the stock ones */
     spc_ui_load();                                               /* sampler+ plugin: the same for 6 / 0x16 */
     finger_screen = SCREEN_TABLE[EUCLID_SCREEN_ID];              /* sequencer plugin screens (swapped into 0x2D) */
@@ -911,6 +915,7 @@ void key_event_hook(int code, int pressed)
     /* midi/mx.c MX_KEY, marked by its state byte: R246 itself pushes key 0x3F state 1 when the host ejects the USB disk
      * (0x019EFE6C, word 0x018E62BC) and the COM controller leaves disk mode on it, so that one must reach the stock code */
     if (code == 0x3F && pressed == 0xA5) { extern void mx_apply(void); mx_apply(); return; }   /* MX_KEY_DOWN */
+    { extern void cc_fb_key(int, int); cc_fb_key(code, pressed); }   /* CC feedback (midi/ccmap.c) */
     if (du_prompt_key(code, pressed)) return;                    /* dev update prompt: T1 restart / T2 cancel */
     extern int ms_key(int code, int pressed, int on_tape);
     if (ms_key(code, pressed, tape_page())) return;              /* MIDI sequencer device: SEQ + TAPE (docs/39) */
@@ -977,7 +982,8 @@ void key_event_hook(int code, int pressed)
         if (!pressed && code == 0x22 && play_swallow) { play_swallow = 0; return; }
         if (pressed && pu_key(code)) { if (code == 0x22) play_swallow = 1; return; }
     }
-    if (mx_changed) { mx_changed = 0; fr_save_sends(); }        /* aux sends: saved at the next key event */
+    { extern uint8_t fr_send_dirty;                             /* aux sends (encoder or MIDI): saved at the next key event */
+      if (mx_changed || fr_send_dirty) { mx_changed = 0; fr_send_dirty = 0; fr_save_sends(); } }
     { extern void scale_flush(void), fxroute_flush(void), settings_flush(void);   /* page settings, likewise */
       scale_flush(); fxroute_flush(); settings_flush(); }
     if (code >= 0x3B && code <= 0x3E && fr_src == 2 && CUR_SCREEN_ID == MIXER_SCREEN_ID) {   /* press: pan / aux */
@@ -1052,70 +1058,11 @@ void key_event_hook(int code, int pressed)
     eu_sync_screen();                                            /* mode / sequencer may have changed */
 }
 
-/* MIDI CC -> key / encoder events (docs/11 §9). Runs in midi_poll (PlayerManager::tick), not the KeyHandler thread,
- * so events go where the key-scan ISR 0xFFA04A44 puts them: keys into the stock key queue (s_key_queue, u16
- * code | pressed << 8, 256 entries), encoder ticks into the accumulators 0x01DD5250[4] (KeyHandler::on_knob, 2 ticks
- * per detent), interrupts off while writing; then the KeyHandler semaphore is posted (0x019C2F04, as the ISR does).
- * Keys: CC = keycode + 5 like COM CTRL mode, value >= 64 = press. Encoders: CC 102..105 relative (1..63 up,
- * 65..127 down, 7-bit two's complement like CTRL relative mode); CC 1..4 stay with the MIDI LFO. */
-static const uint8_t midi_key_ok[] = {               /* key codes 0..0x2F reachable over MIDI (no keyboard keys) */
-    1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,                 /* help metro synth drum tape mixer T1-T4 lift drop scissors */
-    1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,                 /* 1..5, sequencer */
-    0,1,1,1,1,1,1,0,0,0,0,1,1,1,1,1};                /* rec play stop left right shift, mic com, 6..8 */
-static uint8_t midi_key_down[sizeof midi_key_ok];    /* only send state changes */
-
-/* absolute CC -> live mixer / tape words (docs/11 §9). The DSP and the mixer / tape screens read these words
- * directly; ranges come from the firmware's own {min, max, step} int16 tables, as the encoders use them
- * (0x01A1DE68): mixer 0xFF8018CC[8] (vol 0..3, pan 4..7), tape 0x01DE56F8[3] (rec level). */
-static void midi_set_ranged(volatile int16_t *dst, const volatile int16_t *rng, int v)
-{
-    int lo = rng[0], hi = rng[1];
-    if (hi > lo) *dst = lo + (hi - lo) * v / 127;
-}
-
-static void midi_cc_mixer(int cc, int v)
-{
-    int t = (cc - 106) & 3;
-    if (cc < 110)                                                 /* 106..109: track 1..4 volume */
-        midi_set_ranged((volatile int16_t *)0xFF801928 + t, (volatile int16_t *)0xFF8018CC + t * 3, v);
-    else if (cc < 114) {                                          /* 110..113: pan, 64 = centre */
-        const volatile int16_t *r = (volatile int16_t *)0xFF8018CC + (4 + t) * 3;
-        int p = (v - 64) * 0x4000 / 63;                           /* stock pan range is -0x4000..0x4000 */
-        if (r[1] > r[0]) *((volatile int16_t *)0xFF801930 + t) = p < r[0] ? r[0] : p > r[1] ? r[1] : p;
-    } else if (cc < 118) {                                        /* 114..117: mute, as T1..T4 on the mixer page */
-        ((volatile uint8_t *)0xFF8010A0)[t] = v >= 64;
-        ((void (*)(void))0x01967ED0)();                           /* Core: mute words for the DSP */
-    } else                                                        /* 118: tape input (rec) level, red encoder */
-        midi_set_ranged((volatile int16_t *)0x01B4EF6E, (volatile int16_t *)0x01DE56F8 + 3 * 3, v);
-}
-
+/* MIDI CCs (docs/60): keys and params groups are routed from the raw packets (midi/ccmap.c, called in du_rx_poll
+ * before the stock parser); what reaches the stock CC handler here is the stock part (CC table / MIDI LFO). */
 void midi_cc_hook(void *vec)
 {
     ((void (*)(void *))0x01A84F8C)(vec);                         /* stock: CC table (MIDI LFO) */
-    const uint8_t *m = *(const uint8_t **)((char *)vec + 4);     /* status, cc, value (size asserted by stock) */
-    extern int mx_cc(int cc, int v);
-    if (mx_cc(m[1], m[2])) return;                               /* synth automation CCs (midi/mx.c, docs/41) */
-    int code = m[1] - 5, v = m[2], down = v >= 64, knob = m[1] - 102;
-    unsigned imask;
-    if (m[1] >= 106 && m[1] <= 118) { midi_cc_mixer(m[1], v); return; }
-    if (knob >= 0 && knob < 4) {
-        if (!(v & 63)) return;                                   /* 0 / 64: no movement */
-        volatile int32_t *acc = (volatile int32_t *)0x01DD5250 + knob;
-        __asm__ volatile ("cli %0;" : "=d"(imask));
-        *acc += (v < 64 ? v : v - 128) * 2;
-        __asm__ volatile ("sti %0;" : : "d"(imask));
-    } else {
-        if (code < 0 || code >= (int)sizeof midi_key_ok || !midi_key_ok[code] || midi_key_down[code] == down) return;
-        if (du_prompt_active()) return;                          /* security: only physical keys confirm an update */
-        midi_key_down[code] = down;
-        volatile uint32_t *rd = (volatile uint32_t *)0x01DD5244, *wr = (volatile uint32_t *)0x01DD5248;
-        __asm__ volatile ("cli %0;" : "=d"(imask));
-        uint32_t w = *wr, n = (w + 1) & 0xFF;
-        if (n != *rd && !*(volatile uint8_t *)0x01DD524D)       /* full or ISR mid-push: drop the event */
-            ((volatile uint16_t *)0x01DD5044)[w] = code | down << 8, *wr = n;
-        __asm__ volatile ("sti %0;" : : "d"(imask));
-    }
-    ((void (*)(void))0x019C2F04)();                               /* wake KeyHandler::process_queue */
 }
 
 /* MIDI START: CALL 0x01A5E7D0 (reset beat counters) in midi_rx_parse's FA branch (0x019E39D6) -> here (docs/11 §5).
@@ -1170,6 +1117,7 @@ static int eng_turn_word(int n, int knob)
 
 void knob_event_hook(int knob, int16_t *delta)
 {
+    { extern void cc_fb_knob(int, int); cc_fb_knob(knob, *delta); }   /* CC feedback (midi/ccmap.c) */
     if (knob >= 0 && knob < 4 && se_is_open()) { se_knob(knob, *delta); return; }   /* sample editor */
     if (dpu_knob(knob, *delta)) return;                          /* drum+ pages (pitch / volume: stock) */
     if (spc_knob(knob, *delta)) return;                          /* sampler+ pages */

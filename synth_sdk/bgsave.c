@@ -19,7 +19,10 @@ uint32_t bgs_host_now; int bgs_host_jobs[16], bgs_host_njobs;
 #define QUEUE(kind, s)  (bgs_host_jobs[bgs_host_njobs++ & 15] = (kind) * 8 + (s))
 static uint32_t irq_off(void) { return 0; }
 static void irq_on(uint32_t m) { (void)m; }
+uint32_t bgs_host_gc_calls;
+#define BG_GC(path)     (bgs_host_gc_calls++)
 #else
+#define BG_GC(path)     ((void (*)(int))0x01A9AC48)(path)  /* yaffs_do_background_gc */
 extern void bgs_queue_stock(int is_drum, int slot);         /* hook.S: the stock queue call (LINK + 0x019411BC) */
 #define NOW()           op1_cycles()
 #define QUEUE(kind, s)  bgs_queue_stock((kind), (s))
@@ -49,4 +52,18 @@ void bgs_flush(void)                                        /* queue the waiting
 void bgs_service(void)                                      /* main loop: after a quiet period */
 {
     if (bgs_pending && NOW() - bgs_last >= BGS_QUIET) bgs_flush();
+}
+
+/* Idle yaffs background GC (docs/58). Stock: every main-loop pass with no work calls yaffs_do_background_gc
+ * (~250/s); each call rescans every block (find_oldest_dirty_seq caches nothing when nothing is dirty) = 2.8 % CPU.
+ * Replaces that CALL at 0x019F0C46: at most every BGS_GC_GAP. Writes still run their own GC when they need space. */
+#define BGS_GC_GAP 40000000u                                /* cycles: 100 ms at 400 MHz */
+static uint32_t bgs_gc_last;
+
+void bgs_idle_gc(int path)
+{
+    uint32_t now = NOW();
+    if (now - bgs_gc_last < BGS_GC_GAP) return;
+    bgs_gc_last = now;
+    BG_GC(path);
 }

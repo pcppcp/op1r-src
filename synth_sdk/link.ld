@@ -65,6 +65,7 @@ SECTIONS {
   .hook_sqlcache 0x0196F942 : { KEEP(*(.hook_sqlcache)) }
   .hook_taperase 0x0191B9F0 : { KEEP(*(.hook_taperase)) }
   .hook_tapesave 0x01A54842 : { KEEP(*(.hook_tapesave)) }
+  .hook_tapeflush 0x019F0BE2 : { KEEP(*(.hook_tapeflush)) }
   .hook_lander1 0x01A3BDB0 : { KEEP(*(.hook_lander1)) }
   .hook_lander2 0x019C35F0 : { KEEP(*(.hook_lander2)) }
   .hook_lander3 0x019C369C : { KEEP(*(.hook_lander3)) }
@@ -76,6 +77,7 @@ SECTIONS {
   .hook_spadsr 0x01912128 : { KEEP(*(.hook_spadsr)) }
   .hook_frsnap 0x019C9D04 : { KEEP(*(.hook_frsnap)) }
   .hook_bgsqueue 0x019411B8 : { KEEP(*(.hook_bgsqueue)) }
+  .hook_bgsgc 0x019F0C46 : { KEEP(*(.hook_bgsgc)) }
   .hook_dpload 0x01A04BC0 : { KEEP(*(.hook_dpload)) }
   .hook_dpbrowse 0x01977900 : { KEEP(*(.hook_dpbrowse)) }
   .hook_usbbuf1 0x01A69730 : { KEEP(*(.hook_usbbuf1)) }

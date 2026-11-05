@@ -10,8 +10,8 @@ EXTRA = {                                   # test -> extra sources (relative to
     'chord': ['chord/ch_core.c'], 'dddd': ['dddd/dd_core.c'], 'dddd_plugin': ['dddd/dd_core.c'],
     'devupd': ['devupd/du.c'], 'dp_plus': ['drumplus/dp_plus.c', 'drumplus/dp_voice.c'],
     'dp_ui': ['drumplus/dp_plus.c', 'drumplus/dp_voice.c'], 'erase': ['tape/erase.c'],
-    'mseq': ['seqdev/ms_core.c'], 'oblique': ['harness/build/oblique_data.c'], 'mx': ['midi/mx.c'], 'overlay': ['screens/overlay.c'],
-    'rnd': ['rnd/rn_core.c'], 'safewrite': ['tape/safewrite.c'], 'steve': ['steve/st_core.c'],
+    'mseq': ['seqdev/ms_core.c'], 'oblique': ['harness/build/oblique_data.c'], 'mx': ['midi/mx.c'], 'ccmap': ['midi/ccmap.c', 'midi/mx.c', 'screens/op1r_settings.c'], 'overlay': ['screens/overlay.c'],
+    'rnd': ['rnd/rn_core.c'], 'pclk': ['midi/pclk.c', 'screens/op1r_settings.c'], 'safewrite': ['tape/safewrite.c'], 'steve': ['steve/st_core.c'],
     'usbtrack': ['screens/usbtrack.c'], 'op1p': ['plugload/op1p_load.c'],
 }
 def _plugins():                                 # op1p_test: every built plugin file (make_plugin.py / make_firmware.py)

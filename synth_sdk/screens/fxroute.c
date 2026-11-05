@@ -20,15 +20,15 @@ uint8_t fr_out;                                             /* instrument / aux:
 uint8_t fr_send[4];                                         /* aux sends 0..100 */
 volatile uint8_t fr_aux_live;                               /* aux with a send up: track outs needed */
 extern int16_t tr_out[4][64];
-/* the routing is used only by our master FX wrapper (dispatcher.c fx_render_stereo): master FX on and of the plugin
- * type (5). With a stock master FX or the FX off, no copies and no track work (5-7 % CPU with aux) */
+/* the routing runs in every master FX's render (plugins: dispatcher.c fx_render_stereo; stock: the fr_st_* wrappers
+ * below). With the master FX off: no copies and no track work (5-7 % CPU with aux) */
 #ifdef OP1_HOST
 uint8_t fr_host_mfx = 1;
-#define MFX_PLUGIN() fr_host_mfx
+#define MFX_ON() fr_host_mfx
 #else
-#define MFX_PLUGIN() (*(volatile uint8_t *)0x01AAAC40 && *(volatile int *)0xFF801090 == 5)
+#define MFX_ON() (*(volatile uint8_t *)0x01AAAC40)
 #endif
-int fr_tracks_needed(void) { return fr_aux_live && MFX_PLUGIN(); }   /* screens/usbtrack.c: the track work */
+int fr_tracks_needed(void) { return fr_aux_live && MFX_ON(); }   /* screens/usbtrack.c: the track work */
 static void fr_live(void) { fr_aux_live = fr_src == 2 && (fr_send[0] | fr_send[1] | fr_send[2] | fr_send[3]); }
 static int16_t fr_snl[64], fr_snr[64], fr_il[64], fr_ir[64];
 static volatile uint8_t fr_snapped, fr_have;
@@ -73,7 +73,7 @@ void fr_snap(void)                                          /* audio ISR, after 
 #ifndef OP1_HOST
     *(volatile uint8_t *)0x01DD591E = 0;                    /* the stock body of 0x019C9D04 */
 #endif
-    if (fr_src != 1 || !MFX_PLUGIN()) return;
+    if (fr_src != 1 || !MFX_ON()) return;
     for (int i = 0; i < 64; i++) { fr_snl[i] = TAPE_L[i]; fr_snr[i] = TAPE_R[i]; }
     fr_snapped = 1;
 }
@@ -184,6 +184,14 @@ static void fr_load(void)
 static void fr_save(void) { op1r_setting_put("mfxsrc", fr_code()); }
 void fr_save_sends(void) { op1r_setting_put("auxsend", fr_sends_code()); }   /* KeyHandler thread */
 
+uint8_t fr_send_dirty;                                       /* set by MIDI: saved at the next key event (dispatcher.c) */
+void fr_set_send(int t, int v)                               /* MIDI params CC 114..117 (midi/mx.c), KeyHandler thread */
+{
+    if (t < 0 || t > 3) return;
+    fr_send[t] = (uint8_t)(v < 0 ? 0 : v > 100 ? 100 : v);
+    fr_live(); fr_send_dirty = 1;
+}
+
 static int32_t sacc[4];
 void fr_send_turn(int t, int delta)                         /* mixer T1, encoder held + turned: send 0..100 */
 {
@@ -238,3 +246,12 @@ static void fr_update(void *scr, int dt)
     sf_text(r, FR_LX, FR_Y3, FR_S, fr_out ? "MONO TAPE" : "STEREO MASTER", FR_W, c_green);
 }
 const op1_screen_t SCREEN_fxroute = { fr_init, fr_update };
+
+#ifndef OP1_HOST
+/* stock master FX: their stereo render slots (make_firmware.py DATA_PATCHES) call these; the FX itself unchanged */
+typedef void (*fr_fx)(void *, int16_t *, int16_t *, const int16_t *);
+#define FR_ST(name, orig) \
+    void fr_st_##name(void *self, int16_t *l, int16_t *r, const int16_t *p) { fr_route((fr_fx)(orig), self, l, r, p); }
+FR_ST(delay, 0x0197DC42) FR_ST(grid, 0x019AF83C) FR_ST(punch, 0x019E662C) FR_ST(phone, 0x01A1C25C)
+FR_ST(spring, 0x01A32FFC) FR_ST(nitro, 0x019A684C) FR_ST(cwo, 0x019450FC)
+#endif
