@@ -9,7 +9,8 @@
  *   bits 0..119   4 LFOs x 30 bits, LFO i at bit 30 i:  rate 6 | sync 1 | wave 3 | smooth 3 | offset 3 | type 3 |
  *                 target 5 | amount 6 (+32)
  *                 rate 0..63: free 0.05 .. 20 Hz (exponential), sync: tempo division index (QL_DIVS)
- *                 wave 0 sine, 1 triangle, 2 ramp up, 3 ramp down, 4 square, 5 sample & hold
+ *                 wave 0 sine, 1 triangle, 2 ramp up, 3 ramp down, 4 square, 5 sample & hold, 6 lorenz x, 7 lorenz z
+ *                 (Lorenz attractor, docs/62: one wing loop per cycle, the offset field is the chaos rho 28 .. 14)
  *                 smooth 0..7: one-pole slew, 2^smooth blocks; offset 0..7: start phase in 1/8 cycles
  *                 amount -31..31 (full = +-32767); type see QT_*
  *                 target 0..11: synth (drum) knob blue..red, envelope A D S R, FX knob blue..red;
@@ -119,7 +120,7 @@ static const char *const ql_type_name[QT_N] = { "VOIC", "FREE", "GATE", "MONO", 
 #define QL_MARK 0xA5
 
 typedef struct { uint8_t wave, sync, smooth, off, rate, type, tgt, tl, tk; int8_t amt; int16_t a128; uint32_t inc, phoff; } ql_lfo;
-typedef struct { uint32_t ph, cnt; int16_t val, rnd; uint8_t done; } ql_st;
+typedef struct { uint32_t ph, cnt; int16_t val, rnd; uint8_t done; int32_t lx, ly, lz; } ql_st;   /* lx..lz: Lorenz, Q16 (lz 0 = start) */
 static inline int ql_is_lfo(const ql_lfo *o) { return o->tgt >= 12 && o->tgt < QL_P2; }   /* LFO -> LFO target */
 static inline int ql_p2(const ql_lfo *o) { return o->tgt >= QL_P2; }                      /* page-2 word 5 + k */
 /* page-2 word (5..7) of a plugin engine / FX: + mod, 0..32767 (engine words: 0 = unset = 8192, kept >= 1) */
@@ -199,6 +200,31 @@ static int32_t ql_shape(int wave, uint32_t phase, uint32_t cnt, int i)
     default: return OP1_SINE_TABLE[phase >> 19];                  /* sin(2 pi phase / 2^32) */
     }
 }
+/* Lorenz attractor (docs/62): dx = 10 (y - x), dy = x (rho - z) - y, dz = x y - 8/3 z; state Q16, products from Q8
+ * copies (no 64-bit multiply). adv = phase advance of this step (2^32 = one LFO cycle = one wing loop ~ 0.7 time
+ * units); Euler sub-steps of <= 0.01, at most 16 (faster: slowed down). rho_k 0..7 = 28 .. 14 (from 24 down it settles into a wing,
+ * faster the lower). Returns Q15. */
+#define QL_L1 65536
+static int32_t ql_lorenz(ql_st *s, uint32_t adv, int rho_k, int out_z, int rnd_start)
+{
+    if (!s->lz || s->lx > 100 * QL_L1 || s->lx < -100 * QL_L1 || s->ly > 100 * QL_L1 || s->ly < -100 * QL_L1 ||
+        s->lz > 100 * QL_L1 || s->lz < 0) {                          /* start / runaway (products stay in 32 bit) */
+        s->lx = QL_L1 + (rnd_start ? (s->rnd & 0x3FFF) * 16 : 0); s->ly = QL_L1; s->lz = 20 * QL_L1;
+    }
+    uint32_t dt = (uint32_t)(((adv >> 8) * 179u) >> 16);          /* time units Q16: adv / 2^32 * 0.7 * 2^16 */
+    int n = (int)((dt + 654) / 655);                                /* sub-steps of <= 0.01 */
+    if (n > 16) { n = 16; dt = 16 * 655; }
+    int32_t h = n ? (int32_t)(dt / (uint32_t)n) : 0, rho = (28 * 256) - rho_k * 512;   /* Q8: 28 .. 14 */
+    int32_t x = s->lx, y = s->ly, z = s->lz;
+    for (int k = 0; k < n; k++) {
+        int32_t xs = x >> 8, ys = y >> 8, zs = z >> 8;
+        int32_t dx = 10 * (y - x), dy = xs * (rho - zs) - y, dz = xs * ys - ((z >> 8) * 683);
+        x += ((dx >> 8) * h) >> 8; y += ((dy >> 8) * h) >> 8; z += ((dz >> 8) * h) >> 8;
+    }
+    s->lx = x; s->ly = y; s->lz = z;
+    int32_t v = out_z ? (((z - 24 * QL_L1) >> 4) * 1638) >> 12 : ((x >> 4) * 1638) >> 12;   /* x / 20, (z - 24) / 20 */
+    return v > 32767 ? 32767 : v < -32767 ? -32767 : v;
+}
 /* one-pole slew towards x; k = elapsed blocks Q16 */
 static int16_t ql_slew(int16_t y, int32_t x, int sm, uint32_t k)
 {
@@ -229,7 +255,7 @@ static void ql_dec(const int16_t *w, int i, ql_lfo *o)
     }
     int b = 30 * i;
     o->rate = (uint8_t)ql_get(w, b, 6); o->sync = (uint8_t)ql_get(w, b + 6, 1);
-    o->wave = (uint8_t)clampq((int)ql_get(w, b + 7, 3), 0, 5); o->smooth = (uint8_t)ql_get(w, b + 10, 3);
+    o->wave = (uint8_t)ql_get(w, b + 7, 3); o->smooth = (uint8_t)ql_get(w, b + 10, 3);
     o->off = (uint8_t)ql_get(w, b + 13, 3); o->type = (uint8_t)clampq((int)ql_get(w, b + 16, 3), 0, QT_N - 1);
     o->tgt = (uint8_t)clampq((int)ql_get(w, b + 19, 5), 0, QL_NTGT - 1);
     int lt = o->tgt >= 12 && o->tgt < QL_P2;
@@ -275,14 +301,16 @@ static inline int ql_shared(int pos, const ql_lfo *o) { return pos || ql_group(o
 static void ql_step(ql_st *s, const ql_lfo *o, uint32_t k, int i)
 {
     int32_t x;
-    if (o->type == QT_RAND) x = s->rnd;
+    if (o->type == QT_RAND && o->wave < 6) x = s->rnd;               /* RAND: held value; Lorenz: a random start */
     else {
+        uint32_t adv = 0;
         if (!(o->type == QT_1SHT && s->done)) {
-            uint32_t n = s->ph + (k == 65536 ? o->inc : ql_mulq16(o->inc, k));
+            adv = k == 65536 ? o->inc : ql_mulq16(o->inc, k);
+            uint32_t n = s->ph + adv;
             if (n < s->ph) { s->cnt++; if (o->type == QT_1SHT) { s->done = 1; n = 0xFFFFFFFFu; } }
             s->ph = n;
         }
-        x = ql_shape(o->wave, s->ph + o->phoff, s->cnt, i);
+        x = o->wave >= 6 ? ql_lorenz(s, adv, o->off, o->wave == 7, o->type == QT_RAND) : ql_shape(o->wave, s->ph + o->phoff, s->cnt, i);
     }
     s->val = ql_slew(s->val, x, o->smooth, k);
 }
@@ -290,6 +318,7 @@ static void ql_restart(ql_st *s)
 {
     s->ph = 0; s->done = 0; s->cnt++;
     ql_rng = ql_rng * 1664525u + 1013904223u; s->rnd = (int16_t)(ql_rng >> 16);
+    s->lz = 0;                                                       /* Lorenz: from the start point again */
 }
 
 /* elapsed time since `since` in blocks, Q16 (capped at 64 blocks: no jumps after long pauses) */
@@ -493,7 +522,7 @@ void ql_turn(int16_t *w, int pos, int knob, int delta, int shift)
     } else switch (knob) {
         case 0: o.off = (uint8_t)wrapq(o.off + st, 8); break;
         case 1: o.smooth = (uint8_t)clampq(o.smooth + st, 0, 7); break;
-        case 2: o.wave = (uint8_t)clampq(o.wave + st, 0, 5); break;
+        case 2: o.wave = (uint8_t)clampq(o.wave + st, 0, 7); break;
         default:
             if (st > 0 && !o.sync) { o.sync = 1; o.rate = 4; }    /* sync on: 1/4 */
             else if (st < 0 && o.sync) { o.sync = 0; o.rate = 31; }   /* free: ~1 Hz */
@@ -534,15 +563,19 @@ static void ql_hz_text(char *t, uint32_t inc)
 static void ql_wave_glyph(void *r, int wave, int32_t x, int32_t y, const uint8_t *c)
 {
     static const int8_t sh[4] = { 4, -3, 6, -5 };                  /* sample & hold: fixed steps */
+    static const int8_t lor[2][25] = {                               /* a real Lorenz x / z stretch (docs/62), px */
+        { 4, 4, 2, 1, 0, 0, 0, 0, -1, -1, -2, -4, -5, -4, -2, 0, 1, 1, 2, 2, 3, 4, 4, 3, 2 },
+        { 3, 4, 3, 1, 0, -1, -2, -3, -4, -4, -3, -1, 4, 5, 3, 1, 0, -1, -2, -1, 0, 2, 3, 3, 1 } };
     int32_t px = 0, py = 0;
     for (int k = 0; k <= 24; k++) {
         uint32_t a = (uint32_t)k * (0xFFFFFFFFu / 24);
-        int32_t v = wave == 5 ? sh[k < 24 ? k / 6 : 3] * 5000 : ql_shape(wave, a, 0, 0);
+        int32_t v = wave >= 6 ? lor[wave - 6][k] * 5461 : wave == 5 ? sh[k < 24 ? k / 6 : 3] * 5000 : ql_shape(wave, a, 0, 0);
         if (wave == 2 || wave == 3) v = (wave == 2 ? 2 : -2) * ((int32_t)(a >> 17) - 16384);   /* ramps without the wrap */
         int32_t nx = x + OP1_Q10(k), ny = y - (v * OP1_Q10(6) >> 15);
         if (k) {
-            if (wave >= 4 && ny != py) qline(r, px, py, px, ny, 0x400, c);              /* vertical edges */
-            qline(r, px, wave >= 4 ? ny : py, nx, ny, 0x400, c);
+            int step = wave == 4 || wave == 5;
+            if (step && ny != py) qline(r, px, py, px, ny, 0x400, c);                   /* vertical edges */
+            qline(r, px, step ? ny : py, nx, ny, 0x400, c);
         }
         px = nx; py = ny;
     }
@@ -560,7 +593,8 @@ static void ql_table(void *r, const int16_t *w, int sel)
         qline(r, OP1_Q10(QL_LANE_MID), y - OP1_Q10(5), OP1_Q10(QL_LANE_MID), y + OP1_Q10(5), 0x600, black);
         if (i == sel)
             qline(r, OP1_Q10(QL_DOT_X - 7), y + OP1_Q10(10), OP1_Q10(QL_DOT_X + 7), y + OP1_Q10(10), 0x600, ql_col[i]);
-        ql_num(t, o.off * 45);
+        if (o.wave >= 6) { t[0] = 'R'; ql_num(t + 1, 28 - 2 * o.off); }   /* Lorenz: chaos rho */
+        else ql_num(t, o.off * 45);
         sf_text(r, OP1_Q10(QT_OFF_X), ty, OP1_Q10(2), t, 0x400, ql_col[0]);
         ql_num(t, o.smooth);
         sf_text(r, OP1_Q10(QT_SMOOTH_X), ty, OP1_Q10(2), t, 0x400, ql_col[1]);

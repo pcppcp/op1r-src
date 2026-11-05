@@ -81,6 +81,41 @@ int main(int argc, char **argv)
     CHECK(fabs(fmid - 1.0) / 1.0 < 0.03, "mid freq %.3f (expected 1 Hz)", fmid);
     for (int x = 0; x < 32767; x += 97) CHECK(ql_inc(x + 97) >= ql_inc(x), "freq not monotonic at %d", x);
 
+    {   /* Lorenz waveforms (docs/62): bounded, deterministic, chaotic at rho 28, settles at rho 20, restart repeats */
+        uint32_t fast = ql_inc(32767) * 4;                           /* 20 Hz x 4 (LFO -> LFO frequency at full) */
+        for (int rk = 0; rk < 8; rk++) {
+            ql_st s = { 0 }; int ok = 1;
+            for (long b = 0; b < 10L * 60 * 345; b++) { int32_t v = ql_lorenz(&s, fast, rk, b & 1, 0);
+                ok &= v >= -32767 && v <= 32767 && s.lz > 0 && s.lx > -60 * QL_L1 && s.lx < 60 * QL_L1; }
+            CHECK(ok, "lorenz rho_k %d: out of bounds after 10 min at full speed", rk);
+        }
+        uint32_t inc1 = ql_inc(16384);                               /* 1 loop per second */
+        ql_st a = { 0 }, c = { 0 }; int same = 1, flips = 0, prev = 0;
+        for (int b = 0; b < 345 * 100; b++) {                        /* 100 s */
+            int32_t va = ql_lorenz(&a, inc1, 0, 0, 0), vc = ql_lorenz(&c, inc1, 0, 0, 0);
+            same &= va == vc;
+            int sg = va > 3000 ? 1 : va < -3000 ? -1 : prev;
+            if (prev && sg != prev) flips++;
+            prev = sg;
+        }
+        CHECK(same, "lorenz not deterministic");
+        CHECK(flips > 10 && flips < 90, "rho 28: %d wing jumps in ~100 loops (want irregular, some dozens)", flips);
+        ql_st q = { 0 }; int32_t lo = 99999, hi = -99999;
+        for (int b = 0; b < 345 * 120; b++) { int32_t v = ql_lorenz(&q, inc1, 7, 0, 0); if (b > 345 * 100) { if (v < lo) lo = v; if (v > hi) hi = v; } }
+        CHECK(hi - lo < 1500, "rho 14 settles: last 20 s spread %d", hi - lo);
+        ql_st r1 = { 0 }; int32_t first[50]; int rep = 1;
+        for (int b = 0; b < 50; b++) first[b] = ql_lorenz(&r1, inc1, 0, 0, 0);
+        for (int b = 0; b < 2000; b++) ql_lorenz(&r1, inc1, 0, 0, 0);
+        ql_restart(&r1);
+        for (int b = 0; b < 50; b++) rep &= ql_lorenz(&r1, inc1, 0, 0, 0) == first[b];
+        CHECK(rep, "lorenz restart does not repeat the path");
+        int16_t lw[8] = { 0 }; ql_lfo o; ql_dec(lw, 0, &o);
+        for (int k = 0; k < 9; k++) ql_turn(lw, 0, 2, 1024, 1);       /* Shift + white: waveform up past the end */
+        ql_dec(lw, 0, &o);
+        CHECK(o.wave == 7, "waveform turn reaches lorenz z (%d)", o.wave);
+        int16_t uv = lw[0]; (void)uv;
+    }
+
     /* detection: packed words, midi defaults not */
     int16_t midi_def[8] = { 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000 };
     CHECK(!ql_is_quad(midi_def), "midi defaults detected as quad");
@@ -277,7 +312,13 @@ int main(int argc, char **argv)
           { fq(25,0,0,0,0), fq(36,0,0,0,0), fq(18,0,0,0,0), fq(44,0,0,0,0),
             ct(QT_FREE, 24 + 1, 25), ct(QT_VOICE, 1, 20), ct(QT_FREE, 27 + 2, -18), ct(QT_FREE, 10, 31) }, 55 },
         { "SHIFT: offset / smoothing / waveform / sync; LFO2 selected", 0, 1, { fq(30,0,0,0,0), fq(7,1,1,2,2), fq(50,4,0,5,4), fq(63,5,0,0,7),
-          ct(QT_FREE, 0, 25), ct(QT_GATE, 4, -12), ct(QT_MONO, 11, 31), ct(QT_1SHT, 6, 18) }, 60 } };
+          ct(QT_FREE, 0, 25), ct(QT_GATE, 4, -12), ct(QT_MONO, 11, 31), ct(QT_1SHT, 6, 18) }, 60 },
+        { "lorenz: LFO1 x (rho 28) -> knob b, LFO2 z (rho 28) -> fx g, LFO3 x (rho 20) GATE -> env A, LFO4 sine", 0, 0,
+          { fq(36,6,0,0,0), fq(30,7,0,0,0), fq(40,6,0,0,4), fq(31,0,0,0,0),
+            ct(QT_FREE, 0, 28), ct(QT_FREE, 9, 24), ct(QT_GATE, 4, 20), ct(QT_VOICE, 3, 10) }, 400 },
+        { "SHIFT: lorenz x R28, lorenz z R24, lorenz x R14, sine 90 deg", 0, 0,
+          { fq(36,6,0,0,0), fq(30,7,0,1,2), fq(40,6,0,0,7), fq(31,0,0,0,2),
+            ct(QT_FREE, 0, 28), ct(QT_FREE, 9, 24), ct(QT_GATE, 4, 20), ct(QT_VOICE, 3, 10) }, 60 } };
     host_tempo_rate = 1662149u * 120;
     ql_screen_init(0);
     for (unsigned k = 0; k < sizeof st / sizeof st[0]; k++) {
