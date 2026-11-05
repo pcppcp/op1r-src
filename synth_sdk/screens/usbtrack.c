@@ -60,6 +60,8 @@ void tr_resample(int32_t pos, int32_t inc, const int16_t *gain_inc)
         }
     }
     tr_rec[0] = 0;
+    extern volatile uint8_t sc_blk, tr_at;
+    tr_at = (uint8_t)(sc_blk + 1);                         /* fresh for the block fr_snap counts next */
     for (int t = 0; t < TR_N; t++) {
         int16_t *o = tr_out[t];
         int peak = 0;

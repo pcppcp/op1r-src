@@ -112,6 +112,7 @@ extern int se_is_open(void);                                    /* screens/sampe
 static const struct { const char *name; void *addr; } exports[] = {
     { "op1_eng_page", (void *)op1_eng_page }, { "op1_fx_page", (void *)op1_fx_page },
     { "read_fx_param_safe", (void *)read_fx_param_safe },
+    { "op1_sc_source", (void *)op1_sc_source },
     { "sq_line", (void *)sq_line }, { "sq_text", (void *)sq_text }, { "sq_num", (void *)sq_num },
     { "sq_cat", (void *)sq_cat }, { "sq_node_rotate", (void *)sq_node_rotate },
     { "sq_synth_knobs_live", (void *)sq_synth_knobs_live }, { "sq_fx_knobs_live", (void *)sq_fx_knobs_live },

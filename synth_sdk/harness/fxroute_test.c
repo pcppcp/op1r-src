@@ -102,6 +102,23 @@ int main(int argc, char **argv)
     for (int i = 0; i < 40; i++) fr_send_turn(0, 1024);                            /* track 1 send 40 */
     assert(fr_send[0] == 40 && fr_aux_live);
     fr_send_turn(1, 1024 * 200); assert(fr_send[1] == 100);                        /* clamped */
+    {   /* sidechain sources (op1_sc_source, docs/61) */
+        int16_t o[64];
+        sc_want = 0; uint8_t fx_was = fr_src; fr_src = 0;
+        tr_at = (uint8_t)(sc_blk + 1); fr_snap();                       /* track outs fresh for this block */
+        for (int i = 0; i < 64; i++) { tr_out[0][i] = 1000; tr_out[1][i] = 2000; tr_out[2][i] = 30000; tr_out[3][i] = 30000; fr_host_input[i] = (int16_t)i; fr_host_bus[i] = -5; }
+        assert(op1_sc_source(OP1_SC_T2, o) == 1 && o[7] == 2000 && sc_want == 32);
+        assert(op1_sc_source(OP1_SC_TAPE, o) == 1 && o[0] == 32767);   /* sum saturates */
+        assert(op1_sc_source(OP1_SC_IN, o) == 1 && o[9] == 9);
+        assert(op1_sc_source(OP1_SC_INST, o) == 1 && o[3] == -5);
+        assert(op1_sc_source(0, o) == 0 && o[0] == 0 && op1_sc_source(99, o) == 0);
+        assert(fr_tracks_needed());                                     /* asked: the track work runs */
+        fr_snap();                                                      /* next block, no fresh track outs */
+        assert(op1_sc_source(OP1_SC_T1, o) == 0 && o[5] == 0);
+        for (int b = 0; b < 40; b++) fr_snap();
+        assert(!fr_tracks_needed() || fr_aux_live);                     /* not asked for 32 blocks: stops */
+        fr_src = fx_was;
+    }
     { extern uint8_t fr_host_mfx; fr_host_mfx = 0; assert(!fr_tracks_needed()); fr_host_mfx = 1; assert(fr_tracks_needed()); }   /* master FX off: no track work */
     fr_send_turn(1, -1024 * 50); assert(fr_send[1] == 50);
     fr_host_mute[1] = 0;                                                           /* track 2 muted: no send */

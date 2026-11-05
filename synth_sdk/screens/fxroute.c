@@ -28,7 +28,9 @@ uint8_t fr_host_mfx = 1;
 #else
 #define MFX_ON() (*(volatile uint8_t *)0x01AAAC40)
 #endif
-int fr_tracks_needed(void) { return fr_aux_live && MFX_ON(); }   /* screens/usbtrack.c: the track work */
+volatile uint8_t sc_want;                                   /* sidechain asked for track outs: blocks left (op1_sc_source) */
+volatile uint8_t sc_blk, tr_at;                             /* block counter (fr_snap) / block of the last track outs */
+int fr_tracks_needed(void) { return (fr_aux_live && MFX_ON()) || sc_want; }   /* screens/usbtrack.c: the track work */
 static void fr_live(void) { fr_aux_live = fr_src == 2 && (fr_send[0] | fr_send[1] | fr_send[2] | fr_send[3]); }
 static int16_t fr_snl[64], fr_snr[64], fr_il[64], fr_ir[64];
 static volatile uint8_t fr_snapped, fr_have;
@@ -36,6 +38,8 @@ static volatile uint8_t fr_snapped, fr_have;
 #ifdef OP1_HOST
 int16_t fr_host_tape[2][64];
 int16_t fr_host_bus[64];
+int16_t fr_host_input[64];
+#define INPUT  fr_host_input
 #define TAPE_L fr_host_tape[0]
 #define TAPE_R fr_host_tape[1]
 #define BUS    fr_host_bus
@@ -59,6 +63,7 @@ int16_t fr_host_vol[4] = { 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF }, fr_host_lev[4] = { 
 #define TAPE_L ((int16_t *)0xFF800D34)
 #define TAPE_R ((int16_t *)0xFF800DB4)
 #define BUS    ((int16_t *)0xFF800BB4)                       /* synth_mix_bus: recorded after Core_mix_master */
+#define INPUT  ((int16_t *)0xFF800CB4)                       /* input block (mic / line / USB), mono, docs/29 */
 /* the record meter (Core_mix_master loop 1): block peak W[0xFF801084] = max |bus x tape level [0x01B4EF6E]|, then
  * the selected track's meter W[0xFF802990 + 2t] += peak if B[0xFF80103C] (0xFFA00FE0..0xFFA01002) */
 #define METER     ((volatile int16_t *)0xFF802990)
@@ -73,6 +78,8 @@ void fr_snap(void)                                          /* audio ISR, after 
 #ifndef OP1_HOST
     *(volatile uint8_t *)0x01DD591E = 0;                    /* the stock body of 0x019C9D04 */
 #endif
+    sc_blk++;                                               /* once per block, after the tape mix (track outs) */
+    if (sc_want) sc_want--;
     if (fr_src != 1 || !MFX_ON()) return;
     for (int i = 0; i < 64; i++) { fr_snl[i] = TAPE_L[i]; fr_snr[i] = TAPE_R[i]; }
     fr_snapped = 1;
@@ -246,6 +253,23 @@ static void fr_update(void *scr, int dt)
     sf_text(r, FR_LX, FR_Y3, FR_S, fr_out ? "MONO TAPE" : "STEREO MASTER", FR_W, c_green);
 }
 const op1_screen_t SCREEN_fxroute = { fr_init, fr_update };
+
+/* Sidechain sources for plugins (docs/61, plugin export): this block's 64 samples of a signal other than the FX's own
+ * input. Tracks are pre-fader (tr_out): asking for them starts the track work, which runs until 32 blocks after the
+ * last ask; until fresh track outs exist (first block) and for an unknown source: zeros, returns 0. */
+int op1_sc_source(int src, int16_t *out)
+{
+    if (src >= OP1_SC_T1 && src <= OP1_SC_TAPE) {
+        sc_want = 32;
+        if (tr_at != sc_blk) { for (int i = 0; i < 64; i++) out[i] = 0; return 0; }
+        if (src != OP1_SC_TAPE) { const int16_t *t = tr_out[src - OP1_SC_T1]; for (int i = 0; i < 64; i++) out[i] = t[i]; }
+        else for (int i = 0; i < 64; i++) out[i] = op1_sat16(tr_out[0][i] + tr_out[1][i] + tr_out[2][i] + tr_out[3][i]);
+        return 1;
+    }
+    const int16_t *b = src == OP1_SC_IN ? INPUT : src == OP1_SC_INST ? BUS : 0;
+    for (int i = 0; i < 64; i++) out[i] = b ? b[i] : 0;
+    return b != 0;
+}
 
 #ifndef OP1_HOST
 /* stock master FX: their stereo render slots (make_firmware.py DATA_PATCHES) call these; the FX itself unchanged */

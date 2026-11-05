@@ -1154,9 +1154,9 @@ void knob_event_hook(int knob, int16_t *delta)
         int wi = pw >= 0 ? pw : knob;
         if ((acc[knob] > 0 && *delta < 0) || (acc[knob] < 0 && *delta > 0)) acc[knob] = 0;
         acc[knob] += *delta;
-        int st = acc[knob] / 2048;                               /* a detent is 2 events of 1024 (emulator) */
+        int st = acc[knob] / 1024;                               /* a step per hardware click (delta 1024), as the FX list knob */
         if (st) {
-            acc[knob] -= st * 2048;
+            acc[knob] -= st * 1024;
             int32_t v = (w[wi] < 0 ? 0 : w[wi]) + st * 4681;     /* 32767 / 7: 8 positions */
             w[wi] = (int16_t)(v < 0 ? 0 : (v > 32767 ? 32767 : v));
             PATCH_SET_KNOBS(PATCH_OBJ(0, *(volatile int *)0xFF8016D4), w);
@@ -1173,6 +1173,28 @@ void knob_event_hook(int knob, int16_t *delta)
         return;
     }
     int e = custom_fx_page();
+    if (e && knob >= 0 && knob < 4 && OP1_PRESS_IS_LIST(op1_fxs[e]->press[knob])) {   /* list knob: an entry per click */
+        static int32_t acc[4];
+        if ((acc[knob] > 0 && *delta < 0) || (acc[knob] < 0 && *delta > 0)) acc[knob] = 0;
+        acc[knob] += *delta;
+        /* one entry per hardware click = delta 1024 (ENTE on the device: entries 656 raw apart needed 2 clicks, the stock
+         * knob moves 656 per 2048); op1emu's "detent" (4 edges) is 2048 = 2 entries */
+        int st = acc[knob] / 1024;
+        if (st) {
+            acc[knob] -= st * 1024;
+            int pos = op1_fx_screen_pos(), n = op1_fxs[e]->press[knob] & 0x3F;
+            int16_t *w = (int16_t *)op1_fx_knobs(pos);
+            const int16_t *rg = (const int16_t *)(0x01DE5C50 + 5 * 0x30 + knob * 6);
+            int32_t lo = rg[0], hi = rg[1];
+            if (hi <= lo) { lo = fx_rng_default[knob][0]; hi = fx_rng_default[knob][1]; }
+            int32_t q = w[knob] <= lo ? 0 : w[knob] >= hi ? 32767 : (w[knob] - lo) * 32767 / (hi - lo);
+            int i = (op1_fx_list(q, n) + st % n + n) % n;
+            w[knob] = op1_fx_list_word(i, n, lo, hi);
+            if (pos != OP1_FX_MASTER)                    /* master: saved from the live words (0x019D9B94) */
+                PATCH_SET_FX(PATCH_OBJ(pos, *(volatile int *)(pos ? 0xFF8016D8 : 0xFF8016D4)), w);
+        }
+        return;
+    }
     if (e && knob >= 0 && knob < 3 && op1_fxs[e]->press[knob] == OP1_PRESS_PAGE) {
         int pos = op1_fx_screen_pos();
         if (op1_fx_page[pos][knob]) {

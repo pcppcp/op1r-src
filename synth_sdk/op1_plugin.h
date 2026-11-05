@@ -162,7 +162,26 @@ typedef struct {
  * State per FX position (0 synth, 1 drum, 2 master): op1_fx_page[pos][k] = 1 while page 2 / latch is on.
  * FX state must be kept per position 0..2 (the master can run the same custom FX as an instrument). */
 enum { OP1_PRESS_NONE = 0, OP1_PRESS_PAGE = 1, OP1_PRESS_LATCH = 2, OP1_PRESS_BROWSE = 3, OP1_PRESS_SHIFT = 4 };   /* BROWSE, SHIFT: synth engines */
+/* FX list knob (press[k] = OP1_PRESS_LIST(n), n 2..63, needs op1r 52+): the core turns the knob one of n entries per
+ * encoder click, wrapping at both ends; the word holds entry i at i / (n - 1) of the knob's range, so patches and
+ * MIDI CCs keep working. Read it with op1_fx_list(op1_fx_param_q15(p, k), n). Older cores: a plain knob. */
+#define OP1_PRESS_LIST(n)   (0x40 | (n))
+#define OP1_PRESS_IS_LIST(v) (((v) & 0xC0) == 0x40)
+static inline int op1_fx_list(int32_t q15, int n)
+{
+    int i = (int)((q15 * (n - 1) + 16384) >> 15);
+    return i < 0 ? 0 : i >= n ? n - 1 : i;
+}
+/* raw word of entry i (the core's step; lo / hi: the knob's raw range) */
+static inline int16_t op1_fx_list_word(int i, int n, int32_t lo, int32_t hi) { return (int16_t)(lo + (i * (hi - lo) + (n - 1) / 2) / (n - 1)); }
 extern volatile uint8_t op1_fx_page[3][4];
+
+/* ---- sidechain sources (core export, docs/61): 64 samples of this block into out, returns 1 if the source has data
+ * (0 and zeros: not available yet / unknown). T1..T4 = tape tracks pre-fader (asking starts the track work, 5-7 % CPU,
+ * first block zeros), TAPE = their sum, IN = the input (mic / line / USB, mono), INST = the instrument bus (mono,
+ * after its FX; meaningful for the master FX). Call from render only, once per block per source. */
+enum { OP1_SC_T1 = 1, OP1_SC_T2, OP1_SC_T3, OP1_SC_T4, OP1_SC_TAPE, OP1_SC_IN, OP1_SC_INST };
+int op1_sc_source(int src, int16_t *out);
 
 /* ---- beat clock (read-only; read it once per render block, never per sample) ----
  * The stock metronome's beat clock (metronome.cpp state at 0x01AADABC; tape/countin.c counts in on it). It runs
