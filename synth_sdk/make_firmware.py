@@ -163,6 +163,8 @@ L1_TRAMP, L1_TRAMP_MAX = 0xFFA0BFB4, 0xFFA0C000 - 0xFFA0BFB4
 FX_SCREEN_SVG = 'fxgeneric.svg'
 QUAD_LFO_SVG = 'display/quadlfo.svg'
 SYSMON_SVG = 'display/sysmon.svg'
+FOX_LFO_SVG = 'display/foxlfo.svg'
+POND_LFO_SVG = 'display/pondlfo.svg'
 USBOUT_SVG = 'display/usbout.svg'
 ITERLAB_SVG = 'display/iterlab.svg'   # stock iter screen (op1repacker iter-lab.svg, MIT)
 # quad LFO defaults (lfo/quadlfo.c: 128-bit stream, LFO i at bit 30 i: rate 6 | sync 1 | wave 3 | smooth 3 | offset 3 |
@@ -174,6 +176,20 @@ def quad_words(lfos):
     bits |= 0xA5 << 120
     return [((bits >> (16 * k)) & 0xFFFF) - (0x10000 if (bits >> (16 * k)) & 0x8000 else 0) for k in range(8)]
 QUAD_LFO_DEFAULTS = quad_words([(19, 0), (31, 1), (42, 2), (54, 3)])
+# fox LFO (docs/63, lfo/quadlfo.c fox_put): rate 31 (~1 Hz), bloom 16, rabbits -> knob b, foxes -> knob g, amounts 0;
+# marker 0xA6 in bits 120..127
+def fox_words(rate=31, bloom=16, tgt=(0, 1)):
+    bits = rate | bloom << 8 | tgt[0] << 18 | tgt[1] << 23 | 32 << 28 | 32 << 34 | 0xA6 << 120
+    return [((bits >> (16 * k)) & 0xFFFF) - (0x10000 if (bits >> (16 * k)) & 0x8000 else 0) for k in range(8)]
+FOX_LFO_DEFAULTS = fox_words()
+FOX_LFO = False   # shelved (docs/63): no lfo_types row = not in the LFO list; the code stays, sounds using it still load
+# pond LFO (docs/64, lfo/quadlfo.c pond_put): rate 31, chaos 24 (~s 1.0), species 1..4 -> knobs b g w r, amounts 0;
+# marker 0xA7
+def pond_words(rate=31, chaos=24):
+    bits = rate | chaos << 8 | 0xA7 << 120
+    for k in range(4): bits |= k << (13 + 11 * k) | 32 << (18 + 11 * k)
+    return [((bits >> (16 * k)) & 0xFFFF) - (0x10000 if (bits >> (16 * k)) & 0x8000 else 0) for k in range(8)]
+POND_LFO_DEFAULTS = pond_words()
 # optional: hidden OP-Z controller mode, gated by host-mode SysEx 00 01 03 (docs/12_opz_mode_patch.md)
 DEV_HOOKS = {0x019F01B8: ('hook_devboot', bytes.fromhex('05e37c52')),   # boot: access(te-boot.op1) -> apply a staged dev update first (docs/35)
              0x019E3CC8: ('hook_devrx', bytes.fromhex('ffe36efa'))}    # midi_poll: CALL midi_rx_parse -> copy our SysEx first
@@ -470,6 +486,12 @@ def patch_db(dbp, engs, fxs):
     if not c.execute("SELECT 1 FROM lfo_types WHERE type='quad'").fetchone():
         lid = c.execute('SELECT MAX(id) FROM lfo_types').fetchone()[0] + 1
         c.execute('INSERT INTO lfo_types VALUES (?,?,?)', (lid, 'quad', json.dumps(QUAD_LFO_DEFAULTS)))
+    if FOX_LFO and not c.execute("SELECT 1 FROM lfo_types WHERE type='fox'").fetchone():   # fox LFO (docs/63): quad's hooks, marker 0xA6
+        lid = c.execute('SELECT MAX(id) FROM lfo_types').fetchone()[0] + 1
+        c.execute('INSERT INTO lfo_types VALUES (?,?,?)', (lid, 'fox', json.dumps(FOX_LFO_DEFAULTS)))
+    if not c.execute("SELECT 1 FROM lfo_types WHERE type='pond'").fetchone():   # pond LFO (docs/64), marker 0xA7
+        lid = c.execute('SELECT MAX(id) FROM lfo_types').fetchone()[0] + 1
+        c.execute('INSERT INTO lfo_types VALUES (?,?,?)', (lid, 'pond', json.dumps(POND_LFO_DEFAULTS)))
     # sequencers (docs/44) are plugin files: the loader adds / removes their seq_types rows
     # drum+ is a plugin file (docs/43): the loader adds / removes its drum_types row (id 2)
     c.commit()
@@ -502,7 +524,7 @@ def main(opz=False, release=False, plugin_files='all', builtin=''):
     for e in engs:
         assert e['name'] not in BUILTIN and e['name'].islower() and len(e['name']) <= 15, e['name']
     stock = set(os.listdir(os.path.join(SRC_FW, 'content', 'display')))
-    for f in (QUAD_LFO_SVG, SYSMON_SVG, USBOUT_SVG):  # (oblique reuses usbout.svg: empty)
+    for f in (QUAD_LFO_SVG, FOX_LFO_SVG, POND_LFO_SVG, SYSMON_SVG, USBOUT_SVG):  # (oblique reuses usbout.svg: empty)
         assert os.path.basename(f) not in stock, f'{f} clashes with a stock content/display file'
     for e in engs + fxs + seqs:                  # never replace a firmware screen (boot assert "Can't find SVG object")
         if e.get('screen'):
@@ -530,6 +552,8 @@ def main(opz=False, release=False, plugin_files='all', builtin=''):
             shutil.copy(os.path.join(HERE, e['screen']['svg']), os.path.join(disp, os.path.basename(e['screen']['svg'])))
     shutil.copy(os.path.join(HERE, QUAD_LFO_SVG), os.path.join(disp, os.path.basename(QUAD_LFO_SVG)))
     shutil.copy(os.path.join(HERE, SYSMON_SVG), os.path.join(disp, os.path.basename(SYSMON_SVG)))
+    shutil.copy(os.path.join(HERE, FOX_LFO_SVG), os.path.join(disp, os.path.basename(FOX_LFO_SVG)))
+    shutil.copy(os.path.join(HERE, POND_LFO_SVG), os.path.join(disp, os.path.basename(POND_LFO_SVG)))
     shutil.copy(os.path.join(HERE, USBOUT_SVG), os.path.join(disp, os.path.basename(USBOUT_SVG)))
     shutil.copy(os.path.join(HERE, ITERLAB_SVG), os.path.join(disp, os.path.basename(ITERLAB_SVG)))
     src_svg = os.path.join(HERE, 'display', FX_SCREEN_SVG)

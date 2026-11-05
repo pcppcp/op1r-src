@@ -147,8 +147,8 @@ static int rn_random(rn_t *r, int slot, const rn_step *live, rn_step *s)
     const rn_type *fx = &r->fx[pick(r, 0, r->nfx - 1)], *lf = &r->lfo[pick(r, 0, r->nlfo - 1)];
     scpy(s->fx, fx->name); cpy(s->fx_params, fx->def, (int)sizeof s->fx_params); s->fx_on = 1;
     scpy(s->lfo, lf->name); cpy(s->lfo_params, lf->def, (int)sizeof s->lfo_params); s->lfo_on = 1;
-    int quad = streq(lf->name, "quad");
-    if (quad) rn_quad(r, s->lfo_params);
+    int quad = streq(lf->name, "quad") || streq(lf->name, "fox") || streq(lf->name, "pond");   /* packed words: never the midi ranges */
+    if (streq(lf->name, "quad")) rn_quad(r, s->lfo_params);
     if (r->env->apply(slot, s)) return -1;
     if (!r->env->fx_ranges(slot, g)) { rn_knobs(r, s->fx_params, g); r->env->fx_set(slot, s->fx_params); }
     if (!quad && !r->env->lfo_ranges(slot, g)) { rn_knobs(r, s->lfo_params, g); r->env->lfo_set(slot, s->lfo_params); }

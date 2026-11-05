@@ -301,14 +301,18 @@ static void eu_sync_screen(void);
 
 /* ---- quad LFO (lfo/quadlfo.c) ---- */
 extern int  ql_is_quad(const int16_t *w);
+extern int  ql_is_fox(const int16_t *w);
+extern int  fox_press(int16_t *w, int knob);
+extern const op1_screen_t SCREEN_foxlfo, SCREEN_pondlfo;
+extern int  ql_is_pond(const int16_t *w);
 extern void ql_press(int pos, int knob);
 extern void ql_turn(int16_t *w, int pos, int knob, int delta, int shift);
 extern const op1_screen_t SCREEN_quadlfo;
 #define READ_LFO_PARAM ((void *(*)(int, int))0x01A293BC)
 #define MIDI_LFO_SCREEN_ID 0x1C
-static uint32_t ql_scr[32], ql_vt[10];
+static uint32_t ql_scr[32], ql_vt[10], fox_scr[32], fox_vt[10], pond_scr[32], pond_vt[10];   /* quad / fox / pond LFO screens */
 static void *midi_lfo_screen;
-static int ql_scr_ready;
+static int ql_scr_ready, fox_scr_ready, pond_scr_ready;
 
 int32_t op1_db_last_err;                                           /* op1_synth.h: op1_db_write */
 
@@ -405,7 +409,8 @@ int lfo_name_eq(const char *name, const dstring *s)
 {
     const char *p = s->cap > 15 ? s->u.ptr : s->u.buf;
     if (streq_n(p, name, s->size)) return 1;
-    return name[0] == 'm' && name[1] == 'i' && name[2] == 'd' && name[3] == 'i' && !name[4] && streq_n(p, "quad", s->size);
+    return name[0] == 'm' && name[1] == 'i' && name[2] == 'd' && name[3] == 'i' && !name[4]
+        && (streq_n(p, "quad", s->size) || streq_n(p, "fox", s->size) || streq_n(p, "pond", s->size));   /* fox / pond LFO: same class */
 }
 
 static const int16_t *lfo_words(int pos, int slot)
@@ -441,7 +446,8 @@ int lfo_range_ok(int type, int i, const int16_t *v)
     if (i >= 4) oldq &= (uint8_t)oldctrl;
     if (!ok) bad = 1;
     if (i < 7) return 1;
-    if (((uint16_t)*v >> 8) == 0xA5 || oldq) return 1;            /* current or old quad word set */
+    if (((uint16_t)*v >> 8) >= 0xA5 && ((uint16_t)*v >> 8) <= 0xA7) return 1;   /* quad / fox / pond words */
+    if (oldq) return 1;                                           /* old quad words */
     return !bad;
 }
 
@@ -624,6 +630,18 @@ void *screens_ctor_hook(void)
         ql_vt[3 * 2 + 1] = (uint32_t)SCREEN_quadlfo.update;
         ql_vt[4 * 2 + 1] = (uint32_t)SCREEN_quadlfo.init;
         ql_scr[3] = (uint32_t)ql_vt;
+        SCREEN_CTOR(fox_scr, MIDI_LFO_SCREEN_ID, "foxlfo.svg");   /* fox LFO (docs/63) */
+        SCREEN_TABLE[MIDI_LFO_SCREEN_ID] = saved;
+        for (int i = 0; i < 10; i++) fox_vt[i] = ITER_SCREEN_VT[i];
+        fox_vt[3 * 2 + 1] = (uint32_t)SCREEN_foxlfo.update;
+        fox_vt[4 * 2 + 1] = (uint32_t)SCREEN_foxlfo.init;
+        fox_scr[3] = (uint32_t)fox_vt;
+        SCREEN_CTOR(pond_scr, MIDI_LFO_SCREEN_ID, "pondlfo.svg");   /* pond LFO (docs/64) */
+        SCREEN_TABLE[MIDI_LFO_SCREEN_ID] = saved;
+        for (int i = 0; i < 10; i++) pond_vt[i] = ITER_SCREEN_VT[i];
+        pond_vt[3 * 2 + 1] = (uint32_t)SCREEN_pondlfo.update;
+        pond_vt[4 * 2 + 1] = (uint32_t)SCREEN_pondlfo.init;
+        pond_scr[3] = (uint32_t)pond_vt;
     }
     {                                                            /* resource monitor screen object */
         void *saved = SCREEN_TABLE[CLOCK_SCREEN_ID];
@@ -731,6 +749,14 @@ void screens_load_hook(void *table)
     if (ql_scr[2]) {
         ql_scr[0] = (uint32_t)SVG_LOAD((void *)ql_scr[2]);
         if (ql_scr[0]) { SCREEN_quadlfo.init(ql_scr); ql_scr_ready = 1; }
+    }
+    if (fox_scr[2]) {
+        fox_scr[0] = (uint32_t)SVG_LOAD((void *)fox_scr[2]);
+        if (fox_scr[0]) { SCREEN_foxlfo.init(fox_scr); fox_scr_ready = 1; }
+    }
+    if (pond_scr[2]) {
+        pond_scr[0] = (uint32_t)SVG_LOAD((void *)pond_scr[2]);
+        if (pond_scr[0]) { SCREEN_pondlfo.init(pond_scr); pond_scr_ready = 1; }
     }
     if (sm_scr[2]) {                                             /* resource monitor (slot 0x2A on T1) */
         sm_scr[0] = (uint32_t)SVG_LOAD((void *)sm_scr[2]);
@@ -1028,7 +1054,10 @@ void key_event_hook(int code, int pressed)
     }
     if (sb_key(custom_engine_page(), code, pressed)) return;     /* engine sample browser (screens/sbrowse.c) */
     if (code >= 0x3B && code <= 0x3E && quad_lfo_page()) {      /* quad LFO: press selects LFO 1..4 */
-        if (pressed) ql_press(lfo_page_pos(), press_knob[code - 0x3B]);
+        int pos = lfo_page_pos();
+        int16_t *w = (int16_t *)lfo_words(pos, lfo_page_slot(pos));
+        if (pressed && ql_is_fox(w)) { if (fox_press(w, press_knob[code - 0x3B])) PATCH_SET_LFO(PATCH_OBJ(pos, lfo_page_slot(pos)), w); }
+        else if (pressed) ql_press(pos, press_knob[code - 0x3B]);
         return;
     }
     if (code >= 0x3B && code <= 0x3E) {
@@ -1218,13 +1247,18 @@ int lfo_screen_select(void)                    /* ScreenId::for_lfo case 4 -> st
 {
     if (ql_scr_ready && midi_lfo_screen) {
         int pos = lfo_page_pos();
-        SCREEN_TABLE[MIDI_LFO_SCREEN_ID] = ql_is_quad(lfo_words(pos, lfo_page_slot(pos))) ? (void *)ql_scr : midi_lfo_screen;   /* case 4 = midi class */
+        const int16_t *w = lfo_words(pos, lfo_page_slot(pos));
+        SCREEN_TABLE[MIDI_LFO_SCREEN_ID] = ql_is_fox(w) ? (fox_scr_ready ? (void *)fox_scr : midi_lfo_screen)
+                                         : ql_is_pond(w) ? (pond_scr_ready ? (void *)pond_scr : midi_lfo_screen)
+                                         : ql_is_quad(w) ? (void *)ql_scr : midi_lfo_screen;   /* case 4 = midi class */
     }
     return MIDI_LFO_SCREEN_ID;
 }
 static int quad_lfo_page(void)
 {
-    return ql_scr_ready && CURRENT_SCREEN == MIDI_LFO_SCREEN_ID && SCREEN_TABLE[MIDI_LFO_SCREEN_ID] == (void *)ql_scr;
+    return CURRENT_SCREEN == MIDI_LFO_SCREEN_ID && ((ql_scr_ready && SCREEN_TABLE[MIDI_LFO_SCREEN_ID] == (void *)ql_scr)
+                                                  || (fox_scr_ready && SCREEN_TABLE[MIDI_LFO_SCREEN_ID] == (void *)fox_scr)
+                                                  || (pond_scr_ready && SCREEN_TABLE[MIDI_LFO_SCREEN_ID] == (void *)pond_scr));
 }
 
 /* ScreenId::for_fx case 5 (filter) -> asm stub fx_screen_case5 -> here; returns the screen id */
