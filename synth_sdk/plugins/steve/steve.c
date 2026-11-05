@@ -188,7 +188,7 @@ static void sv_screen_update(void *scr, int dt)
 {
     int pos = op1_fx_screen_pos() % 3;
     const st_t *s = &st[pos];
-    const int16_t *w = op1_fx_knobs(pos);
+    int16_t wsh[8]; const int16_t *w = op1_knobs_shown(1, pos, op1_fx_knobs(pos), wsh);   /* page 2 as modulated */
     int16_t k[4];
     op1_fx_knobs_live(k);
     st_par q;

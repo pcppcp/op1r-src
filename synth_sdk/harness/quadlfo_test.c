@@ -268,6 +268,13 @@ int main(int argc, char **argv)
         CHECK(mn_eng >= 1 && mn_eng < 8192 && mx_eng > 8192 && mx_eng <= 32767, "engine page 2 around the unset 8192 (%d..%d)", mn_eng, mx_eng);
         CHECK(mn_fx >= 0 && mn_fx < 16000 && mx_fx > 16000 && mx_fx <= 32767, "FX page 2 around its value (%d..%d)", mn_fx, mx_fx);
         CHECK(n_synth + n_fx == n_other, "page 2 never calls the knob range functions");
+        /* screens: op1_page2_live shows the modulated word while applied (engine green, synth FX white), else stored */
+        CHECK(ql_page2_live(0, 0, 1, 1234) == host_stage[6] && ql_page2_live(1, 0, 2, 1234) == host_fx_params[7],
+              "page 2 shown as modulated (%d / %d)", ql_page2_live(0, 0, 1, 1234), ql_page2_live(1, 0, 2, 1234));
+        CHECK(ql_page2_live(0, 0, 0, 1234) == 1234 && ql_page2_live(1, 1, 2, 1234) == 1234 && ql_page2_live(1, 2, 2, 1234) == 1234,
+              "page 2 not modulated: stored word (other knob, drum FX, master)");
+        host_cycles += cpb * 40;                                     /* LFO stopped applying */
+        CHECK(ql_page2_live(0, 0, 1, 1234) == 1234, "page 2 shown: stored word after the LFO stops");
         host_eng_plugin = host_fx_plugin = 0;
         for (int k = 0; k < 8; k++) host_stage[k] = 0, host_fx_params[k] = 16000;
         for (int b = 0; b < 50; b++) { host_cycles += cpb; ql_apply_synth(host_lfo_obj[0], p2, 0); ql_apply_fx(0, p2, 2); }

@@ -132,6 +132,11 @@ static void ql_p2_mod(int16_t *w, int16_t mod, int engine)
     *w = (int16_t)(v < engine ? engine : v > 32767 ? 32767 : v);
 }
 
+/* page-2 values as modulated last (0 engine, 1 synth FX, 2 drum FX; words 5..7) and when (CYCLES): plugin screens show
+ * them through op1_page2_live while the LFO applies them (the stage copy is not what the screens read) */
+static volatile int16_t ql_p2_shown[3][3];
+static volatile uint32_t ql_p2_at[3][3];
+static volatile uint8_t ql_p2_ok[3][3];                        /* set when applied, cleared when stale (CYCLES wraps)*/
 static ql_st sh_st[2][4];                                     /* shared state per page (synth, drum) */
 static ql_st v_st[6][4];                                      /* per synth voice */
 static volatile int16_t disp_all[2][4];                       /* last per-voice output (before amount), screen */
@@ -406,7 +411,11 @@ int ql_apply_synth(void *self, const int16_t *w, int pass)
         if (!a128 || g == QL_FX || ql_is_lfo(&L[i])) continue;
         int16_t mod = ql_out(sh ? sh_st[0][i].val : v_st[v][i].val, a128);
         if (ql_p2(&L[i])) {                                       /* engine page 2: plugin engines only */
-            if (pass == 0 && ENGINE_PLUGIN(((int16_t *)STAGE_PARAMS)[4])) { ql_p2_mod((int16_t *)STAGE_PARAMS + 5 + ql_dest(&L[i]), mod, 1); applied = 1; }
+            if (pass == 0 && ENGINE_PLUGIN(((int16_t *)STAGE_PARAMS)[4])) {
+                int16_t *pw = (int16_t *)STAGE_PARAMS + 5 + ql_dest(&L[i]);
+                ql_p2_mod(pw, mod, 1); applied = 1;
+                ql_p2_shown[0][ql_dest(&L[i])] = *pw; ql_p2_at[0][ql_dest(&L[i])] = READ_CYCLES(); ql_p2_ok[0][ql_dest(&L[i])] = 1;
+            }
         } else if (g == QL_SYNTH && pass == 0) { KNOB_RANGE_SYNTH(ql_dest(&L[i]), &mod, engine, STAGE_PARAMS); applied = 1; }
         else if (g == QL_ENV && pass == 1) { ENV_MOD(ql_dest(&L[i]), &mod, STAGE_PARAMS); applied = 1; }
     }
@@ -451,11 +460,26 @@ int ql_apply_fx(void *self, const int16_t *w, int pass)
         if (ql_p2(&L[i])) {                                       /* FX page 2: plugin FX only */
             if (!FX_PLUGIN(*FX_PARAM(4))) continue;
             ql_p2_mod(FX_PARAM(5 + k), mod, 0);
+            ql_p2_shown[1 + pos][k] = *FX_PARAM(5 + k); ql_p2_at[1 + pos][k] = READ_CYCLES(); ql_p2_ok[1 + pos][k] = 1;
         } else FX_KNOB_MOD(&mod, FX_RANGE(fxtype, k), FX_PARAM(k));
         applied = 1;
     }
     return applied;
 }
+
+/* page-2 word k (0..2) as a screen should show it: the LFO-modulated value while the quad LFO applies it (within
+ * ~32 blocks), else the stored word. fx 0: synth engine; fx 1: FX at pos (0 synth, 1 drum; master: no quad) */
+int16_t ql_page2_live(int fx, int pos, int k, int16_t stored)
+{
+    if (k < 0 || k > 2 || (fx && pos != 0 && pos != 1)) return stored;
+    int g = fx ? 1 + pos : 0;
+    if (ql_p2_ok[g][k] && READ_CYCLES() - ql_p2_at[g][k] < cpb * 32) return ql_p2_shown[g][k];
+    ql_p2_ok[g][k] = 0;
+    return stored;
+}
+#ifndef OP1_HOST
+int16_t op1_page2_live(int fx, int pos, int k, int16_t stored) { return ql_page2_live(fx, pos, k, stored); }   /* plugin export */
+#endif
 
 /* note-on (LFO object vt+0x1c, called by VoiceCtl for each note-on; v = synth voice, -1 = drums) */
 static void ql_trigger(int pos, int v, const int16_t *w)

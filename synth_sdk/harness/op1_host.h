@@ -70,3 +70,6 @@ __attribute__((weak)) int16_t host_fx_lfo[4];   /* added to the live FX knobs on
 static inline void op1_fx_knobs_live(int16_t out[4])
 { for (int i = 0; i < 4; i++) { int32_t x = host_fx_knobs[0][i] + host_fx_lfo[i]; out[i] = (int16_t)(x < 0 ? 0 : (x > 32767 ? 32767 : x)); } }
 #endif
+#ifndef op1_page2_live
+#define op1_page2_live(fx, pos, k, stored) ((void)(fx), (void)(pos), (void)(k), (stored))   /* host: no LFO */
+#endif

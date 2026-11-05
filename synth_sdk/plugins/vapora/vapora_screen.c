@@ -422,7 +422,7 @@ static void update(void *scr,int dt)
     int white_press=op1_eng_page[2]!=0;
     op1_eng_page[2]=0; /* acknowledge one-shot; white turns return to Brightness */
     int slot=OP1_SCREEN_SLOT&7;
-    const int16_t *raw=op1_synth_knobs(slot);
+    int16_t wsh[8]; const int16_t *raw=op1_knobs_shown(0, 0, op1_synth_knobs(slot), wsh);   /* page 2 as modulated */
     track_controls(raw,view_slot!=slot||view_selector!=raw[4],white_press);
     int16_t words[8];for(int i=0;i<8;i++)words[i]=raw[i];
     op1_synth_knobs_live(slot,words);

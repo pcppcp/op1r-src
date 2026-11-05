@@ -968,7 +968,7 @@ static void ns_init(void *scr)
 static void ns_update(void *scr, int dt)
 {
     int pos = op1_fx_screen_pos();
-    const int16_t *w = op1_fx_knobs(pos);
+    int16_t wsh[8]; const int16_t *w = op1_knobs_shown(1, pos, op1_fx_knobs(pos), wsh);   /* page 2 as modulated */
     int16_t k[4];
     op1_fx_knobs_live(k);
     int32_t v[NC_N] = { k[0], k[1], k[2], k[3], w[5] < 0 ? 0 : w[5], w[6] < 0 ? 0 : w[6], w[7] < 0 ? 0 : w[7] };   /* live */

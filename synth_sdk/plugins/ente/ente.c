@@ -243,7 +243,7 @@ static void ente_screen_update(void *scr, int dt)
 {
     int pos = op1_fx_screen_pos() % 3;
     ente_t *s = &st[pos];
-    const int16_t *wd = op1_fx_knobs(pos);
+    int16_t wsh[8]; const int16_t *wd = op1_knobs_shown(1, pos, op1_fx_knobs(pos), wsh);   /* page 2 as modulated */
     int ent = ent_of(op1_fx_param_q15(wd, 3)), src = ent_src[ent];
     int32_t target = s->gr * 1024 / 4096;                  /* 24 dB = flat */
     if (target > 1024) target = 1024;

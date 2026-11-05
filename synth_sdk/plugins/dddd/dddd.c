@@ -180,7 +180,7 @@ static void dd_screen_update(void *scr, int dt)
     int slot = OP1_SCREEN_SLOT & 7;
     int16_t k[4];
     op1_synth_knobs_live(slot, k);
-    const int16_t *w = op1_synth_knobs(slot);
+    int16_t wsh[8]; const int16_t *w = op1_knobs_shown(0, 0, op1_synth_knobs(slot), wsh);   /* page 2 as modulated */
     if (!tx_made) {
         for (int i = 0; i < 4; i++) {
             op1_text_ctor(tx[TX_LAB + i], Q(8 + 78 * i), 114, TS, col4[i]);

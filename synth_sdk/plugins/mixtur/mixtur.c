@@ -241,7 +241,7 @@ static void mx_screen_update(void *scr, int dt)
     int slot = OP1_SCREEN_SLOT & 7;
     int16_t k[4];
     sq_synth_knobs_live(slot, k);                                     /* incl. LFO, like the stock screens */
-    const int16_t *wd = op1_synth_knobs(slot);                         /* page-2 words 5..7 */
+    int16_t wsh[8]; const int16_t *wd = op1_knobs_shown(0, 0, op1_synth_knobs(slot), wsh);   /* page-2 words 5..7, as modulated */
     int nt[4], pg[4] = { op1_eng_page[0], op1_eng_page[1], op1_eng_page[2], 0 };
     int32_t gt[4];
     targets(k, 0, nt, gt);

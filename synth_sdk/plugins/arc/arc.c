@@ -531,7 +531,7 @@ static void arc_screen_update(void *scr, int dt)
     int slot = OP1_SCREEN_SLOT & 7;
     int16_t k[4];
     sq_synth_knobs_live(slot, k);
-    const int16_t *w = op1_synth_knobs(slot);
+    int16_t wsh[8]; const int16_t *w = op1_knobs_shown(0, 0, op1_synth_knobs(slot), wsh);   /* page 2 as modulated */
     int32_t wr = clampk(w[5]), wc = clampk(w[6]), wb = clampk(w[7]);
 
     /* level: loudest voice since the last frame (render writes, we consume: silent voices read 0) */

@@ -176,6 +176,20 @@ static inline int op1_fx_list(int32_t q15, int n)
 static inline int16_t op1_fx_list_word(int i, int n, int32_t lo, int32_t hi) { return (int16_t)(lo + (i * (hi - lo) + (n - 1) / 2) / (n - 1)); }
 extern volatile uint8_t op1_fx_page[3][4];
 
+/* ---- page-2 words as shown (needs op1r 53+): the quad LFO modulates page 2 (words 5..7) only in the audio stage
+ * copy, so a screen showing words 5..7 reads them through op1_knobs_shown(): a copy of the 8 words with 5..7
+ * replaced by the LFO-modulated value while it is applied. fx 0 = synth engine (pos ignored), 1 = FX at pos.
+ * Screens only (DSP reads its params, knob edits the real words). */
+#ifndef OP1_HOST
+int16_t op1_page2_live(int fx, int pos, int k, int16_t stored);
+#endif
+static inline const int16_t *op1_knobs_shown(int fx, int pos, const int16_t *w, int16_t *buf)
+{
+    for (int i = 0; i < 8; i++) buf[i] = w[i];
+    for (int k = 0; k < 3; k++) buf[5 + k] = op1_page2_live(fx, pos, k, w[5 + k]);
+    return buf;
+}
+
 /* ---- sidechain sources (core export, docs/61): 64 samples of this block into out, returns 1 if the source has data
  * (0 and zeros: not available yet / unknown). T1..T4 = tape tracks pre-fader (asking starts the track work, 5-7 % CPU,
  * first block zeros), TAPE = their sum, IN = the input (mic / line / USB, mono), INST = the instrument bus (mono,

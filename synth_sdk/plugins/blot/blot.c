@@ -289,7 +289,7 @@ static void ac_screen_update(void *scr, int dt)
     int slot = OP1_SCREEN_SLOT & 7;
     int16_t k[4];
     op1_synth_knobs_live(slot, k);
-    const int16_t *w = op1_synth_knobs(slot);
+    int16_t wsh[8]; const int16_t *w = op1_knobs_shown(0, 0, op1_synth_knobs(slot), wsh);   /* page 2 as modulated */
     for (int i = 0; i < 4; i++) if (k[i] < 0) k[i] = 0;
     if (!tx_made) {
         for (int i = 0; i < 4; i++) {

@@ -71,6 +71,7 @@ static void tables_init(void)
 extern volatile uint8_t op1_eng_page[4];
 extern volatile uint8_t op1_fx_page[3][4];
 void *read_fx_param_safe(int slot, int pos);
+int16_t op1_page2_live(int fx, int pos, int k, int16_t stored);
 int  eu_fw_note_on(int pos, int note, int key, int vel);           /* seq/seq_core.c */
 void eu_fw_note_off(int midi);
 extern volatile uint8_t eu_rec_play;
@@ -113,6 +114,7 @@ static const struct { const char *name; void *addr; } exports[] = {
     { "op1_eng_page", (void *)op1_eng_page }, { "op1_fx_page", (void *)op1_fx_page },
     { "read_fx_param_safe", (void *)read_fx_param_safe },
     { "op1_sc_source", (void *)op1_sc_source },
+    { "op1_page2_live", (void *)op1_page2_live },
     { "sq_line", (void *)sq_line }, { "sq_text", (void *)sq_text }, { "sq_num", (void *)sq_num },
     { "sq_cat", (void *)sq_cat }, { "sq_node_rotate", (void *)sq_node_rotate },
     { "sq_synth_knobs_live", (void *)sq_synth_knobs_live }, { "sq_fx_knobs_live", (void *)sq_fx_knobs_live },
