@@ -42,7 +42,15 @@ static void clouds_fx_render(int pos, int16_t *buf, const int16_t *p)
         .dry_wet = p[6], .reverb = p[7], .feedback = 0,
         .freeze = op1_fx_page[pos % 3][3], .trigger = 0 };
     int16_t out[OP1_FX_BLOCK];
+#ifdef CLOUDS_KERN
+    /* clouds_dsp.S leaves L0..L3 at 0 (linear addressing); the caller's values are put back on return */
+    uint32_t l0, l1, l2, l3;
+    __asm__ volatile("%0 = L0;\n\t%1 = L1;\n\t%2 = L2;\n\t%3 = L3;" : "=d"(l0), "=d"(l1), "=d"(l2), "=d"(l3));
     clouds_process(c, &prm, buf, out, OP1_FX_BLOCK);
+    __asm__ volatile("L0 = %0;\n\tL1 = %1;\n\tL2 = %2;\n\tL3 = %3;" : : "d"(l0), "d"(l1), "d"(l2), "d"(l3));
+#else
+    clouds_process(c, &prm, buf, out, OP1_FX_BLOCK);
+#endif
     int32_t peak = 0;
     for (int i = 0; i < OP1_FX_BLOCK; i++) {
         buf[i] = out[i];

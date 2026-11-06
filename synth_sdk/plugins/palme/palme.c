@@ -520,7 +520,7 @@ static void palme_screen_init(void *scr)
 static void palme_screen_update(void *scr, int dt)
 {
     int pos = op1_fx_screen_pos() % 3;
-    const int16_t *w = op1_fx_knobs(pos);
+    int16_t wsh[8]; const int16_t *w = op1_knobs_shown(1, pos, op1_fx_knobs(pos), wsh);   /* page 2 as modulated */
     int16_t k[4];
     sq_fx_knobs_live(k);
     int32_t val[4];

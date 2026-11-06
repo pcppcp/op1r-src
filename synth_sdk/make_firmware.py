@@ -100,6 +100,7 @@ HOOKS = {0x019B975C: ('hook_namecmp', bytes.fromhex('18300b32')),      # instr_t
          0x019F0A24: ('hook_ciservice', bytes.fromhex('03e3761e')),      # main loop tape_c::service(0): count-in PLAY
          0x0196F942: ('hook_sqlcache', bytes.fromhex('ffe3b9fe')),       # sqlite init: open all DBs, then cap page caches
          0x0191B9F0: ('hook_taperase', bytes.fromhex('09e38cc8')),       # clipboard cmd 4 (erase tape): only chunks with clips
+         0x019F0BE2: ('hook_tapeflush', bytes.fromhex('03e3971d')),      # shutdown: CALL tape_c::service(1) loop -> tape_service (flushes every dirty clip)
          0x01A54842: ('hook_tapesave', bytes.fromhex('02e3a12b')),       # tape_c::service: yaffs_write of a dirty clip -> bounce buffer (docs/42)
          0x01A044A8: ('hook_dpkeep', bytes.fromhex('fde38ccc')),         # parse_patch_json: keep "op1r" (drum+, docs/31)
          0x01977900: ('hook_dpbrowse', bytes.fromhex('04e37f53')),       # DrumController Shift+T1: start row (user kit -> DRUM, drum+ -> DRUM+)
@@ -112,11 +113,18 @@ HOOKS = {0x019B975C: ('hook_namecmp', bytes.fromhex('18300b32')),      # instr_t
          0x019C369C: ('hook_lander3', bytes.fromhex('00e3180c')),       # LanderController key_up: instance -> stub
          0x01A04BC0: ('hook_dpload', bytes.fromhex('ffe3f4f5')),         # load_drum_patch: parse, then read drum+ pads
          0x019C9D04: ('hook_frsnap', bytes.fromhex('09e11e59')),         # LFO/seq tick (after tape_play_mix) -> fr_snap (master FX source, docs/54)
+         0x019F0C46: ('hook_bgsgc', bytes.fromhex('05e30150')),          # main loop idle: CALL yaffs_do_background_gc -> bgs_idle_gc (max 10/s, docs/58)
+         0x019411B8: ('hook_bgsqueue', bytes.fromhex('00e80000')),       # queue SaveSlotJob(is_drum, slot): LINK -> bgs_queue_slot (delayed, bgsave.c)
          0x01912128: ('hook_spadsr', bytes.fromhex('e3052a32')),         # Adsr_render entry -> sp_adsr (sampler+ envelope, docs/46)
          0x01A69730: ('hook_usbbuf1', bytes.fromhex('22e11401')),        # EP 0x86 transfer buffer 0x114 -> 828
          0x01A69740: ('hook_usbbuf2', bytes.fromhex('22e11401'))}        # .. second buffer
 # data words: address -> (symbol, expected original value)
 DATA_PATCHES = {0x018F7FF8: ('fx_screen_case5', 0x01A3BF26),          # ScreenId::for_fx case 5
+                # stock master FX stereo render slots (vt+0x14) -> FX2 routing wrappers (screens/fxroute.c, docs/54)
+                0x0190FBA0: ('fr_st_delay', 0x0197DC42), 0x01910238: ('fr_st_grid', 0x019AF83C),
+                0x01910C50: ('fr_st_punch', 0x019E662C), 0x01911328: ('fr_st_phone', 0x01A1C25C),
+                0x019113F0: ('fr_st_spring', 0x01A32FFC), 0x01910048: ('fr_st_nitro', 0x019A684C),
+                0x0190F5A8: ('fr_st_cwo', 0x019450FC),
                 0x018F8074: ('synth_screen_case14', 0x01A3BFD0),      # ScreenId::for_synth case 14
                 0x018F80F8: ('lfo_screen_case4', 0x01A3C078),         # ScreenId::for_lfo case 4 (midi)
                 0x01910840: ('ql_vt_synth', 0x019CCE68),              # LfoMidi synth vtable: apply
@@ -127,6 +135,10 @@ DATA_PATCHES = {0x018F7FF8: ('fx_screen_case5', 0x01A3BF26),          # ScreenId
                 0x01910888: ('ql_trig_fx', 0x019CCE2C),               # LfoMidi FX vtable +0x1c (RTS)
                 0x01911B98: ('sm_idle_run', 0x01A5E240),              # kTE_Idle vtable run: remember thread (sysmon)
                 0x01911B78: ('tm_screen_draw', 0x01A5CF94),           # tape screen draw: + markers (tape/markers.c)
+                0x01911C08: ('pc_tempo_draw', 0x01A5F64C),            # tempo screen draw: + pulse clock source (midi/pclk.c, docs/59)
+                0x01911BD0: ('pc_tempo_knob', 0x01A5EF8C),            # TempoController on_knob: Shift + white = clock source
+                0x0190F718: ('cc_com_knob', 0x01962D30),              # com_controller on_encoder: COM -> OP-1 Shift + green / white / red (midi/ccmap.c, docs/60)
+                0x0190F750: ('cc_com_draw', 0x019655E0),              # ComScreen update: + KEYS / PARAM CH, FEEDBACK in the MIDI CH panel
                 0x01910FB0: ('plug_apply_synth', 0x01A010F8),         # synth patch vtable: apply_synth -> name lookup (docs/37)
                 0x01910FB8: ('plug_apply_synth_fx', 0x01A00DC4),      # synth patch vtable: apply_synth_fx
                 0x01910F80: ('plug_apply_drum_fx', 0x01A0010C)}       # drum patch vtable: apply_drum_fx           # tape screen draw: + markers (tape/markers.c)              # kTE_Idle vtable run: remember thread (sysmon)
@@ -151,6 +163,8 @@ L1_TRAMP, L1_TRAMP_MAX = 0xFFA0BFB4, 0xFFA0C000 - 0xFFA0BFB4
 FX_SCREEN_SVG = 'fxgeneric.svg'
 QUAD_LFO_SVG = 'display/quadlfo.svg'
 SYSMON_SVG = 'display/sysmon.svg'
+FOX_LFO_SVG = 'display/foxlfo.svg'
+POND_LFO_SVG = 'display/pondlfo.svg'
 USBOUT_SVG = 'display/usbout.svg'
 ITERLAB_SVG = 'display/iterlab.svg'   # stock iter screen (op1repacker iter-lab.svg, MIT)
 # quad LFO defaults (lfo/quadlfo.c: 128-bit stream, LFO i at bit 30 i: rate 6 | sync 1 | wave 3 | smooth 3 | offset 3 |
@@ -162,11 +176,58 @@ def quad_words(lfos):
     bits |= 0xA5 << 120
     return [((bits >> (16 * k)) & 0xFFFF) - (0x10000 if (bits >> (16 * k)) & 0x8000 else 0) for k in range(8)]
 QUAD_LFO_DEFAULTS = quad_words([(19, 0), (31, 1), (42, 2), (54, 3)])
+# fox LFO (docs/63, lfo/quadlfo.c fox_put): rate 31 (~1 Hz), bloom 16, rabbits -> knob b, foxes -> knob g, amounts 0;
+# marker 0xA6 in bits 120..127
+def fox_words(rate=31, bloom=16, tgt=(0, 1)):
+    bits = rate | bloom << 8 | tgt[0] << 18 | tgt[1] << 23 | 32 << 28 | 32 << 34 | 0xA6 << 120
+    return [((bits >> (16 * k)) & 0xFFFF) - (0x10000 if (bits >> (16 * k)) & 0x8000 else 0) for k in range(8)]
+FOX_LFO_DEFAULTS = fox_words()
+FOX_LFO = False   # shelved (docs/63): no lfo_types row = not in the LFO list; the code stays, sounds using it still load
+# pond LFO (docs/64, lfo/quadlfo.c pond_put): rate 31, chaos 24 (~s 1.0), species 1..4 -> knobs b g w r, amounts 0;
+# marker 0xA7
+def pond_words(rate=31, chaos=24):
+    bits = rate | chaos << 8 | 0xA7 << 120
+    for k in range(4): bits |= k << (13 + 11 * k) | 32 << (18 + 11 * k)
+    return [((bits >> (16 * k)) & 0xFFFF) - (0x10000 if (bits >> (16 * k)) & 0x8000 else 0) for k in range(8)]
+POND_LFO_DEFAULTS = pond_words()
 # optional: hidden OP-Z controller mode, gated by host-mode SysEx 00 01 03 (docs/12_opz_mode_patch.md)
 DEV_HOOKS = {0x019F01B8: ('hook_devboot', bytes.fromhex('05e37c52')),   # boot: access(te-boot.op1) -> apply a staged dev update first (docs/35)
              0x019E3CC8: ('hook_devrx', bytes.fromhex('ffe36efa'))}    # midi_poll: CALL midi_rx_parse -> copy our SysEx first
 OPZ_HOOKS = {0x019E0CFC: ('hook_opzget', bytes.fromhex('00601000')),   # midi_opz_mode_enabled: R0=0; RTS
              0x019E3540: ('hook_opzset', bytes.fromhex('a5e60900'))}   # rx host-mode m!=1,2: B[P4+9]=R5
+
+# tempo page: the PO graphic (mode 4 without a clock) at 80 %, scaled about its top centre (143.75, 36), so the pulse
+# clock's "ppq 4" line fits between it and the PO SYNC box (docs/59). Only edit of a stock screen file.
+PO_SCALE = 0.8
+def tempo_po_scale(path):
+    # bytes from the stock file every build (keeps its CRLF line endings: the patcher ships only the changed tag;
+    # a text-mode rewrite turned every line ending into LF and put the whole stock file into the patch data)
+    s = open(os.path.join(SRC_FW, 'content', 'display', 'tempo.svg'), 'rb').read()
+    old = b'<g id="po">'
+    assert s.count(old) == 1, 'tempo.svg: po group not found'
+    t = f'<g id="po" transform="matrix({PO_SCALE} 0 0 {PO_SCALE} {143.75 * (1 - PO_SCALE):.3f} {36 * (1 - PO_SCALE):.3f})">'.encode()
+    open(path, 'wb').write(s.replace(old, t))
+
+# COM -> OP-1 Shift panel (group "opset"): border's left edge 238.784 -> 194.0 (room for the CC channel rows, docs/60),
+# the stock MIDI / CH label moved left with it (translate -46), so labels form one column at x 200 and values one at
+# the right edge. Bytes from the stock file every build, only inside "opset" (the CTRL page's panel is a copy).
+COM_PANEL_DX = 46
+def com_panel_edit(path):
+    s = open(os.path.join(SRC_FW, 'content', 'display', 'com.svg'), 'rb').read()
+    i = s.index(b'<g id="opset"'); end = s.index(b'<path display="inline" fill="none" stroke="#383572"', i)
+    j = s.index(b'</g>', s.index(b'<g id="opmidich"', i)) + 4             # after the value group: the label strokes
+    seg = s[i:end]
+    lab = s[j:end]
+    new = s[i:j] + f'<g transform="translate(-{COM_PANEL_DX} 0)">'.encode() + lab + b'</g>'
+    assert seg.count(b'<g') == new.count(b'<g') - 1
+    rest = s[end:]
+    k = rest.index(b'z"/>') + 4                                          # the border path
+    border = rest[:k]
+    assert border.count(b'H241.45c-1.476') == 1 and border.count(b'2.666-2.667h47.817') == 1
+    left = 194.0                                                          # new left edge (stock 238.784)
+    border = border.replace(b'H241.45c-1.476', f'H{left + 2.666:.3f}c-1.476'.encode())          # bottom edge to the left corner
+    border = border.replace(b'2.666-2.667h47.817', f'2.666-2.667h{289.267 - (left + 2.666):.3f}'.encode())   # top edge
+    open(path, 'wb').write(s[:i] + new + border + rest[k:])
 
 def sh(cmd):
     print('$', cmd); subprocess.run(cmd, shell=True, check=True)
@@ -209,13 +270,16 @@ def gen_table(engs, fxs):
 def build(engs, fxs):
     os.makedirs(os.path.join(HERE, 'build'), exist_ok=True)
     gen_table(engs, fxs)
-    srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/usbtrack.c', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'screens/overlay.c', 'plugload/plugload.c', 'plugload/op1p_load.c', 'screens/settings.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/mixdrop.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'scale/sc_core.c', 'scale/sc_fw.c'] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
+    srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/usbtrack.c', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'plugload/op1p_load.c', 'screens/settings.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/mixdrop.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c'] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
     objs = []
     cmds = []
+    flags = {}                                       # plugin.json "source_cflags": e.g. -O3 after the default -O2
+    for e in engs + fxs:
+        flags.update(plugins.source_flags(e, [e['source']] + e.get('extra_sources', [])))
     for s in srcs:
-        o = 'build/' + s.replace('/', '_').replace('.c', '.o'); objs.append(o)
+        o = 'build/' + os.path.splitext(s.replace('/', '_'))[0] + '.o'; objs.append(o)
         cmds.append(f'bfin-elf-gcc -O2 -mcpu=bf524 -ffreestanding -fno-builtin -nostdlib -fno-common '
-                    f'-Wall -I. -c {s} -o {o}')
+                    f'{" ".join(["-Wall -I.", *flags.get(s, [])])} -c {s} -o {o}')
     cmds.append('bfin-elf-as -mcpu=bf524 hook.S -o build/hook.o'); objs.append('build/hook.o')
     cmds.append(f'bfin-elf-ld -T link.ld {" ".join(objs)} $(bfin-elf-gcc -print-libgcc-file-name) -o build/synth.elf')
     cmds.append('bfin-elf-objcopy -O binary -j .text -j .rodata -j .data build/synth.elf build/synth.bin')
@@ -422,6 +486,12 @@ def patch_db(dbp, engs, fxs):
     if not c.execute("SELECT 1 FROM lfo_types WHERE type='quad'").fetchone():
         lid = c.execute('SELECT MAX(id) FROM lfo_types').fetchone()[0] + 1
         c.execute('INSERT INTO lfo_types VALUES (?,?,?)', (lid, 'quad', json.dumps(QUAD_LFO_DEFAULTS)))
+    if FOX_LFO and not c.execute("SELECT 1 FROM lfo_types WHERE type='fox'").fetchone():   # fox LFO (docs/63): quad's hooks, marker 0xA6
+        lid = c.execute('SELECT MAX(id) FROM lfo_types').fetchone()[0] + 1
+        c.execute('INSERT INTO lfo_types VALUES (?,?,?)', (lid, 'fox', json.dumps(FOX_LFO_DEFAULTS)))
+    if not c.execute("SELECT 1 FROM lfo_types WHERE type='pond'").fetchone():   # pond LFO (docs/64), marker 0xA7
+        lid = c.execute('SELECT MAX(id) FROM lfo_types').fetchone()[0] + 1
+        c.execute('INSERT INTO lfo_types VALUES (?,?,?)', (lid, 'pond', json.dumps(POND_LFO_DEFAULTS)))
     # sequencers (docs/44) are plugin files: the loader adds / removes their seq_types rows
     # drum+ is a plugin file (docs/43): the loader adds / removes its drum_types row (id 2)
     c.commit()
@@ -454,7 +524,7 @@ def main(opz=False, release=False, plugin_files='all', builtin=''):
     for e in engs:
         assert e['name'] not in BUILTIN and e['name'].islower() and len(e['name']) <= 15, e['name']
     stock = set(os.listdir(os.path.join(SRC_FW, 'content', 'display')))
-    for f in (QUAD_LFO_SVG, SYSMON_SVG, USBOUT_SVG):  # (oblique reuses usbout.svg: empty)
+    for f in (QUAD_LFO_SVG, FOX_LFO_SVG, POND_LFO_SVG, SYSMON_SVG, USBOUT_SVG):  # (oblique reuses usbout.svg: empty)
         assert os.path.basename(f) not in stock, f'{f} clashes with a stock content/display file'
     for e in engs + fxs + seqs:                  # never replace a firmware screen (boot assert "Can't find SVG object")
         if e.get('screen'):
@@ -482,11 +552,15 @@ def main(opz=False, release=False, plugin_files='all', builtin=''):
             shutil.copy(os.path.join(HERE, e['screen']['svg']), os.path.join(disp, os.path.basename(e['screen']['svg'])))
     shutil.copy(os.path.join(HERE, QUAD_LFO_SVG), os.path.join(disp, os.path.basename(QUAD_LFO_SVG)))
     shutil.copy(os.path.join(HERE, SYSMON_SVG), os.path.join(disp, os.path.basename(SYSMON_SVG)))
+    shutil.copy(os.path.join(HERE, FOX_LFO_SVG), os.path.join(disp, os.path.basename(FOX_LFO_SVG)))
+    shutil.copy(os.path.join(HERE, POND_LFO_SVG), os.path.join(disp, os.path.basename(POND_LFO_SVG)))
     shutil.copy(os.path.join(HERE, USBOUT_SVG), os.path.join(disp, os.path.basename(USBOUT_SVG)))
     shutil.copy(os.path.join(HERE, ITERLAB_SVG), os.path.join(disp, os.path.basename(ITERLAB_SVG)))
     src_svg = os.path.join(HERE, 'display', FX_SCREEN_SVG)
     shutil.copy(src_svg if os.path.exists(src_svg) else os.path.join(disp, 'iter.svg'),
                 os.path.join(disp, FX_SCREEN_SVG))
+    tempo_po_scale(os.path.join(disp, 'tempo.svg'))
+    com_panel_edit(os.path.join(disp, 'com.svg'))
     sh(f'"{REPACKER}" repack "{OUT_FW}"')
     # development delta (tools/op1delta.py, docs/34): LDR + files changed since the tree recorded as installed
     delta = os.path.join(ROOT, os.path.basename(OUT_FW) + '-delta.op1')

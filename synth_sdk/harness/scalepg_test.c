@@ -1,6 +1,7 @@
 /* Host test + preview frames for screens/scalepg.c (clock T4 scale page, docs/55). "render": JSON frames for
  * harness/render_usbout.py */
 #include "../op1_synth.h"
+#include "../screens/op1r_settings.c"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -36,8 +37,8 @@ int main(int argc, char **argv)
     int render = argc > 1 && !strcmp(argv[1], "render");
     sp_init(0); assert(sc_type == 0);
     frame("off (default)", render);
-    scale_turn(1, 1024); assert(scale_host_saved == -1);              /* not per detent */
-    scale_flush(); assert(sc_type == 1 && scale_host_saved == 16);
+    scale_turn(1, 1024); assert(op1r_setting_get("scale", -1) == -1);              /* not per detent */
+    scale_flush(); assert(sc_type == 1 && op1r_setting_get("scale", -1) == 16);
     frame("C major, snap", render);
     for (int i = 0; i < 3; i++) scale_turn(0, -1024);
     assert(sc_root == 9);   /* wraps: C -> A */
@@ -50,7 +51,7 @@ int main(int argc, char **argv)
     for (int i = 0; i < 4; i++) scale_turn(2, 1024);
     assert(sc_mode == 2);   /* clamped */
     scale_turn(3, 1024); assert(sc_mode == 2);
-    scale_host_saved = 9 + 16 * 11 + 256; sp_init(0); assert(sc_root == 9 && sc_type == 11 && sc_mode == 1);
+    op1r_setting_put("scale", 9 + 16 * 11 + 256); sp_init(0); assert(sc_root == 9 && sc_type == 11 && sc_mode == 1);
     if (!render) printf("ok\n");
     return 0;
 }

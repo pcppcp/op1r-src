@@ -13,12 +13,24 @@
  * recorded bus (the selected track's own send muted: no feedback). The track work runs only while a send is up. */
 #include "../op1_synth.h"
 #include "stroke_font.h"
+#include "op1r_settings.h"
 
 uint8_t fr_src;                                             /* 0 master, 1 instrument, 2 aux */
 uint8_t fr_out;                                             /* instrument / aux: 0 stereo master, 1 mono tape */
 uint8_t fr_send[4];                                         /* aux sends 0..100 */
 volatile uint8_t fr_aux_live;                               /* aux with a send up: track outs needed */
 extern int16_t tr_out[4][64];
+/* the routing runs in every master FX's render (plugins: dispatcher.c fx_render_stereo; stock: the fr_st_* wrappers
+ * below). With the master FX off: no copies and no track work (5-7 % CPU with aux) */
+#ifdef OP1_HOST
+uint8_t fr_host_mfx = 1;
+#define MFX_ON() fr_host_mfx
+#else
+#define MFX_ON() (*(volatile uint8_t *)0x01AAAC40)
+#endif
+volatile uint8_t sc_want;                                   /* sidechain asked for track outs: blocks left (op1_sc_source) */
+volatile uint8_t sc_blk, tr_at;                             /* block counter (fr_snap) / block of the last track outs */
+int fr_tracks_needed(void) { return (fr_aux_live && MFX_ON()) || sc_want; }   /* screens/usbtrack.c: the track work */
 static void fr_live(void) { fr_aux_live = fr_src == 2 && (fr_send[0] | fr_send[1] | fr_send[2] | fr_send[3]); }
 static int16_t fr_snl[64], fr_snr[64], fr_il[64], fr_ir[64];
 static volatile uint8_t fr_snapped, fr_have;
@@ -26,6 +38,8 @@ static volatile uint8_t fr_snapped, fr_have;
 #ifdef OP1_HOST
 int16_t fr_host_tape[2][64];
 int16_t fr_host_bus[64];
+int16_t fr_host_input[64];
+#define INPUT  fr_host_input
 #define TAPE_L fr_host_tape[0]
 #define TAPE_R fr_host_tape[1]
 #define BUS    fr_host_bus
@@ -49,6 +63,7 @@ int16_t fr_host_vol[4] = { 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF }, fr_host_lev[4] = { 
 #define TAPE_L ((int16_t *)0xFF800D34)
 #define TAPE_R ((int16_t *)0xFF800DB4)
 #define BUS    ((int16_t *)0xFF800BB4)                       /* synth_mix_bus: recorded after Core_mix_master */
+#define INPUT  ((int16_t *)0xFF800CB4)                       /* input block (mic / line / USB), mono, docs/29 */
 /* the record meter (Core_mix_master loop 1): block peak W[0xFF801084] = max |bus x tape level [0x01B4EF6E]|, then
  * the selected track's meter W[0xFF802990 + 2t] += peak if B[0xFF80103C] (0xFFA00FE0..0xFFA01002) */
 #define METER     ((volatile int16_t *)0xFF802990)
@@ -63,7 +78,9 @@ void fr_snap(void)                                          /* audio ISR, after 
 #ifndef OP1_HOST
     *(volatile uint8_t *)0x01DD591E = 0;                    /* the stock body of 0x019C9D04 */
 #endif
-    if (fr_src != 1) return;
+    sc_blk++;                                               /* once per block, after the tape mix (track outs) */
+    if (sc_want) sc_want--;
+    if (fr_src != 1 || !MFX_ON()) return;
     for (int i = 0; i < 64; i++) { fr_snl[i] = TAPE_L[i]; fr_snr[i] = TAPE_R[i]; }
     fr_snapped = 1;
 }
@@ -164,56 +181,23 @@ static void fr_decode(int v) { if (v >= 0 && v <= 3) { fr_src = v & 1; fr_out = 
 static void fr_decode_sends(int32_t v) { for (int t = 0; t < 4; t++) { int s = v >> (7 * t) & 127; fr_send[t] = (uint8_t)(s > 100 ? 100 : s); } }
 static int fr_code(void) { return fr_src == 2 ? 4 + fr_out : fr_src + 2 * fr_out; }   /* old values 0..3 stay valid */
 static int32_t fr_sends_code(void) { return fr_send[0] | fr_send[1] << 7 | fr_send[2] << 14 | fr_send[3] << 21; }
-#ifdef OP1_HOST
-int fr_host_saved = -1;
-int fr_host_sends = -1;
-static void fr_load(void) { if (fr_host_saved >= 0) fr_decode(fr_host_saved); if (fr_host_sends >= 0) fr_decode_sends(fr_host_sends); fr_live(); }
-static void fr_save(void) { fr_host_saved = fr_code(); }
-void fr_save_sends(void) { fr_host_sends = fr_sends_code(); }
-#else
-#define DB_HANDLE ((void *(*)(void))0x0196DD44)
-#define DB_EXEC   ((void (*)(void *, const char *))0x0196F950)
-#define DB_GET    ((void (*)(void *, void *, const char *))0x0196FBD0)
-typedef struct { uint32_t alloc; union { char buf[16]; char *ptr; } u; uint32_t size, cap; uint32_t pad; } fr_dstr;
-static const char FR_CREATE[] = "CREATE TABLE IF NOT EXISTS op1rsettings (key TEXT PRIMARY KEY, val INTEGER NOT NULL)";
 static void fr_load(void)
 {
-    void *db = DB_HANDLE();
-    DB_EXEC(db, FR_CREATE);
-    fr_dstr s = { 0 };
-    DB_GET(&s, db, "SELECT val FROM op1rsettings WHERE key='mfxsrc'");
-    const char *p = s.cap > 15 ? s.u.ptr : s.u.buf;
-    if (s.size && p[0] >= '0' && p[0] <= '5') fr_decode(p[0] - '0');
-    fr_dstr t = { 0 };
-    DB_GET(&t, db, "SELECT val FROM op1rsettings WHERE key='auxsend'");
-    p = t.cap > 15 ? t.u.ptr : t.u.buf;
-    int32_t v = 0; int n = 0;
-    for (; n < 10 && n < (int)t.size && p[n] >= '0' && p[n] <= '9'; n++) v = v * 10 + p[n] - '0';
-    if (n) fr_decode_sends(v);
+    int v = op1r_setting_get("mfxsrc", -1), s = op1r_setting_get("auxsend", -1);
+    if (v >= 0) fr_decode(v);
+    if (s >= 0) fr_decode_sends(s);
     fr_live();
 }
-static void fr_save(void)
+static void fr_save(void) { op1r_setting_put("mfxsrc", fr_code()); }
+void fr_save_sends(void) { op1r_setting_put("auxsend", fr_sends_code()); }   /* KeyHandler thread */
+
+uint8_t fr_send_dirty;                                       /* set by MIDI: saved at the next key event (dispatcher.c) */
+void fr_set_send(int t, int v)                               /* MIDI params CC 114..117 (midi/mx.c), KeyHandler thread */
 {
-    static char q[] = "INSERT OR REPLACE INTO op1rsettings VALUES ('mfxsrc',0)";
-    q[sizeof q - 3] = (char)('0' + fr_code());
-    void *db = DB_HANDLE();
-    DB_EXEC(db, FR_CREATE);
-    DB_EXEC(db, q);
+    if (t < 0 || t > 3) return;
+    fr_send[t] = (uint8_t)(v < 0 ? 0 : v > 100 ? 100 : v);
+    fr_live(); fr_send_dirty = 1;
 }
-void fr_save_sends(void)                                    /* KeyHandler thread, on knob release */
-{
-    static const char pre[] = "INSERT OR REPLACE INTO op1rsettings VALUES ('auxsend',";
-    static char q[80];
-    char *e = q; for (const char *c = pre; *c; ) *e++ = *c++;
-    char d[12]; int n = 0; int32_t v = fr_sends_code();
-    do { d[n++] = (char)('0' + v % 10); v /= 10; } while (v);
-    while (n) *e++ = d[--n];
-    *e++ = ')'; *e = 0;
-    void *db = DB_HANDLE();
-    DB_EXEC(db, FR_CREATE);
-    DB_EXEC(db, q);
-}
-#endif
 
 static int32_t sacc[4];
 void fr_send_turn(int t, int delta)                         /* mixer T1, encoder held + turned: send 0..100 */
@@ -269,3 +253,29 @@ static void fr_update(void *scr, int dt)
     sf_text(r, FR_LX, FR_Y3, FR_S, fr_out ? "MONO TAPE" : "STEREO MASTER", FR_W, c_green);
 }
 const op1_screen_t SCREEN_fxroute = { fr_init, fr_update };
+
+/* Sidechain sources for plugins (docs/61, plugin export): this block's 64 samples of a signal other than the FX's own
+ * input. Tracks are pre-fader (tr_out): asking for them starts the track work, which runs until 32 blocks after the
+ * last ask; until fresh track outs exist (first block) and for an unknown source: zeros, returns 0. */
+int op1_sc_source(int src, int16_t *out)
+{
+    if (src >= OP1_SC_T1 && src <= OP1_SC_TAPE) {
+        sc_want = 32;
+        if (tr_at != sc_blk) { for (int i = 0; i < 64; i++) out[i] = 0; return 0; }
+        if (src != OP1_SC_TAPE) { const int16_t *t = tr_out[src - OP1_SC_T1]; for (int i = 0; i < 64; i++) out[i] = t[i]; }
+        else for (int i = 0; i < 64; i++) out[i] = op1_sat16(tr_out[0][i] + tr_out[1][i] + tr_out[2][i] + tr_out[3][i]);
+        return 1;
+    }
+    const int16_t *b = src == OP1_SC_IN ? INPUT : src == OP1_SC_INST ? BUS : 0;
+    for (int i = 0; i < 64; i++) out[i] = b ? b[i] : 0;
+    return b != 0;
+}
+
+#ifndef OP1_HOST
+/* stock master FX: their stereo render slots (make_firmware.py DATA_PATCHES) call these; the FX itself unchanged */
+typedef void (*fr_fx)(void *, int16_t *, int16_t *, const int16_t *);
+#define FR_ST(name, orig) \
+    void fr_st_##name(void *self, int16_t *l, int16_t *r, const int16_t *p) { fr_route((fr_fx)(orig), self, l, r, p); }
+FR_ST(delay, 0x0197DC42) FR_ST(grid, 0x019AF83C) FR_ST(punch, 0x019E662C) FR_ST(phone, 0x01A1C25C)
+FR_ST(spring, 0x01A32FFC) FR_ST(nitro, 0x019A684C) FR_ST(cwo, 0x019450FC)
+#endif

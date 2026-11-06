@@ -434,6 +434,10 @@ __hook_taperase:
 	.global __hook_tapesave
 __hook_tapesave:
 	call _tape_safe_write;
+	.section .hook_tapeflush,"ax"
+	.global __hook_tapeflush
+__hook_tapeflush:
+	call _tape_service;
 /* sampler+ (docs/46): JUMP.L at the Adsr_render entry -> sp_adsr (same arguments, 4th on the stack); the stock
  * function = the two replaced instructions, then on at 0x0191212C */
 	.section .hook_spadsr,"ax"
@@ -464,6 +468,18 @@ _sp_adsr_stock:
  * which also does the tick's stock body */
 	.section .hook_frsnap,"ax"
 	jump.l _fr_snap;
+
+/* delayed patch saves (bgsave.c): the SaveSlotJob queue call goes to bgs_queue_slot; bgs_queue_stock = the original */
+	.section .hook_bgsgc,"ax"
+	call _bgs_idle_gc;
+	.section .hook_bgsqueue,"ax"
+	jump.l _bgs_queue_slot;
+	.text
+	.global _bgs_queue_stock
+	.align 2
+_bgs_queue_stock:
+	LINK 0;
+	jump.l _bgs_queue_cont;
 
 	.section .hook_dpkeep,"ax"
 	.global __hook_dpkeep

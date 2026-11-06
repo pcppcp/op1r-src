@@ -1,0 +1,20 @@
+{
+  "name": "blot",
+  "author": "pcppcp",
+  "kind": "synth",
+  "symbol": "ENGINE_blot",
+  "sources": [
+    "blot.c",
+    "blot_dsp.S"
+  ],
+  "defaults": [
+    9000,
+    22000,
+    18000,
+    9000
+  ],
+  "screen": {
+    "svg": "blot.svg",
+    "symbol": "SCREEN_blot"
+  }
+}

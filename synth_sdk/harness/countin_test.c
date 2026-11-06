@@ -10,6 +10,7 @@ static int clicks, plays, block;
 static int click_half[64], click_block[64];
 void pu_block(void) {}
 void inst_fade_block(void) {}
+void pc_block(void) {}
 void pu_service(void) {}
 #include "../tape/countin.c"
 void fr_capture(void) {}

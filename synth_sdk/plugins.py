@@ -16,6 +16,9 @@ plugin.json fields (paths relative to the plugin folder):
   stereo         (fx, optional) op1_fx_t.render_stereo is set: the master position renders left / right itself
   coarse         (synth, optional) knob numbers 0..3 turned in 8 steps over the range (both pages), e.g. a selector
   screen         (optional) {"svg": file name, must not clash with stock content/display, "symbol": op1_screen_t}
+  source_cflags  (optional) {"file.c": ["-O3"]}: extra compiler flags for one source, keyed by its file name and
+                 added after the default -O2. Only -O0 .. -O3 and -Os are accepted. For a hot loop that -O3 speeds
+                 up; check that the output stays the same.
 Orders 1..31 per kind (OP1_MAX_ORDER in op1_plugin.h).
 """
 import json, os
@@ -47,6 +50,18 @@ def load():
         orders = [e['order'] for e in lst if e.get('order')]
         assert len(set(orders)) == len(orders), f'duplicate plugin order: {orders}'
     return engs, fxs
+
+
+def source_flags(e, srcs):
+    """-> {source path: [flags]} for the sources `srcs` of plugin entry `e` (plugin.json "source_cflags", keyed by
+    file name); a key that names no source, or a flag other than -O0..-O3 / -Os, is an error"""
+    sf = e.get('source_cflags', {})
+    names = {os.path.basename(s) for s in srcs}
+    assert isinstance(sf, dict) and set(sf) <= names, f'{e["name"]}: source_cflags names a file that is not a source'
+    for flags in sf.values():
+        assert isinstance(flags, list) and all(f in ('-O0', '-O1', '-O2', '-O3', '-Os') for f in flags), \
+            f'{e["name"]}: source_cflags takes -O0 .. -O3 and -Os only'
+    return {s: sf.get(os.path.basename(s), []) for s in srcs}
 
 
 def load_seqs(kind='seq'):

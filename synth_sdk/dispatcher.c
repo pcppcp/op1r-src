@@ -25,6 +25,8 @@ static uint8_t voice_engine[OP1_VOICES];
 /* selector word -> engine / FX order, 0 if this build has no plugin with that order (stock iter / filter) */
 static int engine_index(int n) { return (n > 0 && n < op1_engine_count && op1_engines[n]) ? n : 0; }
 static int fx_index(int n)     { return (n > 0 && n < op1_fx_count && op1_fxs[n]) ? n : 0; }
+int mx_engine_plugin(int n) { return engine_index(n); }          /* midi/mx.c: page 2 words only for plugins */
+int mx_fx_plugin(int n) { return fx_index(n); }
 
 static int engine_of(const int16_t *params)
 {
@@ -299,14 +301,18 @@ static void eu_sync_screen(void);
 
 /* ---- quad LFO (lfo/quadlfo.c) ---- */
 extern int  ql_is_quad(const int16_t *w);
+extern int  ql_is_fox(const int16_t *w);
+extern int  fox_press(int16_t *w, int knob);
+extern const op1_screen_t SCREEN_foxlfo, SCREEN_pondlfo;
+extern int  ql_is_pond(const int16_t *w);
 extern void ql_press(int pos, int knob);
 extern void ql_turn(int16_t *w, int pos, int knob, int delta, int shift);
 extern const op1_screen_t SCREEN_quadlfo;
 #define READ_LFO_PARAM ((void *(*)(int, int))0x01A293BC)
 #define MIDI_LFO_SCREEN_ID 0x1C
-static uint32_t ql_scr[32], ql_vt[10];
+static uint32_t ql_scr[32], ql_vt[10], fox_scr[32], fox_vt[10], pond_scr[32], pond_vt[10];   /* quad / fox / pond LFO screens */
 static void *midi_lfo_screen;
-static int ql_scr_ready;
+static int ql_scr_ready, fox_scr_ready, pond_scr_ready;
 
 int32_t op1_db_last_err;                                           /* op1_synth.h: op1_db_write */
 
@@ -403,7 +409,8 @@ int lfo_name_eq(const char *name, const dstring *s)
 {
     const char *p = s->cap > 15 ? s->u.ptr : s->u.buf;
     if (streq_n(p, name, s->size)) return 1;
-    return name[0] == 'm' && name[1] == 'i' && name[2] == 'd' && name[3] == 'i' && !name[4] && streq_n(p, "quad", s->size);
+    return name[0] == 'm' && name[1] == 'i' && name[2] == 'd' && name[3] == 'i' && !name[4]
+        && (streq_n(p, "quad", s->size) || streq_n(p, "fox", s->size) || streq_n(p, "pond", s->size));   /* fox / pond LFO: same class */
 }
 
 static const int16_t *lfo_words(int pos, int slot)
@@ -439,7 +446,8 @@ int lfo_range_ok(int type, int i, const int16_t *v)
     if (i >= 4) oldq &= (uint8_t)oldctrl;
     if (!ok) bad = 1;
     if (i < 7) return 1;
-    if (((uint16_t)*v >> 8) == 0xA5 || oldq) return 1;            /* current or old quad word set */
+    if (((uint16_t)*v >> 8) >= 0xA5 && ((uint16_t)*v >> 8) <= 0xA7) return 1;   /* quad / fox / pond words */
+    if (oldq) return 1;                                           /* old quad words */
     return !bad;
 }
 
@@ -622,6 +630,18 @@ void *screens_ctor_hook(void)
         ql_vt[3 * 2 + 1] = (uint32_t)SCREEN_quadlfo.update;
         ql_vt[4 * 2 + 1] = (uint32_t)SCREEN_quadlfo.init;
         ql_scr[3] = (uint32_t)ql_vt;
+        SCREEN_CTOR(fox_scr, MIDI_LFO_SCREEN_ID, "foxlfo.svg");   /* fox LFO (docs/63) */
+        SCREEN_TABLE[MIDI_LFO_SCREEN_ID] = saved;
+        for (int i = 0; i < 10; i++) fox_vt[i] = ITER_SCREEN_VT[i];
+        fox_vt[3 * 2 + 1] = (uint32_t)SCREEN_foxlfo.update;
+        fox_vt[4 * 2 + 1] = (uint32_t)SCREEN_foxlfo.init;
+        fox_scr[3] = (uint32_t)fox_vt;
+        SCREEN_CTOR(pond_scr, MIDI_LFO_SCREEN_ID, "pondlfo.svg");   /* pond LFO (docs/64) */
+        SCREEN_TABLE[MIDI_LFO_SCREEN_ID] = saved;
+        for (int i = 0; i < 10; i++) pond_vt[i] = ITER_SCREEN_VT[i];
+        pond_vt[3 * 2 + 1] = (uint32_t)SCREEN_pondlfo.update;
+        pond_vt[4 * 2 + 1] = (uint32_t)SCREEN_pondlfo.init;
+        pond_scr[3] = (uint32_t)pond_vt;
     }
     {                                                            /* resource monitor screen object */
         void *saved = SCREEN_TABLE[CLOCK_SCREEN_ID];
@@ -730,6 +750,14 @@ void screens_load_hook(void *table)
         ql_scr[0] = (uint32_t)SVG_LOAD((void *)ql_scr[2]);
         if (ql_scr[0]) { SCREEN_quadlfo.init(ql_scr); ql_scr_ready = 1; }
     }
+    if (fox_scr[2]) {
+        fox_scr[0] = (uint32_t)SVG_LOAD((void *)fox_scr[2]);
+        if (fox_scr[0]) { SCREEN_foxlfo.init(fox_scr); fox_scr_ready = 1; }
+    }
+    if (pond_scr[2]) {
+        pond_scr[0] = (uint32_t)SVG_LOAD((void *)pond_scr[2]);
+        if (pond_scr[0]) { SCREEN_pondlfo.init(pond_scr); pond_scr_ready = 1; }
+    }
     if (sm_scr[2]) {                                             /* resource monitor (slot 0x2A on T1) */
         sm_scr[0] = (uint32_t)SVG_LOAD((void *)sm_scr[2]);
         clock_screen = SCREEN_TABLE[CLOCK_SCREEN_ID];
@@ -767,6 +795,8 @@ void screens_load_hook(void *table)
         drum_screen = SCREEN_TABLE[0x10];
         if (se_ready && sd_scr[0] && drum_screen) sd_ready = 1;  /* (texts shared, made once) */
     }
+    { extern void pc_load(void); pc_load(); }                    /* pulse clock in: source setting (midi/pclk.c) */
+    { extern void cc_load(void); cc_load(); }                    /* CC channels / feedback (midi/ccmap.c) */
     dpu_ui_load();                                               /* drum+ plugin: load its pages, take the stock ones */
     spc_ui_load();                                               /* sampler+ plugin: the same for 6 / 0x16 */
     finger_screen = SCREEN_TABLE[EUCLID_SCREEN_ID];              /* sequencer plugin screens (swapped into 0x2D) */
@@ -918,6 +948,7 @@ static uint8_t mode_keys;                                               /* synth
 
 void key_event_hook(int code, int pressed)
 {
+    if (pressed) { extern void bgs_flush(void); bgs_flush(); }   /* delayed saves (bgsave.c): a key may change mode / start disk mode */
     if (code >= 0x02 && code <= 0x05) {                          /* the Lander combo: all four held -> swallowed */
         uint8_t bit = (uint8_t)(1u << (code - 2));
         if (!pressed) mode_keys &= (uint8_t)~bit;
@@ -927,6 +958,7 @@ void key_event_hook(int code, int pressed)
     /* midi/mx.c MX_KEY, marked by its state byte: R246 itself pushes key 0x3F state 1 when the host ejects the USB disk
      * (0x019EFE6C, word 0x018E62BC) and the COM controller leaves disk mode on it, so that one must reach the stock code */
     if (code == 0x3F && pressed == 0xA5) { extern void mx_apply(void); mx_apply(); return; }   /* MX_KEY_DOWN */
+    { extern void cc_fb_key(int, int); cc_fb_key(code, pressed); }   /* CC feedback (midi/ccmap.c) */
     if (du_prompt_key(code, pressed)) return;                    /* dev update prompt: T1 restart / T2 cancel */
     extern int ms_key(int code, int pressed, int on_tape);
     if (ms_key(code, pressed, tape_page())) return;              /* MIDI sequencer device: SEQ + TAPE (docs/39) */
@@ -994,7 +1026,8 @@ void key_event_hook(int code, int pressed)
         if (!pressed && code == 0x22 && play_swallow) { play_swallow = 0; return; }
         if (pressed && pu_key(code)) { if (code == 0x22) play_swallow = 1; return; }
     }
-    if (mx_changed) { mx_changed = 0; fr_save_sends(); }        /* aux sends: saved at the next key event */
+    { extern uint8_t fr_send_dirty;                             /* aux sends (encoder or MIDI): saved at the next key event */
+      if (mx_changed || fr_send_dirty) { mx_changed = 0; fr_send_dirty = 0; fr_save_sends(); } }
     { extern void scale_flush(void), fxroute_flush(void), settings_flush(void);   /* page settings, likewise */
       scale_flush(); fxroute_flush(); settings_flush(); }
     if (code >= 0x3B && code <= 0x3E && fr_src == 2 && CUR_SCREEN_ID == MIXER_SCREEN_ID) {   /* press: pan / aux */
@@ -1039,7 +1072,10 @@ void key_event_hook(int code, int pressed)
     }
     if (sb_key(custom_engine_page(), code, pressed)) return;     /* engine sample browser (screens/sbrowse.c) */
     if (code >= 0x3B && code <= 0x3E && quad_lfo_page()) {      /* quad LFO: press selects LFO 1..4 */
-        if (pressed) ql_press(lfo_page_pos(), press_knob[code - 0x3B]);
+        int pos = lfo_page_pos();
+        int16_t *w = (int16_t *)lfo_words(pos, lfo_page_slot(pos));
+        if (pressed && ql_is_fox(w)) { if (fox_press(w, press_knob[code - 0x3B])) PATCH_SET_LFO(PATCH_OBJ(pos, lfo_page_slot(pos)), w); }
+        else if (pressed) ql_press(pos, press_knob[code - 0x3B]);
         return;
     }
     if (code >= 0x3B && code <= 0x3E) {
@@ -1069,70 +1105,11 @@ void key_event_hook(int code, int pressed)
     eu_sync_screen();                                            /* mode / sequencer may have changed */
 }
 
-/* MIDI CC -> key / encoder events (docs/11 §9). Runs in midi_poll (PlayerManager::tick), not the KeyHandler thread,
- * so events go where the key-scan ISR 0xFFA04A44 puts them: keys into the stock key queue (s_key_queue, u16
- * code | pressed << 8, 256 entries), encoder ticks into the accumulators 0x01DD5250[4] (KeyHandler::on_knob, 2 ticks
- * per detent), interrupts off while writing; then the KeyHandler semaphore is posted (0x019C2F04, as the ISR does).
- * Keys: CC = keycode + 5 like COM CTRL mode, value >= 64 = press. Encoders: CC 102..105 relative (1..63 up,
- * 65..127 down, 7-bit two's complement like CTRL relative mode); CC 1..4 stay with the MIDI LFO. */
-static const uint8_t midi_key_ok[] = {               /* key codes 0..0x2F reachable over MIDI (no keyboard keys) */
-    1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,0,                 /* help metro synth drum tape mixer T1-T4 lift drop scissors */
-    1,1,1,1,1,1,0,0,0,0,0,0,0,0,0,0,                 /* 1..5, sequencer */
-    0,1,1,1,1,1,1,0,0,0,0,1,1,1,1,1};                /* rec play stop left right shift, mic com, 6..8 */
-static uint8_t midi_key_down[sizeof midi_key_ok];    /* only send state changes */
-
-/* absolute CC -> live mixer / tape words (docs/11 §9). The DSP and the mixer / tape screens read these words
- * directly; ranges come from the firmware's own {min, max, step} int16 tables, as the encoders use them
- * (0x01A1DE68): mixer 0xFF8018CC[8] (vol 0..3, pan 4..7), tape 0x01DE56F8[3] (rec level). */
-static void midi_set_ranged(volatile int16_t *dst, const volatile int16_t *rng, int v)
-{
-    int lo = rng[0], hi = rng[1];
-    if (hi > lo) *dst = lo + (hi - lo) * v / 127;
-}
-
-static void midi_cc_mixer(int cc, int v)
-{
-    int t = (cc - 106) & 3;
-    if (cc < 110)                                                 /* 106..109: track 1..4 volume */
-        midi_set_ranged((volatile int16_t *)0xFF801928 + t, (volatile int16_t *)0xFF8018CC + t * 3, v);
-    else if (cc < 114) {                                          /* 110..113: pan, 64 = centre */
-        const volatile int16_t *r = (volatile int16_t *)0xFF8018CC + (4 + t) * 3;
-        int p = (v - 64) * 0x4000 / 63;                           /* stock pan range is -0x4000..0x4000 */
-        if (r[1] > r[0]) *((volatile int16_t *)0xFF801930 + t) = p < r[0] ? r[0] : p > r[1] ? r[1] : p;
-    } else if (cc < 118) {                                        /* 114..117: mute, as T1..T4 on the mixer page */
-        ((volatile uint8_t *)0xFF8010A0)[t] = v >= 64;
-        ((void (*)(void))0x01967ED0)();                           /* Core: mute words for the DSP */
-    } else                                                        /* 118: tape input (rec) level, red encoder */
-        midi_set_ranged((volatile int16_t *)0x01B4EF6E, (volatile int16_t *)0x01DE56F8 + 3 * 3, v);
-}
-
+/* MIDI CCs (docs/60): keys and params groups are routed from the raw packets (midi/ccmap.c, called in du_rx_poll
+ * before the stock parser); what reaches the stock CC handler here is the stock part (CC table / MIDI LFO). */
 void midi_cc_hook(void *vec)
 {
     ((void (*)(void *))0x01A84F8C)(vec);                         /* stock: CC table (MIDI LFO) */
-    const uint8_t *m = *(const uint8_t **)((char *)vec + 4);     /* status, cc, value (size asserted by stock) */
-    extern int mx_cc(int cc, int v);
-    if (mx_cc(m[1], m[2])) return;                               /* synth automation CCs (midi/mx.c, docs/41) */
-    int code = m[1] - 5, v = m[2], down = v >= 64, knob = m[1] - 102;
-    unsigned imask;
-    if (m[1] >= 106 && m[1] <= 118) { midi_cc_mixer(m[1], v); return; }
-    if (knob >= 0 && knob < 4) {
-        if (!(v & 63)) return;                                   /* 0 / 64: no movement */
-        volatile int32_t *acc = (volatile int32_t *)0x01DD5250 + knob;
-        __asm__ volatile ("cli %0;" : "=d"(imask));
-        *acc += (v < 64 ? v : v - 128) * 2;
-        __asm__ volatile ("sti %0;" : : "d"(imask));
-    } else {
-        if (code < 0 || code >= (int)sizeof midi_key_ok || !midi_key_ok[code] || midi_key_down[code] == down) return;
-        if (du_prompt_active()) return;                          /* security: only physical keys confirm an update */
-        midi_key_down[code] = down;
-        volatile uint32_t *rd = (volatile uint32_t *)0x01DD5244, *wr = (volatile uint32_t *)0x01DD5248;
-        __asm__ volatile ("cli %0;" : "=d"(imask));
-        uint32_t w = *wr, n = (w + 1) & 0xFF;
-        if (n != *rd && !*(volatile uint8_t *)0x01DD524D)       /* full or ISR mid-push: drop the event */
-            ((volatile uint16_t *)0x01DD5044)[w] = code | down << 8, *wr = n;
-        __asm__ volatile ("sti %0;" : : "d"(imask));
-    }
-    ((void (*)(void))0x019C2F04)();                               /* wake KeyHandler::process_queue */
 }
 
 /* MIDI START: CALL 0x01A5E7D0 (reset beat counters) in midi_rx_parse's FA branch (0x019E39D6) -> here (docs/11 §5).
@@ -1175,8 +1152,19 @@ void midi_start_hook(void)
     for (int k = 0; k < op1_seq_count; k++) op1_seqs[k]->midi_start();   /* sequencer plugins */
 }
 
+/* the preset word a turn of an engine knob edits instead of params[knob]: page 2 (OP1_PRESS_PAGE, toggled by a press)
+ * or Shift + turn (OP1_PRESS_SHIFT, blue .. white); -1 = the knob itself */
+static int eng_turn_word(int n, int knob)
+{
+    uint8_t m = op1_engines[n]->press[knob];
+    if (m == OP1_PRESS_PAGE && op1_eng_page[knob]) return OP1_ENG_PAGE_WORD(knob);
+    if (m == OP1_PRESS_SHIFT && knob < 3 && *(volatile uint8_t *)0x01DD7F78) return OP1_ENG_PAGE_WORD(knob);
+    return -1;
+}
+
 void knob_event_hook(int knob, int16_t *delta)
 {
+    { extern void cc_fb_knob(int, int); cc_fb_knob(knob, *delta); }   /* CC feedback (midi/ccmap.c) */
     if (knob >= 0 && knob < 4 && se_is_open()) { se_knob(knob, *delta); return; }   /* sample editor */
     if (dpu_knob(knob, *delta)) return;                          /* drum+ pages (pitch / volume: stock) */
     if (spc_knob(knob, *delta)) return;                          /* sampler+ pages */
@@ -1206,31 +1194,54 @@ void knob_event_hook(int knob, int16_t *delta)
     }
     int n = custom_engine_page();
     if (sb_knob(n, knob, *delta)) return;                        /* engine sample browser: white scrolls */
+    int pw = n && knob >= 0 && knob < 4 ? eng_turn_word(n, knob) : -1;   /* page 2 / Shift + turn: a preset word */
     if (n && knob >= 0 && knob < 4 && (op1_engine_coarse[n] >> knob & 1)) {   /* coarse knob: 8 steps over the range */
         static int32_t acc[4];
         int16_t *w = (int16_t *)op1_synth_knobs(*(volatile int *)0xFF8016D4 & 7);
-        int wi = op1_eng_page[knob] && op1_engines[n]->press[knob] == OP1_PRESS_PAGE ? OP1_ENG_PAGE_WORD(knob) : knob;
+        int wi = pw >= 0 ? pw : knob;
         if ((acc[knob] > 0 && *delta < 0) || (acc[knob] < 0 && *delta > 0)) acc[knob] = 0;
         acc[knob] += *delta;
-        int st = acc[knob] / 2048;                               /* a detent is 2 events of 1024 (emulator) */
+        int st = acc[knob] / 1024;                               /* a step per hardware click (delta 1024), as the FX list knob */
         if (st) {
-            acc[knob] -= st * 2048;
+            acc[knob] -= st * 1024;
             int32_t v = (w[wi] < 0 ? 0 : w[wi]) + st * 4681;     /* 32767 / 7: 8 positions */
             w[wi] = (int16_t)(v < 0 ? 0 : (v > 32767 ? 32767 : v));
             PATCH_SET_KNOBS(PATCH_OBJ(0, *(volatile int *)0xFF8016D4), w);
         }
         return;
     }
-    if (n && knob >= 0 && knob < 4 && op1_eng_page[knob] && op1_engines[n]->press[knob] == OP1_PRESS_PAGE) {
+    if (pw >= 0) {
         int16_t *w = (int16_t *)op1_synth_knobs(*(volatile int *)0xFF8016D4 & 7);   /* this slot's words */
         /* shortcut: 0 (unset word of older patches) starts at 8192 = granular's 1x gain; per-engine default if
          * another engine pages a word whose neutral value is not 8192 */
-        int32_t v = (w[OP1_ENG_PAGE_WORD(knob)] > 0 ? w[OP1_ENG_PAGE_WORD(knob)] : 8192) + *delta / 4;
-        w[OP1_ENG_PAGE_WORD(knob)] = (int16_t)(v < 1 ? 1 : (v > 32767 ? 32767 : v));
+        int32_t v = (w[pw] > 0 ? w[pw] : 8192) + *delta / 4;
+        w[pw] = (int16_t)(v < 1 ? 1 : (v > 32767 ? 32767 : v));
         PATCH_SET_KNOBS(PATCH_OBJ(0, *(volatile int *)0xFF8016D4), w);   /* else lost on the next slot switch */
         return;
     }
     int e = custom_fx_page();
+    if (e && knob >= 0 && knob < 4 && OP1_PRESS_IS_LIST(op1_fxs[e]->press[knob])) {   /* list knob: an entry per click */
+        static int32_t acc[4];
+        if ((acc[knob] > 0 && *delta < 0) || (acc[knob] < 0 && *delta > 0)) acc[knob] = 0;
+        acc[knob] += *delta;
+        /* one entry per hardware click = delta 1024 (ENTE on the device: entries 656 raw apart needed 2 clicks, the stock
+         * knob moves 656 per 2048); op1emu's "detent" (4 edges) is 2048 = 2 entries */
+        int st = acc[knob] / 1024;
+        if (st) {
+            acc[knob] -= st * 1024;
+            int pos = op1_fx_screen_pos(), n = op1_fxs[e]->press[knob] & 0x3F;
+            int16_t *w = (int16_t *)op1_fx_knobs(pos);
+            const int16_t *rg = (const int16_t *)(0x01DE5C50 + 5 * 0x30 + knob * 6);
+            int32_t lo = rg[0], hi = rg[1];
+            if (hi <= lo) { lo = fx_rng_default[knob][0]; hi = fx_rng_default[knob][1]; }
+            int32_t q = w[knob] <= lo ? 0 : w[knob] >= hi ? 32767 : (w[knob] - lo) * 32767 / (hi - lo);
+            int i = (op1_fx_list(q, n) + st % n + n) % n;
+            w[knob] = op1_fx_list_word(i, n, lo, hi);
+            if (pos != OP1_FX_MASTER)                    /* master: saved from the live words (0x019D9B94) */
+                PATCH_SET_FX(PATCH_OBJ(pos, *(volatile int *)(pos ? 0xFF8016D8 : 0xFF8016D4)), w);
+        }
+        return;
+    }
     if (e && knob >= 0 && knob < 3 && op1_fxs[e]->press[knob] == OP1_PRESS_PAGE) {
         int pos = op1_fx_screen_pos();
         if (op1_fx_page[pos][knob]) {
@@ -1254,13 +1265,18 @@ int lfo_screen_select(void)                    /* ScreenId::for_lfo case 4 -> st
 {
     if (ql_scr_ready && midi_lfo_screen) {
         int pos = lfo_page_pos();
-        SCREEN_TABLE[MIDI_LFO_SCREEN_ID] = ql_is_quad(lfo_words(pos, lfo_page_slot(pos))) ? (void *)ql_scr : midi_lfo_screen;   /* case 4 = midi class */
+        const int16_t *w = lfo_words(pos, lfo_page_slot(pos));
+        SCREEN_TABLE[MIDI_LFO_SCREEN_ID] = ql_is_fox(w) ? (fox_scr_ready ? (void *)fox_scr : midi_lfo_screen)
+                                         : ql_is_pond(w) ? (pond_scr_ready ? (void *)pond_scr : midi_lfo_screen)
+                                         : ql_is_quad(w) ? (void *)ql_scr : midi_lfo_screen;   /* case 4 = midi class */
     }
     return MIDI_LFO_SCREEN_ID;
 }
 static int quad_lfo_page(void)
 {
-    return ql_scr_ready && CURRENT_SCREEN == MIDI_LFO_SCREEN_ID && SCREEN_TABLE[MIDI_LFO_SCREEN_ID] == (void *)ql_scr;
+    return CURRENT_SCREEN == MIDI_LFO_SCREEN_ID && ((ql_scr_ready && SCREEN_TABLE[MIDI_LFO_SCREEN_ID] == (void *)ql_scr)
+                                                  || (fox_scr_ready && SCREEN_TABLE[MIDI_LFO_SCREEN_ID] == (void *)fox_scr)
+                                                  || (pond_scr_ready && SCREEN_TABLE[MIDI_LFO_SCREEN_ID] == (void *)pond_scr));
 }
 
 /* ScreenId::for_fx case 5 (filter) -> asm stub fx_screen_case5 -> here; returns the screen id */

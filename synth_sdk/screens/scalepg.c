@@ -3,45 +3,17 @@
  * + 256 mode). */
 #include "../op1_synth.h"
 #include "stroke_font.h"
+#include "op1r_settings.h"
 #include "../scale/sc_core.h"
 
-#ifdef OP1_HOST
-int scale_host_saved = -1;
-static void sp_load(void) { if (scale_host_saved >= 0) { int v = scale_host_saved; sc_root = v & 15; sc_type = v >> 4 & 15; sc_mode = (uint8_t)(v >> 8); } }
-static void sp_save(void) { scale_host_saved = sc_root + 16 * sc_type + 256 * sc_mode; }
-#else
-#define DB_HANDLE ((void *(*)(void))0x0196DD44)
-#define DB_EXEC   ((void (*)(void *, const char *))0x0196F950)
-#define DB_GET    ((void (*)(void *, void *, const char *))0x0196FBD0)
-typedef struct { uint32_t alloc; union { char buf[16]; char *ptr; } u; uint32_t size, cap; uint32_t pad; } sp_dstr;
-static const char SP_CREATE[] = "CREATE TABLE IF NOT EXISTS op1rsettings (key TEXT PRIMARY KEY, val INTEGER NOT NULL)";
 static void sp_load(void)
 {
-    void *db = DB_HANDLE();
-    DB_EXEC(db, SP_CREATE);
-    sp_dstr s = { 0 };
-    DB_GET(&s, db, "SELECT val FROM op1rsettings WHERE key='scale'");
-    const char *p = s.cap > 15 ? s.u.ptr : s.u.buf;
-    int v = 0, n = 0;
-    for (; n < 6 && n < (int)s.size && p[n] >= '0' && p[n] <= '9'; n++) v = v * 10 + p[n] - '0';
-    if (!n) return;
+    int v = op1r_setting_get("scale", -1);                  /* root + 16 type + 256 mode */
+    if (v < 0) return;
     int r = v & 15, t = v >> 4 & 15, m = v >> 8;
     if (r < 12 && t < SC_NTYPES && m < SC_NMODES) { sc_root = (uint8_t)r; sc_type = (uint8_t)t; sc_mode = (uint8_t)m; }
 }
-static void sp_save(void)
-{
-    static const char pre[] = "INSERT OR REPLACE INTO op1rsettings VALUES ('scale',";
-    static char q[72];
-    char *e = q; for (const char *c = pre; *c; ) *e++ = *c++;
-    char d[8]; int n = 0, v = sc_root + 16 * sc_type + 256 * sc_mode;
-    do { d[n++] = (char)('0' + v % 10); v /= 10; } while (v);
-    while (n) *e++ = d[--n];
-    *e++ = ')'; *e = 0;
-    void *db = DB_HANDLE();
-    DB_EXEC(db, SP_CREATE);
-    DB_EXEC(db, q);
-}
-#endif
+static void sp_save(void) { op1r_setting_put("scale", sc_root + 16 * sc_type + 256 * sc_mode); }
 
 static int32_t acc[3];
 static uint8_t sp_dirty;

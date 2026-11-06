@@ -1,6 +1,7 @@
 /* Host test + preview frames for screens/usbout.c (USB out page): toggling, live flag, saved value, "restart" hint.
  * "render": JSON frames for harness/render_usbout.py */
 #include "../op1_synth.h"
+#include "../screens/op1r_settings.c"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -33,22 +34,22 @@ static void frame(const char *label, int render)
 int main(int argc, char **argv)
 {
     int render = argc > 1 && !strcmp(argv[1], "render");
-    usbout_host_saved = 0; usb_tracks_live = (uint8_t)usbout_load();
+    op1r_setting_put("usbtracks", 0); usb_tracks_live = (uint8_t)usbout_load();
     us_init(0);
     frame("master (default)", render);
     usbout_turn(1024);
-    assert(usb_tracks_live == 1 && usbout_host_saved == 1);
+    assert(usb_tracks_live == 1 && op1r_setting_get("usbtracks", -1) == 1);
     frame("blue right: master + tracks", render);
     usbout_turn(-1024);
-    assert(usb_tracks_live == 0 && usbout_host_saved == 0);
+    assert(usb_tracks_live == 0 && op1r_setting_get("usbtracks", -1) == 0);
 
-    usbout_turn(-1024); assert(usbout_host_saved == 0);      /* already there: no change */
+    usbout_turn(-1024); assert(op1r_setting_get("usbtracks", -1) == 0);      /* already there: no change */
     usbout_turn(300); usbout_turn(300); assert(usb_tracks_live == 0);   /* < 1 detent */
     assert(!ms_enabled);                                      /* sequencer: opt-in, off by default */
-    usbout_seq_turn(1024); assert(ms_enabled && usbout_host_seq_saved == 1);
+    usbout_seq_turn(1024); assert(ms_enabled && op1r_setting_get("midiseq", -1) == 1);
     frame("green right: sequencer on", render);
-    usbout_seq_turn(-1024); assert(!ms_enabled && usbout_host_seq_saved == 0);
-    usbout_host_seq_saved = 1; usbout_load(); assert(ms_enabled);   /* loaded at boot */
+    usbout_seq_turn(-1024); assert(!ms_enabled && op1r_setting_get("midiseq", -1) == 0);
+    op1r_setting_put("midiseq", 1); usbout_load(); assert(ms_enabled);   /* loaded at boot */
     usbout_seq_turn(-1024);
     if (!render) printf("ok\n");
     return 0;

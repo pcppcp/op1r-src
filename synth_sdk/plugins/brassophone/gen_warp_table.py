@@ -42,7 +42,9 @@ def to_q15(v):
 lines = []
 lines.append("/* Exponential phase warp table: warp_table[s][t] = Q15 warped phase in [0,1] */")
 lines.append("/* s = 0..63 (phase index), t = 0..256 (timbre 0..20 mapped from column) */")
-lines.append("static const int16_t warp_table[64][257] = {")
+lines.append("/* Row 64 repeats row 63 (all 32767) for brass_dsp.S, which always reads rows s and s + 1: at s = 63 that gives what")
+lines.append(" * warp_row() gives (32767; the C code never reads row 64). */")
+lines.append("static const int16_t warp_table[65][257] = {")
 
 for s in range(NUM_SAMPLES):
     ph_f = s / (NUM_SAMPLES - 1)  # 0 to 1
@@ -60,6 +62,11 @@ for s in range(NUM_SAMPLES):
         lines.append("        " + ", ".join(vals) + ",")
     lines.append("    },")
 
+lines.append("    {  // s=64: row 63 again, read by brass_dsp.S only")
+vals = ["%6d" % to_q15(warp(1.0, t * MAX_TIMBRE / NUM_COLUMNS)) for t in range(NUM_COLUMNS + 1)]
+for i in range(0, len(vals), 8):
+    lines.append("        " + ", ".join(vals[i:i + 8]) + ",")
+lines.append("    },")
 lines.append("};")
 
 print("\n".join(lines))

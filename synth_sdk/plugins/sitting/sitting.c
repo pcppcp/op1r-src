@@ -716,7 +716,7 @@ static void sit_screen_update(void *scr, int dt)
     sit_t *s = &st[pos];
     int16_t k[4];
     sq_fx_knobs_live(k);
-    const int16_t *wd = op1_fx_knobs(pos);
+    int16_t wsh[8]; const int16_t *wd = op1_knobs_shown(1, pos, op1_fx_knobs(pos), wsh);   /* page 2 as modulated */
     int32_t w5 = wd[5] < 0 ? 0 : wd[5], w6 = wd[6] < 0 ? 0 : wd[6];
     int pg_blue = op1_fx_page[pos][0], pg_green = op1_fx_page[pos][1], pg_white = op1_fx_page[pos][2];
     op1_screen_draw(scr, dt);

@@ -35,6 +35,14 @@ STATES_BY_NAME['dddd'] = [
     ('everything max', (32767, 32767, 32767, 32767), 1, 50, -1),
     ('page 2 on blue / green / white', (6000, 24000, 20000, 8000), 1, 40, -1, 0b0111, 20000, 16000, 12000),
 ]
+STATES_BY_NAME['blot'] = [                       # the acid smiley: blue eyes, green smile, white mouth, red drips
+    ('defaults, idle', None, 0, 10, -1),
+    ('defaults, note (accent): mouth open, wink', None, 1, 3, -1),
+    ('Shift + white (drive) half: wiggly face', None, 0, 10, -1, 0, 0, 0, 16384),
+    ('drive max, all max, note', (32767, 32767, 32767, 32767), 1, 3, -1, 0, 0, 0, 32767),
+    ('drive max, reso 0, env max, note: mouth inside', (16000, 0, 32767, 32767), 1, 3, -1, 0, 0, 0, 32767),
+    ('note released: mouth closing', None, 1, 20, 4),
+]
 STATES_BY_NAME['aether'] = [                     # HOST_ACCEL: sensor X,Y,Z after the note-on (home = flat)
     ('flat (home), note held', None, 1, 40, -1),
     ('front edge up 20 deg: pitch up', None, 1, 60, -1, 0, 0, 0, 0, {'HOST_ACCEL': '0,-5604,15396'}),
@@ -59,6 +67,16 @@ FX_STATES_BY_NAME = {
               ('page 2 on blue + green (steps)', (21000, 11000, 16384, 20000), 6, 120, -1, 0b0111, 16500, 4000, 0),
               ('frozen, no loop', (16384, 11000, 0, 32767), 0, 10, -1, 0b1000, 0, 8192, 0),
               ('synced length: 1 bar', (20000, 30000, 0, 32767), 0, 10, -1)],
+    'nostromo': [('defaults (program 13: plate / med / low, HIFI): mid decay', None, 4, 160, -1, 0, 17824, 1024, 15170),
+                 ('blue, green, white on page 2; clock STD, program 14', (16645, 23494, 6553, 11468), 4, 160, -1, 0b0111, 26000, 3072, 16384),
+                 ('LOFI hall / high / high, wet: the white knob is the clock', (19660, 26214, 16384, 26214), 4, 160, -1, 0, 9800, 5120, 32767),
+                 ('all min: room / low / low, dry', (0, 0, 0, 0), 4, 160, -1, 0, 0, 0, 0),
+                 ('room, short, dark, thin bass, tank mod MED', (5000, 3300, 3300, 16384), 4, 160, -1, 0, 0, 1024, 1300),
+                 ('hall, long, bright, fat bass, tank mod HIGH', (26000, 31000, 6553, 20000), 4, 160, -1, 0, 32767, 1024, 23000),
+                 ('plate, diffusion HIGH: the pre-delay regenerated', (16645, 23494, 22000, 16384), 4, 160, -1, 0, 17824, 1024, 18811),
+                 ('hall, diffusion LOW: the sparse cloud', (20000, 23494, 16000, 16384), 4, 160, -1, 0, 20000, 1024, 22452),
+                 ('the screen opens: MU/TH/UR 6000', None, 4, 20, -1, 0, 17824, 1024, 15170),
+                 ('an input hit: the engines flare', None, 40, 122, -1, 0, 17824, 1024, 15170)],
     'clouds': [('defaults, silent', None, 0, 20, -1),
                ('defaults, input bursts', None, 12, 60, -1),
                ('dense grains, small', (8000, 6000, 31000, 12000), 6, 60, -1),

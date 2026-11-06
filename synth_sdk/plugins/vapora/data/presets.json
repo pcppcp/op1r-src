@@ -1,0 +1,457 @@
+[
+  {
+    "name": "asteroid swarm",
+    "group": "SPACE",
+    "character": "SWARM",
+    "description": "Swarm spectrum; sustained tone with slow swell.",
+    "interval_semitones": 0,
+    "knobs": [
+      0,
+      2500,
+      30000,
+      25000,
+      21248,
+      8448,
+      8192,
+      16000
+    ],
+    "adsr": [
+      11500,
+      11000,
+      30000,
+      12500
+    ],
+    "preview_envelope_ms": [
+      3700,
+      1000,
+      30146,
+      2500
+    ],
+    "retained_from_r6": true
+  },
+  {
+    "name": "breath choir",
+    "group": "AIR",
+    "character": "BREATH",
+    "description": "Breath spectrum; sustained tone with clear onset.",
+    "interval_semitones": 7,
+    "knobs": [
+      1700,
+      16000,
+      28500,
+      11500,
+      21248,
+      8704,
+      16384,
+      7000
+    ],
+    "adsr": [
+      7000,
+      11000,
+      24500,
+      12500
+    ],
+    "preview_envelope_ms": [
+      650,
+      1000,
+      24575,
+      2500
+    ],
+    "retained_from_r6": true
+  },
+  {
+    "name": "cavern flute",
+    "group": "HOLLOW",
+    "character": "FLUTE",
+    "description": "Flute spectrum; sustained tone with slow swell.",
+    "interval_semitones": 12,
+    "knobs": [
+      5500,
+      24500,
+      32000,
+      25500,
+      21248,
+      8960,
+      31129,
+      28000
+    ],
+    "adsr": [
+      9000,
+      11000,
+      30000,
+      12500
+    ],
+    "preview_envelope_ms": [
+      1500,
+      1000,
+      30146,
+      2500
+    ],
+    "retained_from_r6": true
+  },
+  {
+    "name": "deep pressure",
+    "group": "SPACE",
+    "character": "PRESSURE",
+    "description": "Pressure spectrum; sustained tone with slow swell.; long, dark Reverb enabled in T3",
+    "interval_semitones": 12,
+    "knobs": [
+      5500,
+      24500,
+      32000,
+      4000,
+      21248,
+      9216,
+      31129,
+      2200
+    ],
+    "adsr": [
+      14000,
+      11000,
+      30000,
+      12500
+    ],
+    "preview_envelope_ms": [
+      5200,
+      1000,
+      30146,
+      2500
+    ],
+    "retained_from_r6": true,
+    "fx": {
+      "type": "reverb",
+      "q15": [
+        23000,
+        15000,
+        24000,
+        10000
+      ]
+    }
+  },
+  {
+    "name": "pink surf",
+    "group": "AIR",
+    "character": "SURF",
+    "description": "Surf spectrum; sustained tone with slow swell.",
+    "interval_semitones": 0,
+    "knobs": [
+      0,
+      22000,
+      20000,
+      0,
+      21248,
+      9472,
+      8192,
+      8192
+    ],
+    "adsr": [
+      11500,
+      11000,
+      30000,
+      12500
+    ],
+    "preview_envelope_ms": [
+      3700,
+      1000,
+      30146,
+      2500
+    ],
+    "retained_from_r6": true
+  },
+  {
+    "name": "porcelain orbit",
+    "group": "CHIME",
+    "character": "PORCELAIN",
+    "description": "Porcelain spectrum; sustained tone with slow swell.",
+    "interval_semitones": 0,
+    "knobs": [
+      5500,
+      24500,
+      32000,
+      25500,
+      21248,
+      9728,
+      8192,
+      28000
+    ],
+    "adsr": [
+      9000,
+      11000,
+      26000,
+      12500
+    ],
+    "preview_envelope_ms": [
+      1500,
+      1000,
+      25886,
+      2500
+    ],
+    "retained_from_r6": true
+  },
+  {
+    "name": "sub lantern",
+    "group": "BASS",
+    "character": "SUB",
+    "description": "Sub spectrum; sustained tone with clear onset. One octave down.",
+    "interval_semitones": -12,
+    "knobs": [
+      0,
+      0,
+      18000,
+      0,
+      21248,
+      9984,
+      1638,
+      8192
+    ],
+    "adsr": [
+      64,
+      6500,
+      23000,
+      12500
+    ],
+    "preview_envelope_ms": [
+      5,
+      1800,
+      22937,
+      2500
+    ],
+    "octave": -1,
+    "retained_from_r6": true
+  },
+  {
+    "name": "a fifth tide",
+    "group": "Reference",
+    "description": "Unchanged reference: broad warm fifths.",
+    "interval_semitones": 7,
+    "knobs": [
+      19000,
+      28000,
+      20500,
+      14000,
+      21248,
+      8192,
+      16384,
+      6500
+    ],
+    "adsr": [
+      9000,
+      11000,
+      30000,
+      12500
+    ],
+    "retained_from_r6": true,
+    "character": "WARM",
+    "retained_name_r6": "fifth tide"
+  },
+  {
+    "name": "holy dust",
+    "knobs": [
+      14000,
+      28500,
+      29000,
+      19000,
+      21248,
+      10496,
+      16384,
+      8500
+    ],
+    "adsr": [
+      12500,
+      11000,
+      30000,
+      12500
+    ],
+    "character": "CATHEDRAL",
+    "group": "CINEMATIC",
+    "interval_semitones": 7,
+    "description": "Airy choral fifths with slow spectral motion",
+    "preview_envelope_ms": [
+      3933,
+      2200,
+      30000,
+      3500
+    ],
+    "octave": 0
+  },
+  {
+    "name": "XFIN",
+    "knobs": [
+      22000,
+      29500,
+      24500,
+      19000,
+      21248,
+      8192,
+      16384,
+      5500
+    ],
+    "adsr": [
+      12500,
+      11000,
+      30000,
+      12500
+    ],
+    "character": "WARM",
+    "group": "CINEMATIC",
+    "interval_semitones": 7,
+    "description": "Original silk spectrum with a wide cinematic fifth",
+    "preview_envelope_ms": [
+      3933,
+      2200,
+      30000,
+      3500
+    ],
+    "octave": 0
+  },
+  {
+    "name": "ice chapel",
+    "knobs": [
+      12000,
+      30000,
+      27000,
+      20000,
+      21248,
+      11520,
+      31129,
+      7500
+    ],
+    "adsr": [
+      13000,
+      11000,
+      30000,
+      12500
+    ],
+    "character": "GLASSVEIL",
+    "group": "CINEMATIC",
+    "interval_semitones": 12,
+    "description": "Deep octave foundation and distant crystalline ceiling",
+    "preview_envelope_ms": [
+      4100,
+      2200,
+      30000,
+      3500
+    ],
+    "octave": -1
+  },
+  {
+    "name": "last light",
+    "knobs": [
+      11500,
+      29000,
+      16000,
+      18000,
+      21248,
+      10240,
+      16384,
+      5000
+    ],
+    "adsr": [
+      10500,
+      11000,
+      30000,
+      12500
+    ],
+    "character": "VELVET",
+    "group": "CINEMATIC",
+    "interval_semitones": 7,
+    "description": "Warm fifths opening into a distant choir",
+    "preview_envelope_ms": [
+      3266,
+      2200,
+      30000,
+      3500
+    ],
+    "octave": 0
+  },
+  {
+    "name": "moon choir",
+    "knobs": [
+      27000,
+      28000,
+      21000,
+      18000,
+      21248,
+      11520,
+      14745,
+      4500
+    ],
+    "adsr": [
+      12000,
+      11000,
+      30000,
+      12500
+    ],
+    "character": "GLASSVEIL",
+    "group": "CINEMATIC",
+    "interval_semitones": 4,
+    "description": "Glassy major-third haze melting toward the ocean spectrum",
+    "preview_envelope_ms": [
+      3766,
+      2200,
+      30000,
+      3500
+    ],
+    "octave": 0
+  },
+  {
+    "name": "stone hall",
+    "knobs": [
+      2800,
+      24500,
+      23500,
+      12500,
+      21248,
+      10496,
+      8192,
+      6000
+    ],
+    "adsr": [
+      11500,
+      11000,
+      30000,
+      12500
+    ],
+    "character": "CATHEDRAL",
+    "group": "CINEMATIC",
+    "interval_semitones": 0,
+    "description": "Formant-rich cathedral sustain; octave -3; dry",
+    "preview_envelope_ms": [
+      3600,
+      2200,
+      30000,
+      3500
+    ],
+    "octave": -3
+  },
+  {
+    "name": "tidal arc",
+    "knobs": [
+      28000,
+      30000,
+      27500,
+      22000,
+      21248,
+      11264,
+      16384,
+      6500
+    ],
+    "adsr": [
+      11000,
+      11000,
+      30000,
+      12500
+    ],
+    "character": "OCEANIC",
+    "group": "CINEMATIC",
+    "interval_semitones": 7,
+    "description": "Broad ocean-to-glass morph over an open fifth",
+    "preview_envelope_ms": [
+      3433,
+      2200,
+      30000,
+      3500
+    ],
+    "octave": 0
+  }
+]

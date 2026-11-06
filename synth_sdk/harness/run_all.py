@@ -10,16 +10,21 @@ EXTRA = {                                   # test -> extra sources (relative to
     'chord': ['chord/ch_core.c'], 'dddd': ['dddd/dd_core.c'], 'dddd_plugin': ['dddd/dd_core.c'],
     'devupd': ['devupd/du.c'], 'dp_plus': ['drumplus/dp_plus.c', 'drumplus/dp_voice.c'],
     'dp_ui': ['drumplus/dp_plus.c', 'drumplus/dp_voice.c'], 'erase': ['tape/erase.c'],
-    'mseq': ['seqdev/ms_core.c'], 'mx': ['midi/mx.c'], 'overlay': ['screens/overlay.c'],
-    'rnd': ['rnd/rn_core.c'], 'safewrite': ['tape/safewrite.c'], 'steve': ['steve/st_core.c'],
-    'usbtrack': ['screens/usbtrack.c'],
+    'mseq': ['seqdev/ms_core.c'], 'oblique': ['harness/build/oblique_data.c'], 'mx': ['midi/mx.c'], 'ccmap': ['midi/ccmap.c', 'midi/mx.c', 'screens/op1r_settings.c'], 'overlay': ['screens/overlay.c'],
+    'rnd': ['rnd/rn_core.c'], 'pclk': ['midi/pclk.c', 'screens/op1r_settings.c'], 'safewrite': ['tape/safewrite.c'], 'steve': ['steve/st_core.c'],
+    'usbtrack': ['screens/usbtrack.c'], 'op1p': ['plugload/op1p_load.c'],
 }
+def _plugins():                                 # op1p_test: every built plugin file (make_plugin.py / make_firmware.py)
+    d = os.path.join(SDK, 'build', 'plugins')
+    return sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith('.op1p')) if os.path.isdir(d) else []
+ARGS = {'op1p': _plugins}
 SKIP = {
     'dp_voice': 'needs a sample directory argument', 'sp_voice': 'needs a sample directory and rate',
-    'op1p': 'needs built .op1p files as arguments', 'vel': 'built per engine (-DENGINE=...)',
+'vel': 'built per engine (-DENGINE=...)',
     'paulstretch_engine': 'shelved plugin', 'sitting': 'built from synth_sdk with its own include path',
     'sp_plus': 'needs a sample directory argument',
 }
+if not _plugins(): SKIP['op1p'] = 'no built plugins (build/plugins/*.op1p)'
 if not os.path.exists(os.path.join(HERE, 'build', 'oblique_hostw.h')):   # width table made from the stock font (local)
     SKIP['oblique'] = 'needs build/oblique_hostw.h (stock font widths, local only)'
 
@@ -28,10 +33,11 @@ def run(name):
     exe = os.path.join(HERE, 'build', name + '_test')
     os.makedirs(os.path.dirname(exe), exist_ok=True)
     cmd = ['cc', '-O1', '-DOP1_HOST', '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined',
-           '-I', SDK, '-I', HERE, src] + [os.path.join(SDK, s) for s in EXTRA.get(name, [])] + ['-lm', '-o', exe]
+           '-I', SDK, '-I', HERE, '-I', os.path.join(SDK, 'plugload'), src] + [os.path.join(SDK, s) for s in EXTRA.get(name, [])] + ['-lm', '-o', exe]
     b = subprocess.run(cmd, capture_output=True, text=True)
     if b.returncode: return 'build', b.stderr.strip().splitlines()[-3:]
-    r = subprocess.run([exe], capture_output=True, text=True, cwd=HERE, timeout=600)
+    args = ARGS.get(name, lambda: [])()
+    r = subprocess.run([exe] + args, capture_output=True, text=True, cwd=HERE, timeout=600)
     if r.returncode: return 'run', (r.stdout + r.stderr).strip().splitlines()[-3:]
     return None, None
 

@@ -45,15 +45,24 @@ Measured on the host (FFT of the real output, off-grid notes and μ values):
 - peaks are −6 dBFS at defaults and −2.4 dBFS with every knob at max; nothing saturates in 400 random fuzz runs
   (UBSan, MIDI −10…135, vibrato, negative page words)
 
-## CPU (Blackfin, `bfin-elf-gcc -O2`, instructions per sample from objdump ≈ cycles)
+## CPU (Blackfin)
 
-| configuration | pass 1 (lamps) | pass 2 (shaping) | per-block share | total per voice-sample | 6 voices at 400 MHz |
-|---|---|---|---|---|---|
-| coupling 0 (one lamp) | 50 | 39 | ~12 | ~101 | ~6.7 % |
-| coupling > 0 (two lamps) | 87.5 (175 per 2 samples) | 39 | ~12 | ~139 | ~9.2 % |
+On the Blackfin both passes run in `arc_dsp.S`. They are scheduled by hand and give the same samples, bit for bit,
+as the C loops in `arc.c`, which the host builds still use (the file assembles empty there; build with `-DARC_C_REF`
+to use the C loops on the Blackfin too). Instruction packets per sample, as bcore counts them (the C column is the
+`bfin-elf-gcc -O2` loop):
 
-Divisions (`__divsi3`) only happen per block: voice index, ratio, gain, brightness and portrait scale. There is
-no division or 64-bit maths in any sample loop.
+| configuration | pass 1 (lamps) | pass 2 (shaping) | per-block share | total per voice-sample |
+|---|---|---|---|---|
+| coupling 0 (one lamp) | 28 (C: 50) | 30 (C: 39) | ~4 (C: ~12) | ~62 (C: ~101) |
+| coupling > 0 (two lamps) | 40, 80 per pair (C: 87.5) | 30 (C: 39) | ~9 (C: ~12) | ~79 (C: ~139) |
+
+The most recent voice also draws the portrait. That is one point per chunk (up to 64 per block at high notes) at 18
+packets per point and lamp, computed inside the pass-1 kernel. Six voices at C7..C8 take 52.6k packets per block with
+every knob at 0 and 68.7k with every knob at max (C: 87.8k and 125.6k).
+
+Divisions (`__divsi3`) only happen per block: voice index, ratio, gain, brightness and, for the traced voice, the
+portrait scale. No sample loop divides or uses 64-bit maths.
 
 ## Known limitations
 
@@ -63,4 +72,5 @@ no division or 64-bit maths in any sample loop.
   is not "in tune".
 - The strike sag and pitch bends are applied per 128-sample block. The steps are phase-continuous and stay under
   10 cents.
-- With 2 lamps the worst case is ~9 % CPU, a little above the 8 % target.
+- The tuning table is decoded once per boot, normally by the screen. If a note comes first, render decodes the rows
+  it needs, which costs up to ~58k packets in that one block.

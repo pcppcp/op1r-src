@@ -40,8 +40,8 @@ volatile uint8_t usb_tracks_live;
 
 void tr_resample(int32_t pos, int32_t inc, const int16_t *gain_inc)
 {
-    extern volatile uint8_t fr_aux_live;                    /* FX2 aux with a send up (screens/fxroute.c) */
-    if (!usb_tracks_live && !fr_aux_live) { tr_rec[0] = 0; return; }   /* no track work */
+    extern int fr_tracks_needed(void);                       /* FX2 aux in use (screens/fxroute.c) */
+    if (!usb_tracks_live && !fr_tracks_needed()) { tr_rec[0] = 0; return; }   /* no track work */
     int n = tr_rec[0] > 16 ? 16 : tr_rec[0];
     uint8_t got = 0;
     for (int r = 0; r < n; r++) {                          /* gather: same offsets as the mixed buffers */
@@ -60,6 +60,8 @@ void tr_resample(int32_t pos, int32_t inc, const int16_t *gain_inc)
         }
     }
     tr_rec[0] = 0;
+    extern volatile uint8_t sc_blk, tr_at;
+    tr_at = (uint8_t)(sc_blk + 1);                         /* fresh for the block fr_snap counts next */
     for (int t = 0; t < TR_N; t++) {
         int16_t *o = tr_out[t];
         int peak = 0;

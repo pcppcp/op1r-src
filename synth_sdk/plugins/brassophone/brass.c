@@ -84,6 +84,26 @@ static inline int32_t warp_row(int32_t s, int32_t frac_q15, int32_t col)
     return a + op1_mul16(b - a, frac_q15);
 }
 
+#if defined(__bfin__) && !defined(BRASS_C_REF)
+/* brass_dsp.S: the sample loop below, hand-scheduled for the Blackfin, bit for bit. The block's values in the order
+ * the kernel reads them; its circular constant list k[] (10 words) is cycled once per sample. */
+typedef struct {
+    uint32_t ph;              /*  0: oscillator phase (updated) */
+    int32_t  lp;              /*  4: low-pass state (updated) */
+    uint32_t vph;             /*  8: vibrato phase (updated) */
+    int32_t  envq;            /* 12: envelope ramp, Q15 << 7 (updated) */
+    int16_t *out;             /* 16 */
+    const int16_t *warp;      /* 20: warp_table (65 rows) */
+    const int32_t *inc;       /* 24: OP1_PITCH_INC */
+    int32_t  k[10];           /* 28: vinc, {vamt : 1784}, {width : 257}, interp_start, 0, {32767 : 891},
+                               *     EXTRACT(7, 8), EXTRACT(11, 15), {vel gain : 8191}, env_step */
+} br_blk;
+_Static_assert(sizeof(br_blk) == 68, "br_blk layout (brass_dsp.S)");
+void br_loop(br_blk *b);
+static br_blk br_b;           /* the audio thread only, one voice at a time */
+#define BR_HALVES(h, l) ((int32_t)(((uint32_t)(uint16_t)(h) << 16) | (uint16_t)(l)))
+#endif
+
 static void brass_render(void *self, int16_t *out, const int16_t *params)
 {
     brass_voice_t *v = (brass_voice_t *)self;
@@ -123,7 +143,10 @@ static void brass_render(void *self, int16_t *out, const int16_t *params)
     /* Red/orange knob (0..32767) maps to vibrato frequency (per-sample LFO increment), squared: x^2 in Q15 gives
      * fine control at the slow end and squeezes the fast end into the last part of the knob. */
     int32_t knob_sq = (params[3] * params[3]) >> 15;
-    int32_t vibrato_phase_inc = VIBRATO_MIN_INC + (int32_t)(((int64_t)(VIBRATO_MAX_INC - VIBRATO_MIN_INC) * knob_sq) >> 15);
+    /* = (int64_t)(VIBRATO_MAX_INC - VIBRATO_MIN_INC) * knob_sq >> 15 in 32 bits (no __muldi3): 3116530 = 95 * 2^15 + 3570
+     * and knob_sq >= 0, so the product's high part shifts out exactly */
+    _Static_assert(VIBRATO_MAX_INC - VIBRATO_MIN_INC == 95 * 32768 + 3570, "vibrato increment split");
+    int32_t vibrato_phase_inc = VIBRATO_MIN_INC + 95 * knob_sq + ((3570 * knob_sq) >> 15);
 
     /* White knob (0..32767) maps to vibrato depth, scaled by the fade-in. */
     int32_t vibrato_amt_q15 = (params[2] * VIBRATO_MAX_AMT) >> 15;
@@ -138,6 +161,25 @@ static void brass_render(void *self, int16_t *out, const int16_t *params)
     /* Green knob (0..32767) is the sweep: 0%..100% of the whole interpolation range, scaled by the envelope. */
     int32_t width = params[1];
 
+#if defined(__bfin__) && !defined(BRASS_C_REF)
+    {
+        br_blk *b = &br_b;
+        b->ph = ph; b->lp = lp; b->vph = vibrato_phase; b->envq = env_q;
+        b->out = out; b->warp = &warp_table[0][0]; b->inc = inc;
+        b->k[0] = vibrato_phase_inc;
+        b->k[1] = BR_HALVES(vibrato_amt_q15, 1784);         /* BEND_AMOUNT * 2: see brass_dsp.S */
+        b->k[2] = BR_HALVES(width, 257);
+        b->k[3] = interp_start;
+        b->k[4] = 0;
+        b->k[5] = BR_HALVES(32767, 891);
+        b->k[6] = 7 << 8 | 8;
+        b->k[7] = 11 << 8 | 15;
+        b->k[8] = BR_HALVES(vg, 8191);
+        b->k[9] = env_step;
+        br_loop(b);
+        ph = b->ph; lp = b->lp; vibrato_phase = b->vph;
+    }
+#else
     for (int n = 0; n < OP1_BLOCK; n++) {
         /* Smoothed envelope (Q15, 0..32767). */
         env_q += env_step;
@@ -187,6 +229,7 @@ static void brass_render(void *self, int16_t *out, const int16_t *params)
          * gain envelope. */
         out[n] = op1_sat16((lp * vg) >> 16);
     }
+#endif
     v->ph = ph; v->lp = lp;
     v->interp_start = interp_start;
     v->vibrato_phase = vibrato_phase;

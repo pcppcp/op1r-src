@@ -23,7 +23,7 @@ static int jtype(const void *v) { return v ? ((const uint8_t *)v)[8] : T_NULL; }
 static const char *jstr(const void *v) { return jtype(v) == T_STRING ? *(const char *const *)v : 0; }
 static int eq(const char *a, const char *b) { while (*a && *a == *b) a++, b++; return *a == *b; }
 
-static const char *const lfo_known[] = { "tremolo", "value", "random", "element", "midi", "bend", "crank", "quad", 0 };
+static const char *const lfo_known[] = { "tremolo", "value", "random", "element", "midi", "bend", "crank", "quad", "fox", "pond", 0 };
 static const int16_t fx_def[8] = { 7548, 0, 8272, 19572, 8000, 8000, 8000, 8000 };    /* filter (op1_factory.db) */
 static const int16_t lfo_def[8] = { 16000, 0, 0, 16000, 0, 0, 0, 0 };                 /* tremolo */
 

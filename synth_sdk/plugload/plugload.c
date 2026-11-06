@@ -71,6 +71,7 @@ static void tables_init(void)
 extern volatile uint8_t op1_eng_page[4];
 extern volatile uint8_t op1_fx_page[3][4];
 void *read_fx_param_safe(int slot, int pos);
+int16_t op1_page2_live(int fx, int pos, int k, int16_t stored);
 int  eu_fw_note_on(int pos, int note, int key, int vel);           /* seq/seq_core.c */
 void eu_fw_note_off(int midi);
 extern volatile uint8_t eu_rec_play;
@@ -112,6 +113,8 @@ extern int se_is_open(void);                                    /* screens/sampe
 static const struct { const char *name; void *addr; } exports[] = {
     { "op1_eng_page", (void *)op1_eng_page }, { "op1_fx_page", (void *)op1_fx_page },
     { "read_fx_param_safe", (void *)read_fx_param_safe },
+    { "op1_sc_source", (void *)op1_sc_source },
+    { "op1_page2_live", (void *)op1_page2_live },
     { "sq_line", (void *)sq_line }, { "sq_text", (void *)sq_text }, { "sq_num", (void *)sq_num },
     { "sq_cat", (void *)sq_cat }, { "sq_node_rotate", (void *)sq_node_rotate },
     { "sq_synth_knobs_live", (void *)sq_synth_knobs_live }, { "sq_fx_knobs_live", (void *)sq_fx_knobs_live },
@@ -162,7 +165,7 @@ static void map_load(void *db)
     while (p < e && map_n < MAP_MAX) {
         int present = 1;
         if (*p == '-') { present = 0; p++; }
-        if (e - p < 4 || (p[0] != 's' && p[0] != 'f' && p[0] != 'q' && p[0] != 'd') || p[1] != ':') break;
+        if (e - p < 4 || (p[0] != 's' && p[0] != 'f' && p[0] != 'q' && p[0] != 'd' && p[0] != 'p') || p[1] != ':') break;   /* 'p' sampler+: was missing, so the map was rewritten every boot */
         char k = p[0]; p += 2;
         int i = 0;
         while (p < e && *p != '=' && i < 15) map[map_n].name[i++] = *p++;
@@ -311,9 +314,20 @@ static int seq_taken(const char *name)
     for (int i = 0; i < op1_seq_count; i++) if (seq(op1_seq_names[i], name)) return 1;
     return 0;
 }
+/* a write only when the SELECT finds nothing: an INSERT that changes nothing still costs a write transaction on boot */
+static int db_has(void *db, const char *select)
+{
+    pl_dstr s; dstr_init(&s);
+    DB_GET(&s, db, select);
+    int has = s.size != 0;
+    if (s.cap > 15 && s.u.ptr) OP_DELETE(s.u.ptr);
+    return has;
+}
 static void seq_row(void *db, const char *name)
 {
     char sql[160];
+    scat(scat(scat(sql, "SELECT type FROM seq_types WHERE type='"), name), "'");
+    if (db_has(db, sql)) return;
     char *o = scat(scat(sql, "INSERT INTO seq_types (type) SELECT '"), name);     /* id: INTEGER PRIMARY KEY = next */
     o = scat(scat(o, "' WHERE NOT EXISTS (SELECT 1 FROM seq_types WHERE type='"), name);
     scat(o, "')");
@@ -376,7 +390,8 @@ static int load_one(void *db, const char *file)
             cache_sync(mem, v.mem_size); placed(mem, v.mem_size, file);
             total += v.mem_size;
             op1_sampler = (const op1_sampler_t *)(mem + v.hdr->entry_off);
-            op1_db_write(DB_FACTORY(), "INSERT OR IGNORE INTO synth_types VALUES (100,'sampler+','[0, 0, 0, 0, 0, 0, 0, 0]')");
+            if (!db_has(DB_FACTORY(), "SELECT id FROM synth_types WHERE id=100"))
+                op1_db_write(DB_FACTORY(), "INSERT OR IGNORE INTO synth_types VALUES (100,'sampler+','[0, 0, 0, 0, 0, 0, 0, 0]')");
             kind_map('p', "sampler+");
             sp_replay();                                            /* patches were loaded before the plugins */
         }
@@ -391,7 +406,8 @@ static int load_one(void *db, const char *file)
             cache_sync(mem, v.mem_size); placed(mem, v.mem_size, file);
             total += v.mem_size;
             op1_drum = (const op1_drum_t *)(mem + v.hdr->entry_off);
-            op1_db_write(DB_FACTORY(), "INSERT OR IGNORE INTO drum_types VALUES (2,'drum+','[0, 0, 0, 0, 0, 0, 0, 0]')");
+            if (!db_has(DB_FACTORY(), "SELECT id FROM drum_types WHERE id=2"))
+                op1_db_write(DB_FACTORY(), "INSERT OR IGNORE INTO drum_types VALUES (2,'drum+','[0, 0, 0, 0, 0, 0, 0, 0]')");
             kind_map('d', "drum+");
         }
         if (buf) FREE(buf);

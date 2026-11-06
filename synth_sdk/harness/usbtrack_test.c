@@ -9,7 +9,8 @@
 
 extern volatile intptr_t tr_rec[]; extern int16_t tr_out[4][64];
 void tr_resample(int32_t pos, int32_t inc, const int16_t *gain_inc);
-volatile uint8_t fr_aux_live;
+int fr_tracks_needed(void) { return 0; }
+volatile uint8_t sc_blk, tr_at;
 static int16_t coef[16 * 64];
 const int16_t *tr_host_coef = coef; int16_t tr_host_gain = 32767;
 static int16_t track[4][2000], mixL[600];                  /* mixL lives at "address" 0x1000 for the hooks */

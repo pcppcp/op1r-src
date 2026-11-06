@@ -1,6 +1,7 @@
 /* Host test + preview frames for screens/fxroute.c (master FX source, docs/54): capture / route math, values, saved.
  * "render": JSON frames for harness/render_usbout.py */
 #include "../op1_synth.h"
+#include "../screens/op1r_settings.c"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -43,7 +44,7 @@ int main(int argc, char **argv)
     int16_t l[64], r[64];
     for (int i = 0; i < 64; i++) { l[i] = 100; r[i] = 50; }
     fr_route(fx_gain2, 0, l, r, 0); assert(l[0] == 200 && r[0] == 100);          /* master: whole mix */
-    fxroute_turn(0, 1024); fxroute_flush(); assert(fr_src == 1 && fr_host_saved == 1);
+    fxroute_turn(0, 1024); fxroute_flush(); assert(fr_src == 1 && op1r_setting_get("mfxsrc", -1) == 1);
     frame("blue right: instrument", render);
     for (int i = 0; i < 64; i++) { fr_host_tape[0][i] = 1000; fr_host_tape[1][i] = -300; }   /* tape alone */
     fr_snap();
@@ -52,7 +53,7 @@ int main(int argc, char **argv)
     for (int i = 0; i < 64; i++) { l[i] = fr_host_tape[0][i]; r[i] = fr_host_tape[1][i]; }
     fr_route(fx_gain2, 0, l, r, 0); assert(l[5] == 1080 && r[5] == -280);         /* only the instrument doubled */
     fr_route(fx_gain2, 0, l, r, 0); assert(l[5] == 2160);                          /* no fresh capture: whole mix */
-    fxroute_turn(1, 1024); fxroute_flush(); assert(fr_out == 1 && fr_host_saved == 3);
+    fxroute_turn(1, 1024); fxroute_flush(); assert(fr_out == 1 && op1r_setting_get("mfxsrc", -1) == 3);
     frame("green right: mono tape", render);
     int16_t bus0[64];
     for (int blk = 0; blk < 40; blk++) {                                           /* gain estimate settles */
@@ -86,28 +87,46 @@ int main(int argc, char **argv)
     fr_route(fx_tail, tail, l, r, 0);
     assert(fr_host_bus[0] == 1000 && abs(l[0] - 500) <= 2 && abs(r[0] - 250) <= 2);
     fxroute_turn(0, -1024); fxroute_turn(1, -1024); assert(fr_out == 1);            /* green: instrument only */
-    fxroute_turn(0, 1024); fxroute_turn(1, -1024); fxroute_flush(); assert(fr_out == 0 && fr_host_saved == 1);
+    fxroute_turn(0, 1024); fxroute_turn(1, -1024); fxroute_flush(); assert(fr_out == 0 && op1r_setting_get("mfxsrc", -1) == 1);
     fxroute_turn(0, 1024); assert(fr_src == 2); fxroute_turn(0, 1024); assert(fr_src == 2);   /* clamped at aux */
     fxroute_turn(0, -1024); assert(fr_src == 1);
     fxroute_turn(1, -4096); assert(fr_src == 1);
-    fxroute_turn(0, -1024); fxroute_flush(); assert(fr_src == 0 && fr_host_saved == 0);
-    fr_host_saved = 1; fr_init(0); assert(fr_src == 1);                            /* loaded */
+    fxroute_turn(0, -1024); fxroute_flush(); assert(fr_src == 0 && op1r_setting_get("mfxsrc", -1) == 0);
+    op1r_setting_put("mfxsrc", 1); fr_init(0); assert(fr_src == 1);                            /* loaded */
     /* aux: post-fader sends from the track outs */
     fr_src = 0; fr_out = 0;
-    fxroute_turn(0, 1024); fxroute_turn(0, 1024); fxroute_flush(); assert(fr_src == 2 && fr_host_saved == 4 && !fr_aux_live);
+    fxroute_turn(0, 1024); fxroute_turn(0, 1024); fxroute_flush(); assert(fr_src == 2 && op1r_setting_get("mfxsrc", -1) == 4 && !fr_aux_live);
     frame("blue: aux", render);
     for (int i = 0; i < 64; i++) { tr_out[0][i] = 1000; tr_out[1][i] = 2000; tr_out[2][i] = 0; tr_out[3][i] = 0; l[i] = r[i] = 0; }
     fr_route(fx_gain2, 0, l, r, 0); assert(l[0] == 0);                             /* no send up: FX on the mix */
     for (int i = 0; i < 40; i++) fr_send_turn(0, 1024);                            /* track 1 send 40 */
     assert(fr_send[0] == 40 && fr_aux_live);
     fr_send_turn(1, 1024 * 200); assert(fr_send[1] == 100);                        /* clamped */
+    {   /* sidechain sources (op1_sc_source, docs/61) */
+        int16_t o[64];
+        sc_want = 0; uint8_t fx_was = fr_src; fr_src = 0;
+        tr_at = (uint8_t)(sc_blk + 1); fr_snap();                       /* track outs fresh for this block */
+        for (int i = 0; i < 64; i++) { tr_out[0][i] = 1000; tr_out[1][i] = 2000; tr_out[2][i] = 30000; tr_out[3][i] = 30000; fr_host_input[i] = (int16_t)i; fr_host_bus[i] = -5; }
+        assert(op1_sc_source(OP1_SC_T2, o) == 1 && o[7] == 2000 && sc_want == 32);
+        assert(op1_sc_source(OP1_SC_TAPE, o) == 1 && o[0] == 32767);   /* sum saturates */
+        assert(op1_sc_source(OP1_SC_IN, o) == 1 && o[9] == 9);
+        assert(op1_sc_source(OP1_SC_INST, o) == 1 && o[3] == -5);
+        assert(op1_sc_source(0, o) == 0 && o[0] == 0 && op1_sc_source(99, o) == 0);
+        assert(fr_tracks_needed());                                     /* asked: the track work runs */
+        fr_snap();                                                      /* next block, no fresh track outs */
+        assert(op1_sc_source(OP1_SC_T1, o) == 0 && o[5] == 0);
+        for (int b = 0; b < 40; b++) fr_snap();
+        assert(!fr_tracks_needed() || fr_aux_live);                     /* not asked for 32 blocks: stops */
+        fr_src = fx_was;
+    }
+    { extern uint8_t fr_host_mfx; fr_host_mfx = 0; assert(!fr_tracks_needed()); fr_host_mfx = 1; assert(fr_tracks_needed()); }   /* master FX off: no track work */
     fr_send_turn(1, -1024 * 50); assert(fr_send[1] == 50);
     fr_host_mute[1] = 0;                                                           /* track 2 muted: no send */
     fr_route(fx_gain2, 0, l, r, 0);                                                /* aux = 1000 * 0.4 = ~400, +aux */
     assert(abs(l[0] - 400) <= 3 && abs(r[0] - 400) <= 3);
-    fr_save_sends(); fr_send[0] = 0; fr_host_saved = 4; fr_init(0); assert(fr_send[0] == 40 && fr_send[1] == 50);
+    fr_save_sends(); fr_send[0] = 0; op1r_setting_put("mfxsrc", 4); fr_init(0); assert(fr_send[0] == 40 && fr_send[1] == 50);
     fr_host_mute[1] = 0x7FFF;
-    fxroute_turn(1, 1024); fxroute_flush(); assert(fr_out == 1 && fr_host_saved == 5);             /* aux, mono tape */
+    fxroute_turn(1, 1024); fxroute_flush(); assert(fr_out == 1 && op1r_setting_get("mfxsrc", -1) == 5);             /* aux, mono tape */
     fr_host_track = 1;                                                             /* recording track 2: its send muted */
     for (int i = 0; i < 64; i++) { fr_host_bus[i] = 0; l[i] = r[i] = 0; }
     fr_route(fx_gain2, 0, l, r, 0);

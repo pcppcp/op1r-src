@@ -36,6 +36,12 @@ int sc_key_note(int note)
     return sc_type != SC_OFF && MODE_SYNTH && !seq_ours_live() ? sc_unmap(note) : note;
 }
 
+/* keyboard note velocity (screens/settings.c, clock > T3): the OP-1's keys send 127; a key played on the keyboard
+ * path (physical_key_down, as the MIDI recorder's input I, seqdev/ms_fw.c) gets this one, synth and drum mode. MIDI
+ * out (sent inside VoiceCtl) and the MIDI recorder (after this hook) see it too. */
+extern uint8_t kb_vel;
+static int kb_caller(uint32_t ret) { return ret >= 0x019AC0B0 && ret < 0x019AC2F2; }
+
 /* returns the record to play, 0 = do not play */
 int32_t *sc_vc_down(int32_t *rec, uint32_t ret)
 {
@@ -46,7 +52,11 @@ int32_t *sc_vc_down(int32_t *rec, uint32_t ret)
     int m = sc_down(n, map);
     irq_on(im);
     if (m < 0) return 0;
-    return m == n ? rec : copy_with(rec, m);
+    int vel = kb_caller(ret) && kb_vel < 127 ? kb_vel : -1;
+    if (m == n && vel < 0) return rec;
+    int32_t *c = copy_with(rec, m);
+    if (vel >= 0) c[1] = vel;
+    return c;
 }
 
 /* returns the record to release; note -1 = nothing (VoiceCtl key_up ignores notes outside 0..127) */

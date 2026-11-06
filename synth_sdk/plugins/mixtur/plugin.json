@@ -5,7 +5,8 @@
   "order": 8,
   "symbol": "ENGINE_mixtur",
   "sources": [
-    "mixtur.c"
+    "mixtur.c",
+    "mixtur_dsp.S"
   ],
   "defaults": [
     1966,

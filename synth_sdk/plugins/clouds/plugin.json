@@ -5,7 +5,8 @@
   "order": 2,
   "symbol": "FX_clouds",
   "sources": [
-    "clouds.c"
+    "clouds.c",
+    "clouds_dsp.S"
   ],
   "defaults": [
     16384,

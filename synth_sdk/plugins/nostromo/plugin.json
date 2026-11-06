@@ -1,0 +1,25 @@
+{
+  "name": "nostromo",
+  "author": "Lewis-Clayton",
+  "kind": "fx",
+  "symbol": "FX_nostromo",
+  "sources": [
+    "nostromo.c",
+    "nostromo_kern.S"
+  ],
+  "defaults": [
+    16645,
+    23494,
+    6553,
+    11468
+  ],
+  "page2_defaults": [
+    17824,
+    1024,
+    15170
+  ],
+  "screen": {
+    "svg": "nostromo.svg",
+    "symbol": "SCREEN_nostromo"
+  }
+}

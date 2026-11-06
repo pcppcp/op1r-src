@@ -72,6 +72,9 @@ typedef struct clouds {
     int32_t freeze_lp_q30, dry_wet_q15;
     int32_t fb[CLOUDS_MAX_BLOCK];
     uint32_t rng;
+    int64_t sd_p, sd_space;                             /* the seeding divisions and their inputs (play_granular) */
+    int32_t sd_target, sd_hint;
+    uint8_t sd_ok;
     clouds_tpl_t tpl;                                   /* the grain set-up of the last block and its inputs */
     int32_t tpl_key[4];
     uint8_t tpl_ok;

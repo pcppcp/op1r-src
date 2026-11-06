@@ -1,0 +1,752 @@
+[
+  {
+    "type": "vapora",
+    "name": "asteroid swarm",
+    "knobs": [
+      0,
+      2500,
+      30000,
+      25000,
+      21248,
+      8448,
+      8192,
+      16000
+    ],
+    "adsr": [
+      11500,
+      11000,
+      30000,
+      12500,
+      2048,
+      5568,
+      4000,
+      4000
+    ],
+    "fx_active": false,
+    "fx_type": "delay",
+    "fx_params": [
+      8000,
+      8000,
+      8000,
+      8000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "lfo_active": false,
+    "lfo_type": "tremolo",
+    "lfo_params": [
+      16000,
+      0,
+      0,
+      16000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "octave": 0,
+    "synth_version": 2
+  },
+  {
+    "type": "vapora",
+    "name": "breath choir",
+    "knobs": [
+      1700,
+      16000,
+      28500,
+      11500,
+      21248,
+      8704,
+      16384,
+      7000
+    ],
+    "adsr": [
+      7000,
+      11000,
+      24500,
+      12500,
+      2048,
+      5568,
+      4000,
+      4000
+    ],
+    "fx_active": false,
+    "fx_type": "delay",
+    "fx_params": [
+      8000,
+      8000,
+      8000,
+      8000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "lfo_active": false,
+    "lfo_type": "tremolo",
+    "lfo_params": [
+      16000,
+      0,
+      0,
+      16000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "octave": 0,
+    "synth_version": 2
+  },
+  {
+    "type": "vapora",
+    "name": "cavern flute",
+    "knobs": [
+      5500,
+      24500,
+      32000,
+      25500,
+      21248,
+      8960,
+      31129,
+      28000
+    ],
+    "adsr": [
+      9000,
+      11000,
+      30000,
+      12500,
+      2048,
+      5568,
+      4000,
+      4000
+    ],
+    "fx_active": false,
+    "fx_type": "delay",
+    "fx_params": [
+      8000,
+      8000,
+      8000,
+      8000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "lfo_active": false,
+    "lfo_type": "tremolo",
+    "lfo_params": [
+      16000,
+      0,
+      0,
+      16000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "octave": 0,
+    "synth_version": 2
+  },
+  {
+    "type": "vapora",
+    "name": "deep pressure",
+    "knobs": [
+      5500,
+      24500,
+      32000,
+      4000,
+      21248,
+      9216,
+      31129,
+      2200
+    ],
+    "adsr": [
+      14000,
+      11000,
+      30000,
+      12500,
+      2048,
+      5568,
+      4000,
+      4000
+    ],
+    "fx_active": true,
+    "fx_type": "reverb",
+    "fx_params": [
+      10217,
+      11250,
+      16501,
+      15692,
+      21248,
+      0,
+      0,
+      0
+    ],
+    "lfo_active": false,
+    "lfo_type": "tremolo",
+    "lfo_params": [
+      16000,
+      0,
+      0,
+      16000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "octave": 0,
+    "synth_version": 2
+  },
+  {
+    "type": "vapora",
+    "name": "pink surf",
+    "knobs": [
+      0,
+      22000,
+      20000,
+      0,
+      21248,
+      9472,
+      8192,
+      8192
+    ],
+    "adsr": [
+      11500,
+      11000,
+      30000,
+      12500,
+      2048,
+      5568,
+      4000,
+      4000
+    ],
+    "fx_active": false,
+    "fx_type": "delay",
+    "fx_params": [
+      8000,
+      8000,
+      8000,
+      8000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "lfo_active": false,
+    "lfo_type": "tremolo",
+    "lfo_params": [
+      16000,
+      0,
+      0,
+      16000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "octave": 0,
+    "synth_version": 2
+  },
+  {
+    "type": "vapora",
+    "name": "porcelain orbit",
+    "knobs": [
+      5500,
+      24500,
+      32000,
+      25500,
+      21248,
+      9728,
+      8192,
+      28000
+    ],
+    "adsr": [
+      9000,
+      11000,
+      26000,
+      12500,
+      2048,
+      5568,
+      4000,
+      4000
+    ],
+    "fx_active": false,
+    "fx_type": "delay",
+    "fx_params": [
+      8000,
+      8000,
+      8000,
+      8000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "lfo_active": false,
+    "lfo_type": "tremolo",
+    "lfo_params": [
+      16000,
+      0,
+      0,
+      16000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "octave": 0,
+    "synth_version": 2
+  },
+  {
+    "type": "vapora",
+    "name": "sub lantern",
+    "knobs": [
+      0,
+      0,
+      18000,
+      0,
+      21248,
+      9984,
+      1638,
+      8192
+    ],
+    "adsr": [
+      64,
+      6500,
+      23000,
+      12500,
+      2048,
+      5568,
+      4000,
+      4000
+    ],
+    "fx_active": false,
+    "fx_type": "delay",
+    "fx_params": [
+      8000,
+      8000,
+      8000,
+      8000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "lfo_active": false,
+    "lfo_type": "tremolo",
+    "lfo_params": [
+      16000,
+      0,
+      0,
+      16000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "octave": -1,
+    "synth_version": 2
+  },
+  {
+    "type": "vapora",
+    "name": "a fifth tide",
+    "knobs": [
+      19000,
+      28000,
+      20500,
+      14000,
+      21248,
+      8192,
+      16384,
+      6500
+    ],
+    "adsr": [
+      9000,
+      11000,
+      30000,
+      12500,
+      2048,
+      5568,
+      4000,
+      4000
+    ],
+    "fx_active": false,
+    "fx_type": "delay",
+    "fx_params": [
+      8000,
+      8000,
+      8000,
+      8000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "lfo_active": false,
+    "lfo_type": "tremolo",
+    "lfo_params": [
+      16000,
+      0,
+      0,
+      16000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "octave": 0,
+    "synth_version": 2
+  },
+  {
+    "type": "vapora",
+    "name": "holy dust",
+    "knobs": [
+      14000,
+      28500,
+      29000,
+      19000,
+      21248,
+      10496,
+      16384,
+      8500
+    ],
+    "adsr": [
+      12500,
+      11000,
+      30000,
+      12500,
+      2048,
+      5568,
+      4000,
+      4000
+    ],
+    "fx_active": false,
+    "fx_type": "delay",
+    "fx_params": [
+      8000,
+      8000,
+      8000,
+      8000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "lfo_active": false,
+    "lfo_type": "tremolo",
+    "lfo_params": [
+      16000,
+      0,
+      0,
+      16000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "octave": 0,
+    "synth_version": 2
+  },
+  {
+    "type": "vapora",
+    "name": "XFIN",
+    "knobs": [
+      22000,
+      29500,
+      24500,
+      19000,
+      21248,
+      8192,
+      16384,
+      5500
+    ],
+    "adsr": [
+      12500,
+      11000,
+      30000,
+      12500,
+      2048,
+      5568,
+      4000,
+      4000
+    ],
+    "fx_active": false,
+    "fx_type": "delay",
+    "fx_params": [
+      8000,
+      8000,
+      8000,
+      8000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "lfo_active": false,
+    "lfo_type": "tremolo",
+    "lfo_params": [
+      16000,
+      0,
+      0,
+      16000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "octave": 0,
+    "synth_version": 2
+  },
+  {
+    "type": "vapora",
+    "name": "ice chapel",
+    "knobs": [
+      12000,
+      30000,
+      27000,
+      20000,
+      21248,
+      11520,
+      31129,
+      7500
+    ],
+    "adsr": [
+      13000,
+      11000,
+      30000,
+      12500,
+      2048,
+      5568,
+      4000,
+      4000
+    ],
+    "fx_active": false,
+    "fx_type": "delay",
+    "fx_params": [
+      8000,
+      8000,
+      8000,
+      8000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "lfo_active": false,
+    "lfo_type": "tremolo",
+    "lfo_params": [
+      16000,
+      0,
+      0,
+      16000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "octave": -1,
+    "synth_version": 2
+  },
+  {
+    "type": "vapora",
+    "name": "last light",
+    "knobs": [
+      11500,
+      29000,
+      16000,
+      18000,
+      21248,
+      10240,
+      16384,
+      5000
+    ],
+    "adsr": [
+      10500,
+      11000,
+      30000,
+      12500,
+      2048,
+      5568,
+      4000,
+      4000
+    ],
+    "fx_active": false,
+    "fx_type": "delay",
+    "fx_params": [
+      8000,
+      8000,
+      8000,
+      8000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "lfo_active": false,
+    "lfo_type": "tremolo",
+    "lfo_params": [
+      16000,
+      0,
+      0,
+      16000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "octave": 0,
+    "synth_version": 2
+  },
+  {
+    "type": "vapora",
+    "name": "moon choir",
+    "knobs": [
+      27000,
+      28000,
+      21000,
+      18000,
+      21248,
+      11520,
+      14745,
+      4500
+    ],
+    "adsr": [
+      12000,
+      11000,
+      30000,
+      12500,
+      2048,
+      5568,
+      4000,
+      4000
+    ],
+    "fx_active": false,
+    "fx_type": "delay",
+    "fx_params": [
+      8000,
+      8000,
+      8000,
+      8000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "lfo_active": false,
+    "lfo_type": "tremolo",
+    "lfo_params": [
+      16000,
+      0,
+      0,
+      16000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "octave": 0,
+    "synth_version": 2
+  },
+  {
+    "type": "vapora",
+    "name": "stone hall",
+    "knobs": [
+      2800,
+      24500,
+      23500,
+      12500,
+      21248,
+      10496,
+      8192,
+      6000
+    ],
+    "adsr": [
+      11500,
+      11000,
+      30000,
+      12500,
+      2048,
+      5568,
+      4000,
+      4000
+    ],
+    "fx_active": false,
+    "fx_type": "delay",
+    "fx_params": [
+      8000,
+      8000,
+      8000,
+      8000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "lfo_active": false,
+    "lfo_type": "tremolo",
+    "lfo_params": [
+      16000,
+      0,
+      0,
+      16000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "octave": -3,
+    "synth_version": 2
+  },
+  {
+    "type": "vapora",
+    "name": "tidal arc",
+    "knobs": [
+      28000,
+      30000,
+      27500,
+      22000,
+      21248,
+      11264,
+      16384,
+      6500
+    ],
+    "adsr": [
+      11000,
+      11000,
+      30000,
+      12500,
+      2048,
+      5568,
+      4000,
+      4000
+    ],
+    "fx_active": false,
+    "fx_type": "delay",
+    "fx_params": [
+      8000,
+      8000,
+      8000,
+      8000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "lfo_active": false,
+    "lfo_type": "tremolo",
+    "lfo_params": [
+      16000,
+      0,
+      0,
+      16000,
+      0,
+      0,
+      0,
+      0
+    ],
+    "octave": 0,
+    "synth_version": 2
+  }
+]

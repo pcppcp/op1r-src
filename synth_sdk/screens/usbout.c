@@ -4,67 +4,25 @@
  * device (seqdev/ms_fw.c, docs/39) is opt-in, off by default. Both saved in the DB table op1rsettings. */
 #include "../op1_synth.h"
 #include "stroke_font.h"
+#include "op1r_settings.h"
 
 extern volatile uint8_t usb_tracks_live;
 static uint8_t setting;                                    /* 0 master, 1 master + tracks */
 volatile uint8_t ms_enabled;                               /* MIDI sequencer device on (read by seqdev/ms_fw.c) */
 volatile uint8_t ms_quant;                                 /* MIDI recorder quantize grid (MS_Q_*, set in its view) */
 
-#ifdef OP1_HOST
-int usbout_host_saved;
-int usbout_host_seq_saved;
-int usbout_load(void) { setting = (uint8_t)usbout_host_saved; ms_enabled = (uint8_t)usbout_host_seq_saved; return setting; }
-static void usbout_save(void) { usbout_host_saved = setting; }
-static void seq_save(void) { usbout_host_seq_saved = ms_enabled; }
-void ms_quant_save(void) { }
-#else
-#define DB_HANDLE ((void *(*)(void))0x0196DD44)
-#define DB_EXEC   ((void (*)(void *, const char *))0x0196F950)
-#define DB_GET    ((void (*)(void *, void *, const char *))0x0196FBD0)
-typedef struct { uint32_t alloc; union { char buf[16]; char *ptr; } u; uint32_t size, cap; uint32_t pad; } us_dstr;
-static const char US_CREATE[] = "CREATE TABLE IF NOT EXISTS op1rsettings (key TEXT PRIMARY KEY, val INTEGER NOT NULL)";
 /* at USB start (boot, after the DB is up; also when USB restarts after disk mode) */
 int usbout_load(void)
 {
-    void *db = DB_HANDLE();
-    DB_EXEC(db, US_CREATE);
-    us_dstr s = { 0 };
-    DB_GET(&s, db, "SELECT val FROM op1rsettings WHERE key='usbtracks'");
-    const char *p = s.cap > 15 ? s.u.ptr : s.u.buf;           /* (heap copy for long strings, not freed: 1 char) */
-    setting = (uint8_t)(s.size && p[0] == '1');
-    us_dstr s2 = { 0 };
-    DB_GET(&s2, db, "SELECT val FROM op1rsettings WHERE key='midiseq'");
-    p = s2.cap > 15 ? s2.u.ptr : s2.u.buf;
-    ms_enabled = (uint8_t)(s2.size && p[0] == '1');
-    us_dstr s3 = { 0 };
-    DB_GET(&s3, db, "SELECT val FROM op1rsettings WHERE key='msquant'");
-    p = s3.cap > 15 ? s3.u.ptr : s3.u.buf;
-    ms_quant = (uint8_t)(s3.size && p[0] >= '0' && p[0] <= '6' ? p[0] - '0' : 0);
+    setting = (uint8_t)(op1r_setting_get("usbtracks", 0) == 1);
+    ms_enabled = (uint8_t)(op1r_setting_get("midiseq", 0) == 1);
+    int q = op1r_setting_get("msquant", 0);
+    ms_quant = (uint8_t)(q >= 0 && q <= 6 ? q : 0);
     return setting;
 }
-static void usbout_save(void)                               /* KeyHandler thread, on change */
-{
-    void *db = DB_HANDLE();
-    DB_EXEC(db, US_CREATE);
-    DB_EXEC(db, setting ? "INSERT OR REPLACE INTO op1rsettings VALUES ('usbtracks',1)"
-                        : "INSERT OR REPLACE INTO op1rsettings VALUES ('usbtracks',0)");
-}
-static void seq_save(void)
-{
-    void *db = DB_HANDLE();
-    DB_EXEC(db, US_CREATE);
-    DB_EXEC(db, ms_enabled ? "INSERT OR REPLACE INTO op1rsettings VALUES ('midiseq',1)"
-                           : "INSERT OR REPLACE INTO op1rsettings VALUES ('midiseq',0)");
-}
-void ms_quant_save(void)                                    /* KeyHandler thread (MIDI recorder, Shift + blue) */
-{
-    static char q[] = "INSERT OR REPLACE INTO op1rsettings VALUES ('msquant',0)";
-    q[sizeof q - 3] = (char)('0' + (ms_quant % 7));
-    void *db = DB_HANDLE();
-    DB_EXEC(db, US_CREATE);
-    DB_EXEC(db, q);
-}
-#endif
+static void usbout_save(void) { op1r_setting_put("usbtracks", setting); }   /* KeyHandler thread, on change */
+static void seq_save(void) { op1r_setting_put("midiseq", ms_enabled); }
+void ms_quant_save(void) { op1r_setting_put("msquant", ms_quant % 7); }   /* KeyHandler thread (MIDI recorder) */
 
 static int32_t acc;
 void usbout_turn(int delta)                                 /* blue: one detent each way switches */

@@ -78,11 +78,16 @@ typedef struct {
     uint8_t press[4];   /* encoder press per knob on the engine screen: OP1_PRESS_PAGE toggles page 2, where the
                          * knob edits preset word OP1_ENG_PAGE_WORD(k) (saved with the patch) instead of params[k];
                          * OP1_PRESS_BROWSE (engines with "uses_sample") opens the core's sample browser: the sampler
-                         * presets as in sampler+, white loads one into the slot's sample buffer, the patch stays */
+                         * presets as in sampler+, white loads one into the slot's sample buffer, the patch stays;
+                         * OP1_PRESS_SHIFT: no page, Shift + turn edits OP1_ENG_PAGE_WORD(k) (k = 0..2), the press
+                         * stays stock (op1r 48; older cores: Shift + turn edits params[k]) */
 } op1_engine_t;
 /* page-2 word per knob: blue 5, green 6, white 7, red 7 (white and red share word 7: page one of them only) */
 #define OP1_ENG_PAGE_WORD(k) ((k) < 3 ? 5 + (k) : 7)
 extern volatile uint8_t op1_eng_page[4];   /* synth engine screen: page 2 on per knob (blue..red) */
+#ifndef OP1_HOST
+static inline int op1_shift_held(void) { return *(volatile uint8_t *)0x01DD7F78 != 0; }   /* any thread, read only */
+#endif
 
 /* ---- access to the built-in sampler's per-slot sample (record it with the "sampler" engine) ----
  * 0x01DF6F78[slot] -> { SampleBuffer *sb; rate }   SampleBuffer: +0 int16 *data (8 guard samples,
@@ -156,8 +161,41 @@ typedef struct {
  *  OP1_PRESS_LATCH: press toggles a flag (not saved), e.g. freeze
  * State per FX position (0 synth, 1 drum, 2 master): op1_fx_page[pos][k] = 1 while page 2 / latch is on.
  * FX state must be kept per position 0..2 (the master can run the same custom FX as an instrument). */
-enum { OP1_PRESS_NONE = 0, OP1_PRESS_PAGE = 1, OP1_PRESS_LATCH = 2, OP1_PRESS_BROWSE = 3 };   /* BROWSE: synth engines */
+enum { OP1_PRESS_NONE = 0, OP1_PRESS_PAGE = 1, OP1_PRESS_LATCH = 2, OP1_PRESS_BROWSE = 3, OP1_PRESS_SHIFT = 4 };   /* BROWSE, SHIFT: synth engines */
+/* FX list knob (press[k] = OP1_PRESS_LIST(n), n 2..63, needs op1r 52+): the core turns the knob one of n entries per
+ * encoder click, wrapping at both ends; the word holds entry i at i / (n - 1) of the knob's range, so patches and
+ * MIDI CCs keep working. Read it with op1_fx_list(op1_fx_param_q15(p, k), n). Older cores: a plain knob. */
+#define OP1_PRESS_LIST(n)   (0x40 | (n))
+#define OP1_PRESS_IS_LIST(v) (((v) & 0xC0) == 0x40)
+static inline int op1_fx_list(int32_t q15, int n)
+{
+    int i = (int)((q15 * (n - 1) + 16384) >> 15);
+    return i < 0 ? 0 : i >= n ? n - 1 : i;
+}
+/* raw word of entry i (the core's step; lo / hi: the knob's raw range) */
+static inline int16_t op1_fx_list_word(int i, int n, int32_t lo, int32_t hi) { return (int16_t)(lo + (i * (hi - lo) + (n - 1) / 2) / (n - 1)); }
 extern volatile uint8_t op1_fx_page[3][4];
+
+/* ---- page-2 words as shown (needs op1r 53+): the quad LFO modulates page 2 (words 5..7) only in the audio stage
+ * copy, so a screen showing words 5..7 reads them through op1_knobs_shown(): a copy of the 8 words with 5..7
+ * replaced by the LFO-modulated value while it is applied. fx 0 = synth engine (pos ignored), 1 = FX at pos.
+ * Screens only (DSP reads its params, knob edits the real words). */
+#ifndef OP1_HOST
+int16_t op1_page2_live(int fx, int pos, int k, int16_t stored);
+#endif
+static inline const int16_t *op1_knobs_shown(int fx, int pos, const int16_t *w, int16_t *buf)
+{
+    for (int i = 0; i < 8; i++) buf[i] = w[i];
+    for (int k = 0; k < 3; k++) buf[5 + k] = op1_page2_live(fx, pos, k, w[5 + k]);
+    return buf;
+}
+
+/* ---- sidechain sources (core export, docs/61): 64 samples of this block into out, returns 1 if the source has data
+ * (0 and zeros: not available yet / unknown). T1..T4 = tape tracks pre-fader (asking starts the track work, 5-7 % CPU,
+ * first block zeros), TAPE = their sum, IN = the input (mic / line / USB, mono), INST = the instrument bus (mono,
+ * after its FX; meaningful for the master FX). Call from render only, once per block per source. */
+enum { OP1_SC_T1 = 1, OP1_SC_T2, OP1_SC_T3, OP1_SC_T4, OP1_SC_TAPE, OP1_SC_IN, OP1_SC_INST };
+int op1_sc_source(int src, int16_t *out);
 
 /* ---- beat clock (read-only; read it once per render block, never per sample) ----
  * The stock metronome's beat clock (metronome.cpp state at 0x01AADABC; tape/countin.c counts in on it). It runs

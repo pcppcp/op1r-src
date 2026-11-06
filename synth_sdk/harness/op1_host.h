@@ -53,6 +53,8 @@ void  host_text_draw(void *t, void *r, const int32_t *m9);
 #define OP1_SCREEN_SLOT                   host_slot
 
 static inline int op1_current_slot(void) { return host_slot; }
+extern int host_shift;                                   /* Shift held (screens: op1_shift_held) */
+static inline int op1_shift_held(void) { return host_shift; }
 static inline const uint8_t *op1_sample_buffer(int slot) { return host_sample_buffer[slot & 7]; }
 static inline const int16_t *op1_sample_data(const uint8_t *sb) { return *(int16_t *const *)sb + 8; }
 static inline const int16_t *op1_sample_peaks(const uint8_t *sb) { return (const int16_t *)(sb + sizeof(void *)); }
@@ -64,5 +66,10 @@ static inline volatile int16_t *op1_fx_meter(int pos) { return &host_fx_meter[po
 static inline int op1_fx_screen_pos(void) { return 0; }
 static inline const int16_t *op1_fx_knobs(int pos) { return host_fx_knobs[pos % 3]; }
 static inline int32_t op1_fx_param_q15(const int16_t *p, int i) { return p[i] < 0 ? 0 : p[i]; }
-static inline void op1_fx_knobs_live(int16_t out[4]) { for (int i = 0; i < 4; i++) out[i] = host_fx_knobs[0][i]; }
+__attribute__((weak)) int16_t host_fx_lfo[4];   /* added to the live FX knobs only, as an OP-1 LFO (tests) */
+static inline void op1_fx_knobs_live(int16_t out[4])
+{ for (int i = 0; i < 4; i++) { int32_t x = host_fx_knobs[0][i] + host_fx_lfo[i]; out[i] = (int16_t)(x < 0 ? 0 : (x > 32767 ? 32767 : x)); } }
+#endif
+#ifndef op1_page2_live
+#define op1_page2_live(fx, pos, k, stored) ((void)(fx), (void)(pos), (void)(k), (stored))   /* host: no LFO */
 #endif

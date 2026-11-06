@@ -21,6 +21,7 @@ static int n_drum, drum_eng, drum_idx;
 void host_knob_range_drum(int k, int16_t *m, int e, void *p) { (void)m; (void)p; n_drum++; drum_eng = e; drum_idx = k; }
 void host_knob_range_synth(int k, int16_t *m, int e, void *p) { (void)e; (void)p; n_synth++; last_idx = k; last_mod = *m; if (abs(*m) > max_mod) max_mod = (int16_t)abs(*m); }
 int16_t host_fx_range[8][3], host_fx_params[8];
+int16_t host_stage[8]; int host_eng_plugin = 1, host_fx_plugin = 1;
 void host_fx_knob_mod(int16_t *m, const int16_t *rg, int16_t *p) { n_fx++; last_idx = (int)(p - host_fx_params); last_mod = *m; (void)rg; }
 void host_env_mod(int k, int16_t *m, void *p) { (void)p; n_env++; last_idx = k; last_mod = *m; if (abs(*m) > max_mod) max_mod = (int16_t)abs(*m); }
 
@@ -34,6 +35,12 @@ void host_screen_draw(void *s, int dt) { (void)s; (void)dt; nlines = 0; }
 void *host_raster(void) { return &nlines; }
 void host_raster_line(void *r, const void *a, const void *b, int32_t w, const uint8_t *c)
 { (void)r; const op1_pt *p = a, *q = b; if (nlines < MAXL) { lines[nlines].x0 = p->x; lines[nlines].y0 = p->y; lines[nlines].x1 = q->x; lines[nlines].y1 = q->y; lines[nlines].w = w; memcpy(lines[nlines].c, c, 4); nlines++; } }
+
+typedef struct { int32_t x, y, size; uint8_t c[4]; char s[32]; } htext_t;   /* stock font stand-in (fox screen) */
+static htext_t *texts[32]; static int ntexts;
+void *host_text_ctor(void *o, int32_t x, int32_t y, int32_t z, const uint8_t *c) { htext_t *t = o; t->x = x; t->y = y; t->size = z; memcpy(t->c, c, 4); t->s[0] = 0; return o; }
+void host_text_set(void *t, const char *s) { snprintf(((htext_t *)t)->s, 32, "%s", s); }
+void host_text_draw(void *t, void *r, const int32_t *m) { (void)r; (void)m; if (ntexts < 32) texts[ntexts++] = t; }
 
 static int fails;
 #define CHECK(c, ...) do { if (!(c)) { fails++; printf("FAIL: " __VA_ARGS__); printf("\n"); } } while (0)
@@ -62,7 +69,11 @@ static void frame_json(const char *label)
     for (int i = 0; i < nnodes; i++) { printf("%s\"%s\": [", i ? ", " : "", node_id[i]); for (int j = 0; j < 9; j++) printf("%s%d", j ? ", " : "", node_m[i][j]); printf("]"); }
     printf("}, \"lines\": [");
     for (int i = 0; i < nlines; i++) printf("%s[%d, %d, %d, %d, %d, [%d, %d, %d, %d]]", i ? ", " : "", lines[i].x0, lines[i].y0, lines[i].x1, lines[i].y1, lines[i].w, lines[i].c[0], lines[i].c[1], lines[i].c[2], lines[i].c[3]);
+    printf("], \"texts\": [");
+    for (int i = 0; i < ntexts; i++) printf("%s[%d, %d, %d, [%d, %d, %d, %d], \"%s\"]", i ? ", " : "", texts[i]->x, texts[i]->y, texts[i]->size,
+                                         texts[i]->c[0], texts[i]->c[1], texts[i]->c[2], texts[i]->c[3], texts[i]->s);
     printf("]}\n");
+    ntexts = 0;
 }
 
 int main(int argc, char **argv)
@@ -79,6 +90,170 @@ int main(int argc, char **argv)
     CHECK(fabs(fmax - 20.0) / 20.0 < 0.02, "max freq %.3f", fmax);
     CHECK(fabs(fmid - 1.0) / 1.0 < 0.03, "mid freq %.3f (expected 1 Hz)", fmid);
     for (int x = 0; x < 32767; x += 97) CHECK(ql_inc(x + 97) >= ql_inc(x), "freq not monotonic at %d", x);
+
+    {   /* Lorenz waveforms (docs/62): bounded, deterministic, chaotic at rho 28, settles at rho 20, restart repeats */
+        uint32_t fast = ql_inc(32767) * 4;                           /* 20 Hz x 4 (LFO -> LFO frequency at full) */
+        for (int rk = 0; rk < 8; rk++) {
+            ql_st s = { 0 }; int ok = 1;
+            for (long b = 0; b < 10L * 60 * 345; b++) { int32_t v = ql_lorenz(&s, fast, rk, b & 1, 0);
+                ok &= v >= -32767 && v <= 32767 && s.lz > 0 && s.lx > -60 * QL_L1 && s.lx < 60 * QL_L1; }
+            CHECK(ok, "lorenz rho_k %d: out of bounds after 10 min at full speed", rk);
+        }
+        uint32_t inc1 = ql_inc(16384);                               /* 1 loop per second */
+        ql_st a = { 0 }, c = { 0 }; int same = 1, flips = 0, prev = 0;
+        for (int b = 0; b < 345 * 100; b++) {                        /* 100 s */
+            int32_t va = ql_lorenz(&a, inc1, 0, 0, 0), vc = ql_lorenz(&c, inc1, 0, 0, 0);
+            same &= va == vc;
+            int sg = va > 3000 ? 1 : va < -3000 ? -1 : prev;
+            if (prev && sg != prev) flips++;
+            prev = sg;
+        }
+        CHECK(same, "lorenz not deterministic");
+        CHECK(flips > 10 && flips < 90, "rho 28: %d wing jumps in ~100 loops (want irregular, some dozens)", flips);
+        ql_st q = { 0 }; int32_t lo = 99999, hi = -99999;
+        for (int b = 0; b < 345 * 120; b++) { int32_t v = ql_lorenz(&q, inc1, 7, 0, 0); if (b > 345 * 100) { if (v < lo) lo = v; if (v > hi) hi = v; } }
+        CHECK(hi - lo < 1500, "rho 14 settles: last 20 s spread %d", hi - lo);
+        ql_st r1 = { 0 }; int32_t first[50]; int rep = 1;
+        for (int b = 0; b < 50; b++) first[b] = ql_lorenz(&r1, inc1, 0, 0, 0);
+        for (int b = 0; b < 2000; b++) ql_lorenz(&r1, inc1, 0, 0, 0);
+        ql_restart(&r1);
+        for (int b = 0; b < 50; b++) rep &= ql_lorenz(&r1, inc1, 0, 0, 0) == first[b];
+        CHECK(rep, "lorenz restart does not repeat the path");
+        int16_t lw[8] = { 0 }; ql_lfo o; ql_dec(lw, 0, &o);
+        for (int k = 0; k < 9; k++) ql_turn(lw, 0, 2, 1024, 1);       /* Shift + white: waveform up past the end */
+        ql_dec(lw, 0, &o);
+        CHECK(o.wave == 7, "waveform turn reaches lorenz z (%d)", o.wave);
+        int16_t uv = lw[0]; (void)uv;
+    }
+    {   /* fox LFO (docs/63) */
+        fox_set f = { 31, 0, 0, 16, 0, { 0, 9 }, { 31, 20 } }, g; int16_t fw[8] = { 0 };
+        fox_put(&f, fw); fox_get(fw, &g);
+        CHECK(!memcmp(&f, &g, sizeof f) && ql_is_quad(fw) && ql_is_fox(fw), "fox words round trip / recognised");
+        ql_lfo L0, L1, L2; ql_dec(fw, 0, &L0); ql_dec(fw, 1, &L1); ql_dec(fw, 2, &L2);
+        CHECK(L0.wave == 8 && L1.wave == 9 && L0.tgt == 0 && L1.tgt == 9 && L2.amt == 0 && L0.type == QT_FREE, "fox decode");
+        for (int bl = 0; bl <= 31; bl += 31) {                     /* one orbit per LFO cycle (~1 Hz), foxes lag */
+            memset(sh_st, 0, sizeof sh_st);
+            fox_set h = f; h.bloom = (uint8_t)bl; int16_t hw[8] = { 0 }; fox_put(&h, hw);
+            ql_lfo A, B; ql_dec(hw, 0, &A); ql_dec(hw, 1, &B);
+            int nb = 345 * 6, up = 0, prev = 0, t_first = -1, t_last = -1, rmax_t = 0, fmax_t = 0; int32_t rmax = -99999, fmax = -99999;
+            for (int b = 0; b < nb; b++) {
+                ql_step(&sh_st[0][0], &A, 65536, 0); ql_step(&sh_st[0][1], &B, 65536, 1);
+                int32_t r = sh_st[0][0].val, x = sh_st[0][1].val;
+                int sg = r > 0;
+                if (b > 0 && sg && !prev) { if (t_first < 0) t_first = b; t_last = b; up++; }
+                prev = sg;
+                if (b > 345 * 3 && b < 345 * 4) { if (r > rmax) { rmax = r; rmax_t = b; } if (x > fmax) { fmax = x; fmax_t = b; } }
+            }
+            double per = up > 1 ? (t_last - t_first) / (double)(up - 1) / 345.0 * 128 / 128 : 0;
+            double hz = ql_inc((31 << 9) | 0x100) / 4294967296.0 * 44100 / 128;
+            CHECK(fabs(per * hz - 1.0) < 0.06, "fox bloom %d: one orbit per LFO cycle (%.3f s at %.3f Hz)", bl, per, hz);
+            int lag = ((fmax_t - rmax_t) % 345 + 345) % 345;
+            CHECK(lag > 20 && lag < 172, "fox bloom %d: foxes peak after rabbits (%d blocks of 345)", bl, lag);
+        }
+        {   /* bounded: fastest rate x 4, wild max, 10 minutes */
+            memset(sh_st, 0, sizeof sh_st);
+            fox_set h = f; h.bloom = 31; h.wild = 31; int16_t hw[8] = { 0 }; fox_put(&h, hw);
+            ql_lfo A, B; ql_dec(hw, 0, &A); ql_dec(hw, 1, &B); A.inc = B.inc = ql_inc(32767) * 4;
+            int ok = 1, outside = 0;
+            for (long b = 0; b < 345L * 600; b++) {
+                ql_step(&sh_st[0][0], &A, 65536, 0); ql_step(&sh_st[0][1], &B, 65536, 1);
+                ok &= sh_st[0][0].val >= -32767 && sh_st[0][0].val <= 32767;
+                outside += sh_st[0][0].lx < -5 * 4096 || sh_st[0][0].lx > 3 * 4096;   /* far beyond the bloom 100 % orbit */
+            }
+            CHECK(ok, "fox: wild max at 4 x the top speed for 10 min: outputs in range (%d of 207000 blocks beyond the bloom range: clamped)", outside);
+            memset(sh_st, 0, sizeof sh_st); ql_dec(hw, 0, &A); ql_dec(hw, 1, &B); outside = 0;   /* ~1 Hz */
+            for (long b = 0; b < 345L * 600; b++) {
+                ql_step(&sh_st[0][0], &A, 65536, 0); ql_step(&sh_st[0][1], &B, 65536, 1);
+                outside += sh_st[0][0].lx < -5 * 4096 || sh_st[0][0].lx > 3 * 4096;
+            }
+            CHECK(outside < 345, "fox: wild max at 1 Hz for 10 min stays near the orbit (%d blocks outside)", outside);
+        }
+        {   /* controls */
+            int16_t cw[8] = { 0 }; fox_put(&f, cw);
+            ql_turn(cw, 0, 1, 1024 * 40, 0); fox_get(cw, &g); CHECK(g.bloom == 31, "fox bloom clamps (%d)", g.bloom);
+            ql_turn(cw, 0, 2, -1024 * 70, 0); fox_get(cw, &g); CHECK(g.amt[0] == -31, "fox rabbit amount clamps");
+            int seen_lfo = 0, seen_p2e = 0;
+            for (int k = 0; k < 40; k++) { ql_turn(cw, 0, 0, 1024, 1); fox_get(cw, &g); seen_lfo |= g.tgt[0] >= 12 && g.tgt[0] < QL_P2; seen_p2e |= g.tgt[0] >= QL_P2 && g.tgt[0] < QL_P2 + 3; }
+            CHECK(!seen_lfo && seen_p2e, "fox targets: no LFO targets, engine page 2 on synth");
+            seen_p2e = 0;
+            for (int k = 0; k < 40; k++) { ql_turn(cw, 1, 1, 1024, 1); fox_get(cw, &g); seen_p2e |= g.tgt[1] >= QL_P2 && g.tgt[1] < QL_P2 + 3; }
+            CHECK(!seen_p2e, "fox targets on the drum page: no engine page 2");
+            ql_turn(cw, 0, 2, 1024, 1); fox_get(cw, &g); CHECK(g.retrig == 1, "fox mode retrig");
+            CHECK(fox_press(cw, 0) && (fox_get(cw, &g), g.sync == 1 && g.rate == 4), "fox blue press: sync 1/4");
+            CHECK(!fox_press(cw, 1), "fox: only blue press does something");
+        }
+        static const int wls[4] = { 0, 8, 16, 31 };
+        for (int wi = 0; wi < 4; wi++) { int wl = wls[wi];   /* wild: boom height / interval spread (printed) */
+            memset(sh_st, 0, sizeof sh_st);
+            fox_set h = f; h.bloom = 16; h.wild = (uint8_t)wl; int16_t hw[8] = { 0 }; fox_put(&h, hw);
+            ql_lfo A, B; ql_dec(hw, 0, &A); ql_dec(hw, 1, &B);
+            double pk[400], iv[400]; int np = 0, last = -1, rising = 0; int32_t prevv = -(1 << 30), umin = 1 << 30, umax = -(1 << 30);
+            for (int b = 0; b < 345 * 120; b++) {
+                ql_step(&sh_st[0][0], &A, 65536, 0); ql_step(&sh_st[0][1], &B, 65536, 1);
+                int32_t x = sh_st[0][0].lx;
+                if (x < umin) umin = x; if (x > umax) umax = x;
+                /* a boom: from above +0.3 down to below -0.3 (hysteresis), its height = the max in between */
+                if (x > prevv) prevv = x;
+                if (!rising && x > 1229) { rising = 1; prevv = x; }
+                else if (rising && x < -1229 && np < 400) { pk[np] = prevv / 4096.0; iv[np] = last >= 0 ? (b - last) / 345.0 : 0; last = b; np++; rising = 0; prevv = -(1 << 30); }
+            }
+            double m = 0, v = 0, mi = 0, vi = 0; int ni = 0;
+            for (int k = 1; k < np; k++) { m += pk[k]; v += pk[k] * pk[k]; mi += iv[k]; vi += iv[k] * iv[k]; ni++; }
+            m /= ni; v = sqrt(fabs(v / ni - m * m)); mi /= ni; vi = sqrt(fabs(vi / ni - mi * mi));
+            if (!render) printf("fox wild %2d: %d peaks, height %.2f +- %.2f, interval %.2f +- %.2f s, u %.2f .. %.2f\n", wl, ni, m, v, mi, vi, umin / 4096.0, umax / 4096.0);
+            if (wl == 0) CHECK(v < 0.02 && vi < 0.03, "fox wild 0: regular (height sd %.3f, interval sd %.3f)", v, vi);
+            if (wl == 31) CHECK(v > 0.15 && vi / mi > 0.12 && umin > -12 * 4096 + 4096, "fox wild max: irregular (height sd %.2f, interval cv %.2f)", v, vi / mi);
+        }
+        memset(sh_st, 0, sizeof sh_st);
+    }
+    {   /* pond LFO (docs/64) */
+        pond_set f = { 31, 0, 0, 0, { 0, 1, 9, 27 }, { 31, -20, 10, 5 } }, g; int16_t pw[8] = { 0 };
+        pond_put(&f, pw); pond_get(pw, &g);
+        CHECK(!memcmp(&f, &g, sizeof f) && ql_is_quad(pw) && ql_is_pond(pw) && !ql_is_fox(pw), "pond words round trip / recognised");
+        ql_lfo L[4]; for (int i = 0; i < 4; i++) ql_dec(pw, i, &L[i]);
+        CHECK(L[0].wave == 10 && L[3].wave == 13 && L[3].tgt == 27 && L[1].amt == -20 && L[2].type == QT_FREE, "pond decode");
+        double cv[2] = { 0, 0 }, per0 = 0;
+        for (int ci = 0; ci < 2; ci++) {                            /* chaos 0 regular, chaos 31 irregular; ~1 swing per cycle */
+            memset(sh_st, 0, sizeof sh_st);
+            pond_set h = f; h.chaos = (uint8_t)(ci ? 31 : 0); int16_t hw[8] = { 0 }; pond_put(&h, hw);
+            for (int i = 0; i < 4; i++) ql_dec(hw, i, &L[i]);
+            int up = 0, prev = 0, last = -1; double sum = 0, sum2 = 0; int ok = 1;
+            for (int b = 0; b < 345 * 240; b++) {
+                for (int i = 0; i < 4; i++) ql_step(&sh_st[0][i], &L[i], 65536, i);
+                int32_t v = sh_st[0][0].val;
+                ok &= sh_st[0][0].lx >= 1049 && sh_st[0][0].lx <= 2097152 && v >= -32767 && v <= 32767;
+                int sg = v > 0;
+                if (b > 345 * 20 && sg && !prev) { if (last >= 0) { double d = (b - last) / 345.0; sum += d; sum2 += d * d; up++; } last = b; }
+                prev = sg;
+            }
+            double m = sum / up, sd = sqrt(fabs(sum2 / up - m * m));
+            cv[ci] = sd / m; if (!ci) per0 = m;
+            CHECK(ok, "pond chaos %d: in range", ci ? 31 : 0);
+            if (!render) printf("pond chaos %2d: %d swings, interval %.2f +- %.2f s\n", ci ? 31 : 0, up, m, sd);
+        }
+        double hz = ql_inc((31 << 9) | 0x100) / 4294967296.0 * 44100 / 128;
+        CHECK(fabs(per0 * hz - 1.0) < 0.15, "pond chaos 0: ~1 swing per LFO cycle (%.2f s at %.2f Hz)", per0, hz);
+        CHECK(cv[0] < 0.05 && cv[1] > 0.12, "pond: chaos 0 regular (cv %.3f), chaos 31 irregular (cv %.2f)", cv[0], cv[1]);
+        {   /* bounded at 4 x the top speed for 10 minutes, full chaos */
+            memset(sh_st, 0, sizeof sh_st);
+            pond_set h = f; h.chaos = 31; int16_t hw[8] = { 0 }; pond_put(&h, hw);
+            for (int i = 0; i < 4; i++) { ql_dec(hw, i, &L[i]); L[i].inc = ql_inc(32767) * 4; }
+            int ok = 1;
+            for (long b = 0; b < 345L * 600; b++) for (int i = 0; i < 4; i++) { ql_step(&sh_st[0][i], &L[i], 65536, i); ok &= sh_st[0][i].val >= -32767 && sh_st[0][i].val <= 32767; }
+            CHECK(ok && sh_st[0][0].lx >= 1049 && sh_st[0][0].d1 <= 2097152, "pond: bounded at full speed for 10 min");
+        }
+        {   /* controls: the selected species */
+            int16_t cw[8] = { 0 }; pond_put(&f, cw);
+            ql_press(0, 2); ql_turn(cw, 0, 2, 1024 * 3, 0); pond_get(cw, &g);
+            CHECK(g.amt[2] == 13 && g.amt[0] == 31, "pond: white edits the selected species' amount (%d)", g.amt[2]);
+            ql_turn(cw, 0, 3, 1024, 0); pond_get(cw, &g); CHECK(g.tgt[2] != 9 && g.tgt[0] == 0, "pond: red edits its target");
+            ql_turn(cw, 0, 1, 1024 * 40, 0); pond_get(cw, &g); CHECK(g.chaos == 31, "pond: chaos clamps");
+            ql_turn(cw, 0, 0, 1024, 1); pond_get(cw, &g); CHECK(g.sync && g.rate == 4, "pond: Shift + blue: sync");
+            ql_turn(cw, 0, 1, 1024, 1); pond_get(cw, &g); CHECK(g.retrig, "pond: Shift + green: retrig");
+            ql_press(0, 0);
+        }
+        memset(sh_st, 0, sizeof sh_st);
+    }
 
     /* detection: packed words, midi defaults not */
     int16_t midi_def[8] = { 2000, 2000, 2000, 2000, 2000, 2000, 2000, 2000 };
@@ -122,11 +297,17 @@ int main(int argc, char **argv)
         for (int i = 0; i < 70; i++) ql_turn(e, 0, 0, 1024, 0);
         CHECK(D(e, 2).rate == 63 && D(e, 0).rate == e0.rate && D(e, 0).tgt == e0.tgt && D(e, 3).amt == e3.amt && D(e, 3).type == e3.type && ql_is_quad(e), "rate edit of LFO 3 only");
         ql_turn(e, 0, 1, -40 * 1024, 0); CHECK(D(e, 2).amt == -31, "amount clamp %d", D(e, 2).amt);
-        int seq[22], own = 0; for (int k = 0; k < 22; k++) { seq[k] = D(e, 2).tgt; own |= seq[k] >= 18 && seq[k] <= 20; ql_turn(e, 0, 2, 1024, 0); }
-        CHECK(seq[0] == 0 && seq[17] == 17 && seq[18] == 21 && seq[20] == 23 && seq[21] == 0 && !own,
-              "LFO 3: 21 targets, its own 18..20 skipped (%d %d %d %d)", seq[17], seq[18], seq[20], seq[21]);
+        static const int want[28] = { 0, 1, 2, 3, 24, 25, 26, 4, 5, 6, 7, 8, 9, 10, 11, 27, 28, 29, 12, 13, 14, 15, 16, 17, 21, 22, 23, 0 };
+        int seq[28], ok = 1; for (int k = 0; k < 28; k++) { seq[k] = D(e, 2).tgt; ok &= seq[k] == want[k]; ql_turn(e, 0, 2, 1024, 0); }
+        CHECK(ok, "LFO 3: 27 targets, page 2 after its page 1, own 18..20 skipped (%d %d %d %d %d)", seq[4], seq[7], seq[15], seq[18], seq[24]);
         ql_turn(e, 0, 2, -2048, 0); CHECK(D(e, 2).tgt == 23, "target wraps back (%d)", D(e, 2).tgt);
         ql_turn(e, 0, 2, -3 * 1024, 0); CHECK(D(e, 2).tgt == 17, "backwards skips its own too (%d)", D(e, 2).tgt);
+        {   /* drum page: 24 targets, no engine page 2 (24..26) */
+            int16_t dw[8]; for (int k = 0; k < 8; k++) dw[k] = e[k];
+            int dseq[25], dp2 = 0;
+            for (int k = 0; k < 25; k++) { dseq[k] = D(dw, 2).tgt; dp2 |= dseq[k] >= 24 && dseq[k] <= 26; ql_turn(dw, 1, 2, 1024, 0); }
+            CHECK(!dp2 && dseq[24] == dseq[0], "drum page: 24 targets, engine page 2 skipped");
+        }
         for (int k = 0; k < 6; k++) ql_turn(e, 0, 3, 1024, 0);
         CHECK(D(e, 2).type == QT_VOICE, "type wraps after 6");
         ql_turn(e, 0, 3, -1024, 0); CHECK(D(e, 2).type == QT_RAND, "type wraps back -> RAND");
@@ -211,6 +392,35 @@ int main(int argc, char **argv)
         CHECK(L[0].inc == inc0, "a stored self target is ignored");
         n_synth = 0; for (int b = 0; b < 200; b++) { host_cycles += cpb; ql_apply_synth(host_lfo_obj[0], self, 0); }
         CHECK(n_synth == 0, "LFO targets never touch knobs (%d calls)", n_synth);
+        /* page 2: engine words 5..7 (plugin engines, unset 0 = 8192), FX words 5..7 (plugin FX), clamped 0..32767 */
+        int16_t p2[8] = { fq(31,0,0,0,0), fq(31,0,0,0,0), fq(31,0,0,0,0), fq(31,0,0,0,0),
+                          ct(QT_FREE, 24 + 1, 31), ct(QT_FREE, 27 + 2, -31), ct(QT_FREE, 0, 0), ct(QT_FREE, 0, 0) }; pk(p2);
+        int mx_eng = 0, mn_eng = 32767, mx_fx = 0, mn_fx = 32767, n_other = n_synth + n_fx;
+        for (int b = 0; b < 400; b++) {
+            host_cycles += cpb;
+            for (int k = 0; k < 8; k++) host_stage[k] = 0, host_fx_params[k] = 16000;   /* the firmware copies the words per block */
+            ql_apply_synth(host_lfo_obj[0], p2, 0); ql_apply_fx(0, p2, 2);
+            if (host_stage[6] > mx_eng) mx_eng = host_stage[6]; if (host_stage[6] < mn_eng) mn_eng = host_stage[6];
+            if (host_fx_params[7] > mx_fx) mx_fx = host_fx_params[7]; if (host_fx_params[7] < mn_fx) mn_fx = host_fx_params[7];
+            CHECK(host_stage[5] == 0 && host_stage[7] == 0 && host_fx_params[5] == 16000 && host_fx_params[6] == 16000, "page 2: only the target word");
+        }
+        CHECK(mn_eng >= 1 && mn_eng < 8192 && mx_eng > 8192 && mx_eng <= 32767, "engine page 2 around the unset 8192 (%d..%d)", mn_eng, mx_eng);
+        CHECK(mn_fx >= 0 && mn_fx < 16000 && mx_fx > 16000 && mx_fx <= 32767, "FX page 2 around its value (%d..%d)", mn_fx, mx_fx);
+        CHECK(n_synth + n_fx == n_other, "page 2 never calls the knob range functions");
+        /* screens: op1_page2_live shows the modulated word while applied (engine green, synth FX white), else stored */
+        CHECK(ql_page2_live(0, 0, 1, 1234) == host_stage[6] && ql_page2_live(1, 0, 2, 1234) == host_fx_params[7],
+              "page 2 shown as modulated (%d / %d)", ql_page2_live(0, 0, 1, 1234), ql_page2_live(1, 0, 2, 1234));
+        CHECK(ql_page2_live(0, 0, 0, 1234) == 1234 && ql_page2_live(1, 1, 2, 1234) == 1234 && ql_page2_live(1, 2, 2, 1234) == 1234,
+              "page 2 not modulated: stored word (other knob, drum FX, master)");
+        host_cycles += cpb * 40;                                     /* LFO stopped applying */
+        CHECK(ql_page2_live(0, 0, 1, 1234) == 1234, "page 2 shown: stored word after the LFO stops");
+        host_eng_plugin = host_fx_plugin = 0;
+        for (int k = 0; k < 8; k++) host_stage[k] = 0, host_fx_params[k] = 16000;
+        for (int b = 0; b < 50; b++) { host_cycles += cpb; ql_apply_synth(host_lfo_obj[0], p2, 0); ql_apply_fx(0, p2, 2); }
+        CHECK(host_stage[6] == 0 && host_fx_params[7] == 16000, "stock engine / FX: page 2 targets do nothing");
+        host_eng_plugin = host_fx_plugin = 1;
+        int nd = n_drum; for (int b = 0; b < 50; b++) { host_cycles += cpb; ql_apply_drum(0, p2, 3); }
+        CHECK(n_drum == nd && host_stage[6] == 0, "drums: no engine page 2");
         /* round trip: every field of every LFO */
         int16_t rt[8] = { 0 }; ql_lfo q[4];
         for (int i = 0; i < 4; i++) { q[i].rate = (uint8_t)(10 + i * 13); q[i].sync = 0; q[i].wave = (uint8_t)(i + 1); q[i].smooth = (uint8_t)(7 - i);
@@ -244,8 +454,17 @@ int main(int argc, char **argv)
         { "LFO targets: LFO1 -> freq of LFO2 (F, green dot), LFO3 -> amount of LFO4 (A), LFO4 -> offset of LFO1 (O)", 0, 0,
           { fq(12,0,0,0,0), fq(40,0,0,0,0), fq(20,3,0,0,0), fq(45,0,0,0,0),
             ct(QT_FREE, 12 + 3 * 1 + 0, 25), ct(QT_FREE, 0, 20), ct(QT_FREE, 12 + 3 * 3 + 1, -20), ct(QT_VOICE, 12 + 3 * 0 + 2, 31) }, 70 },
+        { "page 2: LFO1 -> engine page 2 green, LFO2 -> engine knob green, LFO3 -> FX page 2 white, LFO4 -> FX white", 0, 0,
+          { fq(25,0,0,0,0), fq(36,0,0,0,0), fq(18,0,0,0,0), fq(44,0,0,0,0),
+            ct(QT_FREE, 24 + 1, 25), ct(QT_VOICE, 1, 20), ct(QT_FREE, 27 + 2, -18), ct(QT_FREE, 10, 31) }, 55 },
         { "SHIFT: offset / smoothing / waveform / sync; LFO2 selected", 0, 1, { fq(30,0,0,0,0), fq(7,1,1,2,2), fq(50,4,0,5,4), fq(63,5,0,0,7),
-          ct(QT_FREE, 0, 25), ct(QT_GATE, 4, -12), ct(QT_MONO, 11, 31), ct(QT_1SHT, 6, 18) }, 60 } };
+          ct(QT_FREE, 0, 25), ct(QT_GATE, 4, -12), ct(QT_MONO, 11, 31), ct(QT_1SHT, 6, 18) }, 60 },
+        { "lorenz: LFO1 x (rho 28) -> knob b, LFO2 z (rho 28) -> fx g, LFO3 x (rho 20) GATE -> env A, LFO4 sine", 0, 0,
+          { fq(36,6,0,0,0), fq(30,7,0,0,0), fq(40,6,0,0,4), fq(31,0,0,0,0),
+            ct(QT_FREE, 0, 28), ct(QT_FREE, 9, 24), ct(QT_GATE, 4, 20), ct(QT_VOICE, 3, 10) }, 400 },
+        { "SHIFT: lorenz x R28, lorenz z R24, lorenz x R14, sine 90 deg", 0, 0,
+          { fq(36,6,0,0,0), fq(30,7,0,1,2), fq(40,6,0,0,7), fq(31,0,0,0,2),
+            ct(QT_FREE, 0, 28), ct(QT_FREE, 9, 24), ct(QT_GATE, 4, 20), ct(QT_VOICE, 3, 10) }, 60 } };
     host_tempo_rate = 1662149u * 120;
     ql_screen_init(0);
     for (unsigned k = 0; k < sizeof st / sizeof st[0]; k++) {
@@ -256,6 +475,37 @@ int main(int argc, char **argv)
         host_shift = !strncmp(st[k].label, "SHIFT", 5);
         ql_screen_update(0, 16);
         frame_json(st[k].label);
+    }
+    {   /* fox LFO frames (docs/63): run a few seconds, then draw */
+        struct { const char *label; int bloom, wild, shift; } fs[] = {
+            { "FOX: bloom 20 %, 3 s at 0.95 Hz", 6, 0, 0 }, { "FOX: bloom 60 %, rabbits +100 / foxes -60", 19, 0, 0 },
+            { "FOX: bloom 100 %", 31, 0, 0 }, { "FOX SHIFT: targets, mode, wild 40 %", 19, 12, 1 } };
+        for (unsigned k = 0; k < sizeof fs / sizeof fs[0]; k++) {
+            fox_set f = { 31, 0, 0, (uint8_t)fs[k].bloom, (uint8_t)fs[k].wild, { 0, 9 }, { 31, -19 } };
+            memset(host_lfo_words, 0, 16); fox_put(&f, host_lfo_words); memset(sh_st, 0, sizeof sh_st); memset((void *)fox_trail, 0, sizeof fox_trail);
+            host_pos = 0;
+            for (int b = 0; b < 345 * 3 + 120 * (int)k; b++) { host_cycles += cpb; ql_apply_synth(host_lfo_obj[0], host_lfo_words, 0); }
+            host_shift = fs[k].shift;
+            fx_screen_update(0, 16);
+            frame_json(fs[k].label);
+        }
+        host_shift = 0;
+    }
+    {   /* pond LFO frames */
+        struct { const char *label; int chaos, sel, shift; } ps[] = {
+            { "POND: chaos 0 %, species 1 selected", 0, 0, 0 }, { "POND: chaos 75 %, species 2 selected", 23, 1, 0 },
+            { "POND: chaos 100 %, species 4 selected", 31, 3, 0 }, { "POND SHIFT: clock / mode", 31, 0, 1 } };
+        for (unsigned k = 0; k < sizeof ps / sizeof ps[0]; k++) {
+            pond_set f = { 31, 0, 0, (uint8_t)ps[k].chaos, { 0, 1, 9, 27 }, { 25, -20, 10, 31 } };
+            memset(host_lfo_words, 0, 16); pond_put(&f, host_lfo_words); memset(sh_st, 0, sizeof sh_st);
+            memset((void *)pond_trail, 0, sizeof pond_trail);
+            host_pos = 0; ql_sel[0] = (uint8_t)ps[k].sel;
+            for (int b = 0; b < 345 * 40; b++) { host_cycles += cpb; ql_apply_synth(host_lfo_obj[0], host_lfo_words, 0); }
+            host_shift = ps[k].shift;
+            pd_screen_update(0, 16);
+            frame_json(ps[k].label);
+        }
+        host_shift = 0; ql_sel[0] = 0;
     }
     return 0;
 }
