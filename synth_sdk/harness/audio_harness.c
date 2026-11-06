@@ -18,6 +18,11 @@ void host_screen_draw(void *s, int dt) { (void)s; (void)dt; }
 void *host_raster(void) { return 0; }
 void host_raster_line(void *r, const void *a, const void *b, int32_t w, const uint8_t *c) { (void)r; (void)a; (void)b; (void)w; (void)c; }
 void *read_fx_param_safe(int slot, int pos) { (void)slot; (void)pos; return 0; }
+void *host_text_ctor(void *o, int32_t x, int32_t y, int32_t sz, const uint8_t *c) { (void)x; (void)y; (void)sz; (void)c; return o; }
+void host_text_set(void *t, const char *s) { (void)t; (void)s; }
+void host_text_draw(void *t, void *r, const int32_t *m) { (void)t; (void)r; (void)m; }
+int host_shift;
+int op1_sc_source(int src, int16_t *out) { (void)src; (void)out; return 0; }   /* ENTE: no sidechain on the host */
 
 static int peak; static long nonzero;
 static void emit(const int16_t *b, int n)

@@ -119,21 +119,21 @@ static int32_t gacc_w[1 + OP1_BLOCK];                 /* voices render one after
 #define gacc (gacc_w + 1)                             /* gr_grain writes back the word in front of its piece unchanged */
 
 #if defined(__bfin__) && !defined(GR_C_REF)
-void gr_grain(int32_t *acc, const int16_t *data, grain_t *g, int32_t cnt);
+void gr_grain(int32_t *acc, const int16_t *data, grain_t *g, int32_t cnt, const int16_t *sine4096);
+#define GR_GRAIN(a, d, g, c) gr_grain(a, d, g, c, OP1_SINE_Q + 4096)
 void gr_out(int16_t *out, int32_t *acc, int32_t gain, int32_t sg);
 #else
 
 /* cnt samples of grain g into acc[0..cnt): pos and wph advance, winc is left to the caller */
 static void gr_grain(int32_t *acc, const int16_t *data, grain_t *g, int32_t cnt)
 {
-    const int16_t *sine = OP1_SINE_TABLE;
     uint32_t pos = g->pos, wph = g->wph;
     const uint32_t rate = g->rate, winc = g->winc;
     for (int32_t k = 0; k < cnt; k++) {
         uint32_t idx = pos >> FRAC;
         int32_t a = data[idx], b = data[idx + 1];
         int32_t s = a + (((b - a) * (int32_t)(pos & ((1 << FRAC) - 1))) >> FRAC);
-        int32_t w = sine[((int32_t)wph >> 19) + 4096];                    /* sin(pi*t), 0..32767 */
+        int32_t w = op1_sin(((int32_t)wph >> 19) + 4096);                    /* sin(pi*t), 0..32767 */
         w = (w * w) >> 15;                                                /* sin^2 = Hann */
         acc[k] += (s * w) >> 15;
         pos += rate;
@@ -142,6 +142,7 @@ static void gr_grain(int32_t *acc, const int16_t *data, grain_t *g, int32_t cnt)
     g->pos = pos;
     g->wph = wph;
 }
+#define GR_GRAIN gr_grain
 static void gr_out(int16_t *out, int32_t *acc, int32_t gain, int32_t sg)
 {
     for (int n = 0; n < OP1_BLOCK; n++) {
@@ -174,7 +175,7 @@ static void gr_piece(gvoice_t *v, const int16_t *data, int32_t len, int32_t n0, 
         int32_t c = gr_count(g->pos, g->rate, lim, seg);                 /* samples whose index is in range */
         int32_t w = gr_count(g->wph, g->winc, 0x80000000u, seg);         /* samples inside the window */
         if (w < c) c = w;
-        if (c) gr_grain(gacc + n0, data, g, c);
+        if (c) GR_GRAIN(gacc + n0, data, g, c);
         if (g->wph >= 0x80000000u || c < seg) g->winc = 0;               /* finished, or its index ran out */
     }
 }
@@ -394,7 +395,7 @@ static void gr_screen_update(void *scr, int dt)
         for (int i = 0; i < MAX_GRAINS; i++) {
             const grain_t *g = &gv[vi].g[i];
             if (!g->winc) continue;
-            int32_t w = OP1_SINE_TABLE[(g->wph >> 19) & 8191];           /* sin(pi*t), 0..32767 */
+            int32_t w = op1_sin((g->wph >> 19) & 8191);           /* sin(pi*t), 0..32767 */
             int32_t h = 2 + ((w * (WH - 4)) >> 15);
             vline(r, xpos((int32_t)(g->pos >> FRAC), len), Q(WYC - h), Q(WYC + h), COL_GRAIN);
         }

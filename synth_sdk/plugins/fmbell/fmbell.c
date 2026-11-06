@@ -14,7 +14,7 @@ typedef struct {
     uint8_t  gate;            /* key held (for the screen only) */
 } fm_voice_t;
 
-static inline int32_t sine(uint32_t ph) { return OP1_SINE_TABLE[((int32_t)ph >> 19) + 4096]; }
+static inline int32_t sine(uint32_t ph) { return op1_sin(((int32_t)ph >> 19) + 4096); }
 
 static void fm_note_on(void *self, const int16_t *params)
 {
@@ -73,7 +73,7 @@ static void fm_screen_init(void *scr)
 }
 
 /* sine/cosine for a = 0..8191 per turn, Q15 (table[k] = sin(2*pi*k/8192), see op1_synth.h) */
-static inline int32_t tsin(int32_t a) { return OP1_SINE_TABLE[a & 8191]; }
+static inline int32_t tsin(int32_t a) { return op1_sin(a & 8191); }
 static inline int32_t tcos(int32_t a) { return tsin(a + 2048); }
 
 static void arc(void *r, int32_t rad, int32_t a0, int32_t a1)    /* angles 0..8191, 0 = right, CW */

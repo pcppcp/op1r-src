@@ -487,7 +487,7 @@ static const uint8_t C_WHITE[4] = { 0xFF, 0xFF, 0xFF, 0xFF }, C_GREY[4] = { 0x6F
                      C_DGREY[4] = { 0x3A, 0x3B, 0x3D, 0xFF }, C_RED[4] = { 0xFF, 0x3A, 0x5D, 0xFF },
                      C_FELT[4] = { 0x8A, 0x8C, 0x8E, 0xFF }, C_BLACK[4] = { 0, 0, 0, 0xFF };
 
-static inline int32_t psin(int32_t a) { return OP1_SINE_TABLE[a & 8191]; }      /* table[k] = sin(2 pi k/8192) */
+static inline int32_t psin(int32_t a) { return op1_sin(a & 8191); }      /* table[k] = sin(2 pi k/8192) */
 #define pline sq_line                                 /* seq/seq_text.h: one raster line */
 static void pcircle(void *r, int32_t cx, int32_t cy, int32_t rad, int32_t w, const uint8_t *c)   /* Q10 */
 {

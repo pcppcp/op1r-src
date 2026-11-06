@@ -464,7 +464,7 @@ static void eu_note_name(char *p, int n)
 static void eu_ring_pt(int i, int n, int32_t cx, int32_t cy, int32_t rad, int32_t *x, int32_t *y)
 {
     int32_t a = (i * 8192 / n) & 8191;                  /* angle, 8192 = full turn */
-    int32_t s = OP1_SINE_TABLE[a], c = OP1_SINE_TABLE[(a + 2048) & 8191];
+    int32_t s = op1_sin(a), c = op1_sin((a + 2048) & 8191);
     *x = cx + (int32_t)(((int64_t)s * rad) >> 15);
     *y = cy - (int32_t)(((int64_t)c * rad) >> 15);
 }

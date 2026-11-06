@@ -195,5 +195,6 @@ if __name__ == '__main__':
         args = [e['dir'] for e in sum(plugins.load(), []) + plugins.load_seqs() + plugins.load_seqs('drum') + plugins.load_seqs('sampler') + plugins.load_seqs('tool')]
     if not args:
         raise SystemExit(__doc__)
-    for a in args:
-        build(a)
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(os.cpu_count()) as pool:   # all cores
+        for _ in pool.map(build, args): pass

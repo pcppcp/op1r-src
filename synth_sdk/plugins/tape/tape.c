@@ -45,7 +45,7 @@ static volatile int16_t in_level[3];   /* input peak (hold + decay) per FX posit
 static volatile int16_t fb_level[3];   /* feedback signal peak (hold + decay), record head brightness */
 static volatile uint32_t samples[3];   /* samples processed per FX position: audio clock for the screen */
 
-static inline int32_t sine(uint32_t ph) { return OP1_SINE_TABLE[((int32_t)ph >> 19) + 4096]; }
+static inline int32_t sine(uint32_t ph) { return op1_sin(((int32_t)ph >> 19) + 4096); }
 
 static inline int32_t softclip(int32_t x)          /* Q15 in/out, gentle cubic */
 {
@@ -184,7 +184,7 @@ static const uint8_t COL_PLAY[4]  = { 0xFF, 0xFF, 0xFF, 0xFF };   /* white = tim
 static const uint8_t COL_LED_OFF[4] = { 0x4E, 0x28, 0x32, 0xFF };  /* stock "offred"   */
 static const uint8_t COL_LED_ON[4]  = { 0xFF, 0x42, 0x3F, 0xFF };  /* stock "orange"   */
 
-static inline int32_t tsin(int32_t a) { return OP1_SINE_TABLE[a & 8191]; }   /* table[k] = sin(2 pi k/8192) */
+static inline int32_t tsin(int32_t a) { return op1_sin(a & 8191); }   /* table[k] = sin(2 pi k/8192) */
 static inline int32_t tcos(int32_t a) { return tsin(a + 2048); }
 
 /* page-2 texts (stock font, lowercase): top left the active page-2 value, under the play-head dial the sync division */

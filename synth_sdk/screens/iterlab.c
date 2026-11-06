@@ -37,7 +37,7 @@ static uint32_t t_frames, orbit_ph, bubble_ph, dash_ph;
 static int32_t lvl;                       /* displayed level, Q15 */
 static int16_t shown_note = -1;
 
-static inline int32_t tsin(int32_t a) { return OP1_SINE_TABLE[a & 8191]; }
+static inline int32_t tsin(int32_t a) { return op1_sin(a & 8191); }
 static inline int32_t tcos(int32_t a) { return tsin(a + 2048); }
 
 static void ln(void *r, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t w, const uint8_t *c)

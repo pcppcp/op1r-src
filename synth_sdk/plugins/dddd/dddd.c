@@ -138,10 +138,10 @@ static void seg2(void *r, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_
 /* an ellipse of n segments around (cx, cy), radii rx, ry px; a: from .. to (8192 a turn) */
 static void ellipse(void *r, int32_t cx, int32_t cy, int32_t rx, int32_t ry, int n, int32_t a0, int32_t a1, const uint8_t *c)
 {
-    int32_t px = cx + (rx * OP1_SINE_TABLE[(a0 + 2048) & 8191] >> 15), py = cy + (ry * OP1_SINE_TABLE[a0 & 8191] >> 15);
+    int32_t px = cx + (rx * op1_sin((a0 + 2048) & 8191) >> 15), py = cy + (ry * op1_sin(a0 & 8191) >> 15);
     for (int i = 1; i <= n; i++) {
         int32_t a = a0 + (a1 - a0) * i / n;
-        int32_t x = cx + (rx * OP1_SINE_TABLE[(a + 2048) & 8191] >> 15), y = cy + (ry * OP1_SINE_TABLE[a & 8191] >> 15);
+        int32_t x = cx + (rx * op1_sin((a + 2048) & 8191) >> 15), y = cy + (ry * op1_sin(a & 8191) >> 15);
         seg2(r, px, py, x, y, 0x600, c);
         px = x; py = y;
     }
@@ -211,7 +211,7 @@ static void dd_screen_update(void *scr, int dt)
     w_seed = (q >> 16) & 7;                                     /* the jag flickers between 8 shapes */
     w_tear = tear;
     int seg = 16 - ((k[0] * 12) >> 15);                         /* wings: smooth (16) .. angular (4) */
-    int32_t open = 6 + ((OP1_SINE_TABLE[(flap >> 4) & 8191] + 32768) * 6 >> 16);   /* wing width 6 .. 12 px */
+    int32_t open = 6 + ((op1_sin((flap >> 4) & 8191) + 32768) * 6 >> 16);   /* wing width 6 .. 12 px */
     wasp_draw(r, seg, open, k[0]);
     if (tear) tear--;
 

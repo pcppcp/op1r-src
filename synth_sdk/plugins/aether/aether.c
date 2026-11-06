@@ -44,7 +44,7 @@ static volatile int ae_cur;           /* voice of the last note-on (screen) */
 static inline int32_t page_word(const int16_t *p, int i) { return p[i] > 0 ? p[i] : 8192; }
 static inline int32_t sin_deg_q10(int32_t deg_q10)  /* sin of an angle in degrees (Q10) -> raw units (1 g = 16384) */
 {
-    return OP1_SINE_TABLE[(deg_q10 * 8192 / 360 >> 10) & 8191] >> 1;
+    return op1_sin((deg_q10 * 8192 / 360 >> 10) & 8191) >> 1;
 }
 static inline int32_t iabs(int32_t a) { return a < 0 ? -a : a; }
 
@@ -101,7 +101,7 @@ static void ae_render(void *self, int16_t *out, const int16_t *params)
     int32_t rate_mhz = 3000 + page_word(params, 7) * 5000 / 32767;
     s->vph += (uint32_t)rate_mhz * 12466u;                     /* 2^32 * Hz * 128 / 44100 / 1000 */
     int32_t depth = (int32_t)((int64_t)params[2] * s->env >> 15);              /* Q15 of 0.5 semitone */
-    semis += (int32_t)((int64_t)depth * OP1_SINE_TABLE[s->vph >> 19] >> 15);  /* +-32768 Q16 = 0.5 semitone */
+    semis += (int32_t)((int64_t)depth * op1_sin(s->vph >> 19) >> 15);  /* +-32768 Q16 = 0.5 semitone */
     s->semis = semis;
     int32_t m1 = exp2_q14(semis / 12);                         /* constant divisor: compiled as a multiply */
     if (m1 > 65535) m1 = 65535;
@@ -111,7 +111,6 @@ static void ae_render(void *self, int16_t *out, const int16_t *params)
 
     /* ---- per sample ---- */
     const int32_t *inc = OP1_PITCH_INC;
-    const int16_t *sine = OP1_SINE_TABLE;
     int32_t tim = params[1];
     int32_t even = tim >> 2, drive = 8192 + (tim * 3 >> 2);    /* even harmonics up to 0.25, drive 1x .. 4x (Q13) */
     int32_t vg = op1_voice_vel_gain(self);
@@ -121,7 +120,7 @@ static void ae_render(void *self, int16_t *out, const int16_t *params)
         uint32_t mm = (uint32_t)(m0 + ((m1 - m0) * n >> 7));
         uint32_t i = (uint32_t)inc[n];
         ph += ((i >> 16) * mm << 2) + ((i & 0xFFFF) * mm >> 14);   /* i * mm / 16384, no 64-bit */
-        int32_t x = sine[ph >> 19];
+        int32_t x = op1_sin(ph >> 19);
         x += (even * ((x * x) >> 15) >> 15) - (even >> 1);        /* x^2 = 2nd harmonic (minus its DC) */
         x = x * drive >> 13;                                       /* |x| < 41000, drive < 32768: 32-bit */
         if (x > 32767) x = 32767; else if (x < -32767) x = -32767;
@@ -190,8 +189,8 @@ static void ae_screen_init(void *scr)
 }
 
 /* sin / cos (Q15) of a dial position (sine table: 8192 / turn) */
-static inline int32_t dsin(int32_t a) { return OP1_SINE_TABLE[a & 8191]; }
-static inline int32_t dcos(int32_t a) { return OP1_SINE_TABLE[(a + 2048) & 8191]; }
+static inline int32_t dsin(int32_t a) { return op1_sin(a & 8191); }
+static inline int32_t dcos(int32_t a) { return op1_sin((a + 2048) & 8191); }
 
 static void ae_screen_update(void *scr, int dt)
 {

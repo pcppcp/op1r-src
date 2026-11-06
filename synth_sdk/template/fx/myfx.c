@@ -21,7 +21,7 @@ static void my_render(int pos, int16_t *buf, const int16_t *p)
     int32_t mix   = op1_fx_param_q15(p, 3);
     for (int n = 0; n < OP1_FX_BLOCK; n++) {
         s->lfo += (uint32_t)rate;
-        int32_t l = (OP1_SINE_TABLE[s->lfo >> 19] + 32768) >> 1;           /* 0..32767 */
+        int32_t l = (op1_sin(s->lfo >> 19) + 32768) >> 1;           /* 0..32767 */
         int32_t g = 32767 - ((depth * (32767 - l)) >> 15);
         int32_t x = (buf[n] * drive) >> 15;
         x = x > 32767 ? 32767 : (x < -32767 ? -32767 : x);

@@ -30,6 +30,16 @@
 #ifdef OP1_HOST
 #include "harness/op1_host.h"
 #endif
+/* sin(2 pi k / 8192) x 32767 for any k (one turn = 8192; only k & 8191 is used), from the sine table in L1
+ * (l1pool.c, needs op1r 55+; before its first audio block it reads OP1_SINE_TABLE, the same values). Use this in
+ * audio code instead of OP1_SINE_TABLE[...]: one-cycle L1 reads (docs/67). */
+#ifndef OP1_HOST
+extern const int16_t *op1_sine_q;
+#define OP1_SINE_Q op1_sine_q
+#else
+#define OP1_SINE_Q OP1_SINE_TABLE
+#endif
+static inline int32_t op1_sin(int32_t k) { return OP1_SINE_Q[k & 8191]; }
 
 #define OP1_BLOCK        128
 #define OP1_VOICES       6

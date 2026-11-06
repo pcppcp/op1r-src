@@ -303,7 +303,7 @@ static void nt_lfo(nt_t *s, int r)                                /* the LFOs, e
             v = s->wv[k] += (s->wt[k] - s->wv[k]) >> nt_wander[r][2];
         } else {
             s->ph[k] += (uint32_t)s->inc[k];
-            v = (OP1_SINE_TABLE[s->ph[k] >> 19] + 32768) >> 1;
+            v = (op1_sin(s->ph[k] >> 19) + 32768) >> 1;
         }
         s->lfo[k] = s->glide ? s->lfo[k] + ((v - s->lfo[k]) >> 3) : v;
     }
@@ -781,7 +781,7 @@ static void ns_mat(void *n, int32_t a, int32_t tx, int32_t ty)   /* scale x by a
     int32_t m[9] = { a, 0, 0, 0, 1024, 0, tx, ty, 1024 };
     if (n) op1_node_set_transform(n, m);
 }
-static inline int32_t ns_sin(int32_t a) { return OP1_SINE_TABLE[a & 8191]; }   /* Q15, 8192 a turn */
+static inline int32_t ns_sin(int32_t a) { return op1_sin(a & 8191); }   /* Q15, 8192 a turn */
 static uint32_t ns_rgb(uint32_t a, uint32_t b, int32_t f)         /* a .. b, f Q15 */
 {
     uint32_t o = 0;

@@ -19,7 +19,7 @@ static void *spinner_node;
 
 static uint32_t spinner_ph, vibrato_ph;
 
-static inline int32_t tsin(int32_t a) { return OP1_SINE_TABLE[a & 8191]; }
+static inline int32_t tsin(int32_t a) { return op1_sin(a & 8191); }
 static inline int32_t tcos(int32_t a) { return tsin(a + 2048); }
 
 /* Build a 3x3 transform matrix (Q10) for scaling around a center point */

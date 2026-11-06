@@ -77,7 +77,7 @@ static const uint8_t COL_FROZEN[4] = { 0xBF, 0xD8, 0xFF, 0xFF };          /* sto
 static const uint8_t COL_HEAD[4] = { 0xFF, 0x3A, 0x5D, 0xFF };
 static const uint8_t COL_DIM[4] = { 0x6F, 0x71, 0x73, 0xFF };
 
-static inline int32_t clsin(int32_t a) { return OP1_SINE_TABLE[a & 8191]; }      /* table[k] = sin(2 pi k/8192) */
+static inline int32_t clsin(int32_t a) { return op1_sin(a & 8191); }      /* table[k] = sin(2 pi k/8192) */
 static void cline(void *r, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t w, const uint8_t *c)
 {
     op1_pt a = { x0, y0 }, b = { x1, y1 };

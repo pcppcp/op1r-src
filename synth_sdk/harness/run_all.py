@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Build and run every host test (harness/*_test.c) with sanitizers; exit 1 on the first failure.
+"""Build and run every host test (harness/*_test.c) with sanitizers; exit 1 if any fails; all in parallel.
     python3 harness/run_all.py [name ...]      (names without _test.c; default: all)
 A test builds from its own file plus the sources listed in EXTRA; SKIP names tests that need input files or
 arguments, with the reason. Run before every release (AGENTS.md)."""
 import os, subprocess, sys
+from concurrent.futures import ThreadPoolExecutor
 
 HERE = os.path.dirname(os.path.abspath(__file__)); SDK = os.path.dirname(HERE)
 EXTRA = {                                   # test -> extra sources (relative to synth_sdk)
@@ -44,9 +45,12 @@ def run(name):
 def main(names):
     names = names or sorted(f[:-7] for f in os.listdir(HERE) if f.endswith('_test.c'))
     bad = 0
+    todo = [n for n in names if n not in SKIP]
+    with ThreadPoolExecutor(os.cpu_count()) as pool:   # every test builds and runs in parallel (own exe, own outputs)
+        res = dict(zip(todo, pool.map(run, todo)))
     for n in names:
         if n in SKIP: print(f'skip  {n}: {SKIP[n]}'); continue
-        what, out = run(n)
+        what, out = res[n]
         print(('ok    ' if not what else f'FAIL  ') + n + ('' if not what else f' ({what})'))
         for l in out or []: print('      ' + l)
         bad += bool(what)

@@ -65,8 +65,7 @@ _br_loop:
 	B3 = R0;
 	R0 = 40;
 	L3 = R0;                             /* k[] read in a circle, once per sample */
-	P0.H = 0x0101;
-	P0.L = 0xE5E8;                       /* OP1_SINE_TABLE */
+	P0 = [P5 + 68];                      /* the sine table (L1, op1_sin) */
 
 	/* sample 0 up to its sine index (the loop body without the previous sample's output) */
 	R5 = R5 + R1 (NS) || R1 = [I3++] || NOP;            /* envq += env_step; vinc */

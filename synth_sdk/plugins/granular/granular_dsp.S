@@ -1,7 +1,7 @@
 /* Granular's grain and output passes, hand-scheduled for the Blackfin: the same arithmetic as granular.c's gr_grain and
  * gr_out (kept there for host builds and GR_C_REF), bit for bit, in fewer instruction packets.
  *
- * void gr_grain(int32_t *acc, const int16_t *data, grain_t *g, int32_t cnt)
+ * void gr_grain(int32_t *acc, const int16_t *data, grain_t *g, int32_t cnt, const int16_t *sine4096)
  *   cnt >= 1 samples of one grain added to acc[0 .. cnt): idx = pos >> 10, f = pos & 1023,
  *   s = a + ((b - a) f >> 10) with a = data[idx], b = data[idx + 1] (b f - a f as one integer MAC pair: exact, |.| <
  *   2^27), w = sine[(wph >> 19) + 4096], w2 = w w >> 15 (0 .. 32768: kept in 32 bits, so a table word of -32768 gives
@@ -15,7 +15,7 @@
  *   out[n] = sat16((((acc[n] gain) >> 15) sg) >> 13), acc[n] = 0, n = 0 .. 127: the products are the low 32 bits
  *   (Dreg *= Dreg, as the C's int multiply), sat16 as a saturating shift into the high half. 5 packets per sample.
  *
- * The sample data and the sine table are in SDRAM: gr_grain's three point loads per sample are the memory-bound part
+ * The sample data are in SDRAM (the sine table in L1): gr_grain's three point loads per sample are the memory-bound part
  * (bcore counts packets, not the SDRAM / cache stalls). L0..L3 are set to 0 here; granular.c's gr_render restores
  * the caller's values after the block. M2 and M3 are saved and restored; M1 is not touched (R246's PmSynth keeps its
  * frame there).
@@ -74,8 +74,7 @@ _gr_grain:
 	L3 = R0;
 	R3 = [P1];                                       /* the word in front of acc, written back unchanged */
 	P4 = [SP + 48];                                  /* cnt (12 + 7 regs + M2, M3) */
-	P3.H = 0x0102;
-	P3.L = 0x05E8;                                   /* OP1_SINE_TABLE 0x0101E5E8 + 4096 words */
+	P3 = [SP + 52];                                  /* the sine table (L1, op1_sin) + 4096 words: 5th argument */
 	R7 = 10 (Z);                                     /* EXTRACT: position 0, length 10 */
 	R6 = [P5];                                       /* pos */
 	R5 = [P5 + 4];                                   /* rate */

@@ -97,8 +97,9 @@ typedef struct {
     const int32_t *inc;       /* 24: OP1_PITCH_INC */
     int32_t  k[10];           /* 28: vinc, {vamt : 1784}, {width : 257}, interp_start, 0, {32767 : 891},
                                *     EXTRACT(7, 8), EXTRACT(11, 15), {vel gain : 8191}, env_step */
+    const int16_t *sine;      /* 68: the sine table (L1, op1_sin) */
 } br_blk;
-_Static_assert(sizeof(br_blk) == 68, "br_blk layout (brass_dsp.S)");
+_Static_assert(sizeof(br_blk) == 72, "br_blk layout (brass_dsp.S)");
 void br_loop(br_blk *b);
 static br_blk br_b;           /* the audio thread only, one voice at a time */
 #define BR_HALVES(h, l) ((int32_t)(((uint32_t)(uint16_t)(h) << 16) | (uint16_t)(l)))
@@ -176,6 +177,7 @@ static void brass_render(void *self, int16_t *out, const int16_t *params)
         b->k[7] = 11 << 8 | 15;
         b->k[8] = BR_HALVES(vg, 8191);
         b->k[9] = env_step;
+        b->sine = OP1_SINE_Q;
         br_loop(b);
         ph = b->ph; lp = b->lp; vibrato_phase = b->vph;
     }
@@ -198,7 +200,7 @@ static void brass_render(void *self, int16_t *out, const int16_t *params)
         int32_t bend_q15 = op1_mul16(BEND_AMOUNT, pitch_bend_phase);
 
         /* Vibrato: per-sample LFO, scaled by the gate/fade above. */
-        int32_t vibrato_q15 = (OP1_SINE_TABLE[vibrato_phase >> 19] * vibrato_amt_q15) >> 15;
+        int32_t vibrato_q15 = (op1_sin(vibrato_phase >> 19) * vibrato_amt_q15) >> 15;
         vibrato_phase += (uint32_t)vibrato_phase_inc;
 
         /* inc * (1 + mod): 32-bit only. |mod| < 2^12 and inc < 2^31, so (inc >> 12) * mod stays below 2^31. */
@@ -220,7 +222,7 @@ static void brass_render(void *self, int16_t *out, const int16_t *params)
         sine_idx = sine_idx > 8191 ? 8191 : (sine_idx < 0 ? 0 : sine_idx);
 
         /* Lookup sine value. */
-        int32_t sample = OP1_SINE_TABLE[sine_idx];
+        int32_t sample = op1_sin(sine_idx);
 
         /* One-pole low-pass filter. */
         lp += ((sample - lp) * 16384) >> 15;

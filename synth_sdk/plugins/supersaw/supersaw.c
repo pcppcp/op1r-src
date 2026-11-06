@@ -28,7 +28,6 @@ static void ss_render(void *self, int16_t *out, const int16_t *params)
 {
     voice_t *v = (voice_t *)self;
     const int32_t *inc = OP1_PITCH_INC;
-    const int16_t *sine = OP1_SINE_TABLE;
     int32_t detune = params[0] >> 7;          /* 0..255 -> up to ~1.6% detune */
     int32_t morph  = params[1];               /* Q15 */
     int32_t sublvl = params[2];               /* Q15 */
@@ -48,7 +47,7 @@ static void ss_render(void *self, int16_t *out, const int16_t *params)
         /* morph: saw2 -> inverted saw2 gives saw->pulse (s1 - s2) */
         int32_t s2m = s2 - op1_mul16(2 * s2, morph);
         int32_t x = (s1 + s2m) >> 1;
-        x += op1_mul16(sine[((int32_t)ps >> 19) + 4096], sublvl) >> 1;
+        x += op1_mul16(op1_sin(((int32_t)ps >> 19) + 4096), sublvl) >> 1;
         x = (x * (drive >> 4)) >> 11;                        /* drive up to 5x: keep the product in 32 bits */
         /* soft clip: x - x^3/3 style on +-32767 */
         if (x > 32767) x = 32767; else if (x < -32767) x = -32767;
@@ -83,7 +82,7 @@ static const uint8_t COL_TRIG[4]  = { 0xFF, 0x3A, 0x5D, 0xFF };
 static const uint8_t COL_CAP[4]   = { 0x4D, 0x9E, 0xFF, 0xFF };   /* blue  = detune */
 static const uint8_t COL_HANDLE[4]= { 0x00, 0xED, 0x95, 0xFF };   /* green = morph  */
 
-static inline int32_t tsin(int32_t a) { return OP1_SINE_TABLE[a & 8191]; }   /* table[k] = sin(2 pi k/8192) */
+static inline int32_t tsin(int32_t a) { return op1_sin(a & 8191); }   /* table[k] = sin(2 pi k/8192) */
 static inline int32_t tcos(int32_t a) { return tsin(a + 2048); }
 
 static void ss_screen_init(void *scr)

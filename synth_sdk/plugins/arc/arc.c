@@ -454,7 +454,7 @@ static const uint8_t COL_BLUE[4] = { 0x4D, 0x9E, 0xFF, 0xFF }, COL_GREEN[4] = { 
                      COL_ROD[4] = { 0xDF, 0xD9, 0xFF, 0xFF }, COL_BLACK[4] = { 0, 0, 0, 0xFF };
 static const uint8_t *const COL_K[4] = { COL_BLUE, COL_GREEN, COL_WHITE, COL_RED };
 
-static inline int32_t tsin(int32_t a) { return OP1_SINE_TABLE[a & 8191]; }   /* table[k] = sin(2 pi k / 8192) */
+static inline int32_t tsin(int32_t a) { return op1_sin(a & 8191); }   /* table[k] = sin(2 pi k / 8192) */
 static inline int32_t tcos(int32_t a) { return tsin(a + 2048); }
 static int32_t rnd(int32_t n)                        /* 0 .. n-1, n <= 65536 */
 { srng ^= srng << 13; srng ^= srng >> 17; srng ^= srng << 5; return (int32_t)(((srng >> 16) * (uint32_t)n) >> 16); }

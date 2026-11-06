@@ -117,6 +117,7 @@ static const struct { const char *name; void *addr; } exports[] = {
     { "op1_sc_source", (void *)op1_sc_source },
     { "op1_page2_live", (void *)op1_page2_live },
     { "op1_patch_wait", (void *)op1_patch_wait },
+    { "op1_sine_q", (void *)&op1_sine_q },
     { "sq_line", (void *)sq_line }, { "sq_text", (void *)sq_text }, { "sq_num", (void *)sq_num },
     { "sq_cat", (void *)sq_cat }, { "sq_node_rotate", (void *)sq_node_rotate },
     { "sq_synth_knobs_live", (void *)sq_synth_knobs_live }, { "sq_fx_knobs_live", (void *)sq_fx_knobs_live },

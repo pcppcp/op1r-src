@@ -207,7 +207,7 @@ static int32_t ql_shape(int wave, uint32_t phase, uint32_t cnt, int i)
     case 3: return ~((int32_t)phase >> 16);                       /* -32768 .. 32767 */
     case 4: return phase < 0x80000000u ? 32767 : -32767;
     case 5: { uint32_t x = (cnt + (uint32_t)i * 0x9E37u) * 2654435761u; x ^= x >> 15; return (int16_t)(x >> 16); }
-    default: return OP1_SINE_TABLE[phase >> 19];                  /* sin(2 pi phase / 2^32) */
+    default: return op1_sin(phase >> 19);                  /* sin(2 pi phase / 2^32) */
     }
 }
 /* Lorenz attractor (docs/62): dx = 10 (y - x), dy = x (rho - z) - y, dz = x y - 8/3 z; state Q16, products from Q8
@@ -908,8 +908,8 @@ static void ql_glyph(void *r, int pos, int g, int32_t gx, int32_t y, const uint8
         int32_t cx = gx + OP1_Q10(6), rr = OP1_Q10(5);
         for (int k = 0; k < 12; k++) {
             int32_t a0 = k * 8192 / 12, a1 = (k + 1) * 8192 / 12;
-            qline(r, cx + (OP1_SINE_TABLE[a0] * rr >> 15), y - (OP1_SINE_TABLE[(a0 + 2048) & 8191] * rr >> 15),
-                     cx + (OP1_SINE_TABLE[a1 & 8191] * rr >> 15), y - (OP1_SINE_TABLE[(a1 + 2048) & 8191] * rr >> 15), 0x300, ql_col[1]);
+            qline(r, cx + (op1_sin(a0) * rr >> 15), y - (op1_sin((a0 + 2048) & 8191) * rr >> 15),
+                     cx + (op1_sin(a1 & 8191) * rr >> 15), y - (op1_sin((a1 + 2048) & 8191) * rr >> 15), 0x300, ql_col[1]);
         }
         qline(r, cx - 0x180, y, cx + 0x180, y, 0x500, ql_col[1]);
         qline(r, cx, y, cx, y + OP1_Q10(9), 0x300, ql_col[1]);

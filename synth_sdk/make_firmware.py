@@ -276,7 +276,7 @@ def gen_table(engs, fxs):
 def build(engs, fxs):
     os.makedirs(os.path.join(HERE, 'build'), exist_ok=True)
     gen_table(engs, fxs)
-    srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/usbtrack.c', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'plugload/op1p_load.c', 'screens/settings.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/mixdrop.c', 'crash.c', 'patchjob.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c'] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
+    srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/usbtrack.c', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'plugload/op1p_load.c', 'screens/settings.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/mixdrop.c', 'crash.c', 'patchjob.c', 'l1pool.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c'] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
     objs = []
     cmds = []
     flags = {}                                       # plugin.json "source_cflags": e.g. -O3 after the default -O2
@@ -294,8 +294,10 @@ def build(engs, fxs):
     cmds.append('bfin-elf-objcopy -O binary -j .l1tramp build/synth.elf build/l1tramp.bin')
     cmds.append('bfin-elf-nm build/synth.elf > build/synth.sym')
     cmds.append('bfin-elf-objdump -d build/synth.elf > build/synth.lst && bfin-elf-size build/synth.elf')
+    ncc = len(srcs)                                  # the compiles run in parallel (all cores), then link etc. in order
+    open(os.path.join(HERE, 'build', 'cc.list'), 'w').write('\n'.join(cmds[:ncc]) + '\n')
     sh(f'docker run --rm -u {os.getuid()}:{os.getgid()} -v "{HERE}":/work bfin-elf-toolchain '
-       f'sh -c \'{" && ".join(cmds)}\'')
+       f'sh -c \'xargs -d "\\n" -n1 -P {os.cpu_count()} sh -c < build/cc.list && {" && ".join(cmds[ncc:])}\'')
     syms = {}
     for line in open(os.path.join(HERE, 'build', 'synth.sym')):
         a, t, n = line.split(); syms[n.lstrip('_')] = int(a, 16)
@@ -542,13 +544,18 @@ def main(opz=False, release=False, plugin_files='all', builtin=''):
     ob_cards, _ = gen_oblique.build(os.path.join(SRC_FW, 'content', 'display', 'opfont.svg'),
                                     os.path.join(HERE, 'screens', 'oblique', 'cards.txt'))
     gen_oblique.emit(ob_cards, os.path.join(HERE, 'build', 'oblique_data.c'))
-    code, hooks, syms = build(engs, fxs)
+    import make_plugin                           # plugin files keep their order as preferred number (old sounds)
+    from concurrent.futures import ThreadPoolExecutor
+    pl_out = os.path.join(HERE, 'build', 'fw_plugins')
+    shutil.rmtree(pl_out, ignore_errors=True)
+    with ThreadPoolExecutor(os.cpu_count()) as pool:  # plugin files build in parallel, alongside the core
+        jobs = [pool.submit(make_plugin.build, e['name'], pl_out) for e in file_plugins]
+        code, hooks, syms = build(engs, fxs)
+        for j in jobs: j.result()                    # re-raises a plugin's build error
     assert len(code) < 0x100000
     shutil.rmtree(OUT_FW, ignore_errors=True); shutil.copytree(SRC_FW, OUT_FW)
     if file_plugins:
-        import make_plugin                       # plugin files keep their order as preferred number (old sounds)
-        for e in file_plugins:
-            make_plugin.build(e['name'], os.path.join(OUT_FW, 'plugins'))
+        shutil.copytree(pl_out, os.path.join(OUT_FW, 'plugins'), dirs_exist_ok=True)
     patch_ldr(os.path.join(SRC_FW, 'OP1_vdk.ldr'), os.path.join(OUT_FW, 'OP1_vdk.ldr'), code, hooks, syms, opz, release)
     print(f'code {len(code)} bytes @{CODE_BASE:#x}; ' + ', '.join(f'{k}={syms[k]:#x}' for k in SLOTS))
     patch_db(os.path.join(OUT_FW, 'content', 'op1_factory.db'), engs, fxs)

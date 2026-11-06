@@ -267,7 +267,7 @@ static void arc(void *r, int32_t cx, int32_t cy, int32_t rx, int32_t ry, int n, 
     int32_t px = 0, py = 0;
     for (int i = 0; i <= n; i++) {
         int32_t a = a0 + (a1 - a0) * i / n;
-        int32_t x = cx + Q(rx) * OP1_SINE_TABLE[(a + 2048) & 8191] / 32768, y = cy + Q(ry) * OP1_SINE_TABLE[a & 8191] / 32768;
+        int32_t x = cx + Q(rx) * op1_sin((a + 2048) & 8191) / 32768, y = cy + Q(ry) * op1_sin(a & 8191) / 32768;
         if (i) ln(r, px, py, x, y, w, c);
         px = x; py = y;
     }
@@ -277,8 +277,8 @@ static void arc(void *r, int32_t cx, int32_t cy, int32_t rx, int32_t ry, int n, 
 /* the outline's point at angle a (8192 a turn), Q10; wg = wiggle depth, Q10 px (8 bumps) */
 static op1_pt face_pt(int32_t a, int32_t wg)
 {
-    int32_t rr = Q(FR) + wg * OP1_SINE_TABLE[(a * 8) & 8191] / 32768;
-    op1_pt p = { Q(FX) + rr * OP1_SINE_TABLE[(a + 2048) & 8191] / 32768, Q(FY) + rr * OP1_SINE_TABLE[a & 8191] / 32768 };
+    int32_t rr = Q(FR) + wg * op1_sin((a * 8) & 8191) / 32768;
+    op1_pt p = { Q(FX) + rr * op1_sin((a + 2048) & 8191) / 32768, Q(FY) + rr * op1_sin(a & 8191) / 32768 };
     return p;
 }
 
