@@ -1,0 +1,30 @@
+{
+  "name": "stutter",
+  "kind": "fx",
+  "symbol": "FX_stutter",
+  "sources": [
+    "stutter.c"
+  ],
+  "defaults": [
+    17152,
+    2304,
+    8000,
+    12000
+  ],
+  "page2_defaults": [
+    13568,
+    0,
+    0
+  ],
+  "screen": {
+    "svg": "stutter.svg",
+    "symbol": "SCREEN_stutter"
+  },
+  "loadable": true,
+  "claims": [],
+  "author": "hundekraft",
+  "cost": {
+    "call": 6595,
+    "init": 37666
+  }
+}

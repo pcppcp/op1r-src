@@ -1,0 +1,28 @@
+{
+  "name": "snowglobe",
+  "kind": "fx",
+  "order": 5,
+  "symbol": "FX_snowglobe",
+  "sources": [
+    "snowglobe_plugin.c",
+    "snowglobe_src_screen.c",
+    "snowglobe_src_snowglobe.c"
+  ],
+  "defaults": [
+    16384,
+    16384,
+    16384,
+    16385
+  ],
+  "screen": {
+    "svg": "snowglobe.svg",
+    "symbol": "SCREEN_snowglobe"
+  },
+  "loadable": true,
+  "claims": [],
+  "author": "hundekraft",
+  "cost": {
+    "call": 7927,
+    "init": 20322
+  }
+}

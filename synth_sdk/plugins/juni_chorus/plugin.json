@@ -1,0 +1,27 @@
+{
+  "name": "juni_chorus",
+  "kind": "fx",
+  "symbol": "FX_juni_chorus",
+  "stereo": true,
+  "sources": [
+    "juni_chorus.c",
+    "juni_chorus_screen.c"
+  ],
+  "defaults": [
+    4608,
+    27852,
+    6000,
+    24575
+  ],
+  "screen": {
+    "svg": "juni_chorus.svg",
+    "symbol": "SCREEN_juni_chorus"
+  },
+  "loadable": true,
+  "claims": [],
+  "author": "hundekraft",
+  "cost": {
+    "call": 10922,
+    "init": 11490
+  }
+}

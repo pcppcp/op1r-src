@@ -1,0 +1,28 @@
+{
+  "name": "juni",
+  "kind": "synth",
+  "symbol": "ENGINE_juni",
+  "sources": [
+    "juni.c"
+  ],
+  "defaults": [
+    18000,
+    16384,
+    11000,
+    9800
+  ],
+  "screen": {
+    "svg": "juni.svg",
+    "symbol": "SCREEN_juni"
+  },
+  "loadable": true,
+  "claims": [],
+  "author": "hundekraft",
+  "cflags": [
+    "-O3"
+  ],
+  "cost": {
+    "voice": 13166,
+    "start": 554
+  }
+}

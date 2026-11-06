@@ -1,0 +1,29 @@
+{
+  "name": "taffy",
+  "kind": "synth",
+  "order": 5,
+  "symbol": "ENGINE_taffy",
+  "sources": [
+    "taffy_plugin.c",
+    "taffy_src_screen.c",
+    "taffy_src_taffy.c",
+    "taffy_dsp.S"
+  ],
+  "defaults": [
+    16384,
+    8192,
+    0,
+    8192
+  ],
+  "screen": {
+    "svg": "taffy.svg",
+    "symbol": "SCREEN_taffy"
+  },
+  "loadable": true,
+  "claims": [],
+  "author": "hundekraft",
+  "cost": {
+    "voice": 13690,
+    "start": 1544
+  }
+}

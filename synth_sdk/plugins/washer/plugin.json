@@ -1,0 +1,28 @@
+{
+  "name": "washer",
+  "kind": "fx",
+  "order": 4,
+  "symbol": "FX_washer",
+  "sources": [
+    "washer_plugin.c",
+    "washer_src_screen.c",
+    "washer_src_washer.c"
+  ],
+  "defaults": [
+    16384,
+    16384,
+    16384,
+    16385
+  ],
+  "screen": {
+    "svg": "washer.svg",
+    "symbol": "SCREEN_washer"
+  },
+  "loadable": true,
+  "claims": [],
+  "author": "hundekraft",
+  "cost": {
+    "call": 12874,
+    "init": 14915
+  }
+}

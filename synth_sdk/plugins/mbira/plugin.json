@@ -1,0 +1,26 @@
+{
+  "name": "mbira",
+  "kind": "synth",
+  "symbol": "ENGINE_mbira",
+  "sources": [
+    "mbira.c",
+    "mbira_dsp.S"
+  ],
+  "defaults": [
+    14000,
+    16384,
+    12000,
+    0
+  ],
+  "screen": {
+    "svg": "mbira.svg",
+    "symbol": "SCREEN_mbira"
+  },
+  "loadable": true,
+  "claims": [],
+  "author": "hundekraft",
+  "cost": {
+    "voice": 15327,
+    "start": 2874
+  }
+}

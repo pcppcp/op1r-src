@@ -79,7 +79,6 @@ void fr_snap(void)                                          /* audio ISR, after 
     *(volatile uint8_t *)0x01DD591E = 0;                    /* the stock body of 0x019C9D04 */
 #endif
     sc_blk++;                                               /* once per block, after the tape mix (track outs) */
-    { extern void l1_block(void); l1_block(); }             /* sine quarter into L1 (l1pool.c, docs/67) */
     if (sc_want) sc_want--;
     if (fr_src != 1 || !MFX_ON()) return;
     for (int i = 0; i < 64; i++) { fr_snl[i] = TAPE_L[i]; fr_snr[i] = TAPE_R[i]; }

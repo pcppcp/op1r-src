@@ -101,7 +101,7 @@ typedef struct { uint32_t alloc; union { char buf[16]; char *ptr; } u; uint32_t 
 
 #define DIR_PATH   "/yaffs2/plugins"
 #define MARKER     "/yaffs2/plugins/.boot"
-#define MAX_FILES  32
+#define MAX_FILES  96                                       /* plugin files read per boot (more: refused, counted) */
 #define TOTAL_CAP  (4096u * 1024)                              /* all loaded plugins together (heap 0: ~9 MB free, docs/02) */
 
 void plug_apply_synth(int *patch);
@@ -118,6 +118,8 @@ static const struct { const char *name; void *addr; } exports[] = {
     { "op1_page2_live", (void *)op1_page2_live },
     { "op1_patch_wait", (void *)op1_patch_wait },
     { "op1_sine_q", (void *)&op1_sine_q },
+    { "op1_l1_claim", (void *)op1_l1_claim }, { "op1_l1_claim_state", (void *)op1_l1_claim_state },
+    { "op1_l1_sine_quarter", (void *)op1_l1_sine_quarter },
     { "sq_line", (void *)sq_line }, { "sq_text", (void *)sq_text }, { "sq_num", (void *)sq_num },
     { "sq_cat", (void *)sq_cat }, { "sq_node_rotate", (void *)sq_node_rotate },
     { "sq_synth_knobs_live", (void *)sq_synth_knobs_live }, { "sq_fx_knobs_live", (void *)sq_fx_knobs_live },
@@ -511,13 +513,15 @@ void plug_boot(void)
     tables_init();
     void *dir = Y_OPENDIR(DIR_PATH);
     if (!dir) return;
-    char files[MAX_FILES][44];
+    static char files[MAX_FILES][44];                     /* static: not on the boot thread's stack */
     int nf = 0;
     uint8_t *d;
-    while ((d = Y_READDIR(dir)) && nf < MAX_FILES) {
+    while ((d = Y_READDIR(dir))) {
         const char *s = (const char *)d + 0xB;
         int l = slen(s);
-        if (l > 5 && l < 44 && seq(s + l - 5, ".op1p") && s[0] != '.') scat(files[nf++], s);
+        if (!(l > 5 && l < 44 && seq(s + l - 5, ".op1p") && s[0] != '.')) continue;
+        if (nf < MAX_FILES) scat(files[nf++], s);
+        else { plug_refused++; plug_last_err = OP1P_E_SIZE; }   /* over the limit: shown on the monitor */
     }
     Y_CLOSEDIR(dir);
     if (!nf) return;
@@ -533,7 +537,7 @@ void plug_boot(void)
     __asm__ volatile("%0 = CYCLES; %1 = CYCLES2;" : "=d"(c1), "=d"(marker_c2));
     void *db = DB_HANDLE();
     map_load(db);
-    int pref[MAX_FILES];                                  /* load by preferred number: list rows keep the build order */
+    static int pref[MAX_FILES];                           /* load by preferred number: list rows keep the build order */
     for (int i = 0; i < nf; i++) pref[i] = file_pref(files[i]);
     for (int i = 1; i < nf; i++)
         for (int j = i; j > 0 && pref[j] < pref[j - 1]; j--) {

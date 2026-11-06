@@ -1,0 +1,35 @@
+{
+  "name": "sister",
+  "kind": "fx",
+  "symbol": "FX_sister",
+  "stereo": true,
+  "sources": [
+    "sister.c",
+    "sister_dsp.c",
+    "sister_kern.c",
+    "sister_asm.S",
+    "sister_screen.c"
+  ],
+  "defaults": [
+    19661,
+    6554,
+    0,
+    11469
+  ],
+  "page2_defaults": [
+    0,
+    16384,
+    0
+  ],
+  "screen": {
+    "svg": "sister.svg",
+    "symbol": "SCREEN_sister"
+  },
+  "loadable": true,
+  "claims": [],
+  "author": "Hundekraft",
+  "cost": {
+    "call": 27615,
+    "init": 5892
+  }
+}

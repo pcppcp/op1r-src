@@ -1,0 +1,35 @@
+{
+  "name": "hail",
+  "kind": "fx",
+  "symbol": "FX_hail",
+  "sources": [
+    "hail.c"
+  ],
+  "defaults": [
+    9830,
+    19660,
+    16384,
+    9830
+  ],
+  "page2_defaults": [
+    16384,
+    16384,
+    8192
+  ],
+  "screen": {
+    "svg": "hail.svg",
+    "symbol": "SCREEN_hail"
+  },
+  "loadable": true,
+  "claims": [],
+  "author": "hundekraft",
+  "source_cflags": {
+    "hail.c": [
+      "-O3"
+    ]
+  },
+  "cost": {
+    "call": 27448,
+    "init": 54794
+  }
+}

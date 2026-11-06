@@ -136,7 +136,7 @@ static int fw_engine_ranges(int slot, rn_range g[8])
     int n = KNOB_W(slot)[4] - OP1_ENGINE_MAGIC;                   /* plugin engine (iter): its page-2 words */
     const op1_engine_t *p = e == 14 && n > 0 && n < op1_engine_count ? op1_engines[n] : 0;
     for (int k = 0; p && k < 4; k++)
-        if (p->press[k] == OP1_PRESS_PAGE) page_range(&g[OP1_ENG_PAGE_WORD(k)], ENG_RG(e, OP1_ENG_PAGE_WORD(k)), 1, 32767);
+        if (p->press[k] == OP1_PRESS_PAGE || op1_press_steps(p->press[k])) page_range(&g[OP1_ENG_PAGE_WORD(k)], ENG_RG(e, OP1_ENG_PAGE_WORD(k)), 1, 32767);
     return filled ? 0 : -1;                                     /* table not filled yet */
 }
 static int fw_fx_ranges(int slot, rn_range g[8])
@@ -151,7 +151,7 @@ static int fw_fx_ranges(int slot, rn_range g[8])
     int n = FX_W(slot)[4] - OP1_ENGINE_MAGIC;                     /* plugin FX (filter): its page-2 words */
     const op1_fx_t *p = t == 5 && n > 0 && n < op1_fx_count ? op1_fxs[n] : 0;
     for (int k = 0; p && k < 3; k++)
-        if (p->press[k] == OP1_PRESS_PAGE) page_range(&g[5 + k], FX_RG(t, 5 + k), 0, 32767);
+        if (p->press[k] == OP1_PRESS_PAGE || p->press[k] == OP1_PRESS_PAGE_SEMI) page_range(&g[5 + k], FX_RG(t, 5 + k), 0, 32767);
     return 0;
 }
 static int fw_lfo_ranges(int slot, rn_range g[8])

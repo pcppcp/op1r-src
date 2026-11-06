@@ -1,0 +1,31 @@
+{
+  "name": "eva",
+  "kind": "synth",
+  "symbol": "ENGINE_eva",
+  "sources": [
+    "eva.c",
+    "eva_dsp.S"
+  ],
+  "defaults": [
+    20000,
+    16384,
+    12000,
+    3000
+  ],
+  "screen": {
+    "svg": "eva.svg",
+    "symbol": "SCREEN_eva"
+  },
+  "loadable": true,
+  "claims": [],
+  "author": "hundekraft",
+  "page2_defaults": [
+    0,
+    0,
+    16384
+  ],
+  "cost": {
+    "voice": 12894,
+    "start": 1320
+  }
+}

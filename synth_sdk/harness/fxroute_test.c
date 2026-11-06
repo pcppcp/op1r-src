@@ -6,7 +6,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-void l1_block(void) {}                                      /* l1pool.c (docs/67): not on the host */
 #include "../screens/fxroute.c"
 int16_t tr_out[4][64];
 

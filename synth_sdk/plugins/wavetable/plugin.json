@@ -1,0 +1,29 @@
+{
+  "name": "wavetable",
+  "kind": "synth",
+  "order": 4,
+  "symbol": "ENGINE_wavetable",
+  "sources": [
+    "wavetable_plugin.c",
+    "wavetable_screen.c",
+    "wavetable_src_wavetable.c",
+    "wavetable_dsp.S"
+  ],
+  "defaults": [
+    16384,
+    8192,
+    20000,
+    8192
+  ],
+  "screen": {
+    "svg": "wavetable.svg",
+    "symbol": "SCREEN_wavetable"
+  },
+  "loadable": true,
+  "claims": [],
+  "author": "hundekraft",
+  "cost": {
+    "voice": 13526,
+    "start": 4090
+  }
+}

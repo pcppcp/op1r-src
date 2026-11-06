@@ -1,12 +1,12 @@
-op1r-src - source code of op1r, custom firmware for the Teenage Engineering OP-1 (firmware R246)
+op1r - custom firmware for the Teenage Engineering OP-1 (firmware R246): sources (synth_sdk, tools, docs) and the patcher
 Copyright (C) 2026 pcppcp
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public
 License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later
 version. It is distributed WITHOUT ANY WARRANTY; see the GNU General Public License (LICENSE) for details.
 
-Covered: our source code, our graphics (SVG) and our compiled code, including the code contained in the op1r patch
-data (https://github.com/pcppcp/op1r). Anyone who distributes this program or a work based on it (modified patchers, other firmware mods or
+Covered: our source code, our graphics (SVG) and our compiled code, including the code contained in the patch data
+(data/). Anyone who distributes this program or a work based on it (modified patchers, other firmware mods or
 products containing this code) must do so under the GPL and provide the complete corresponding source.
 
 ADDITIONAL PERMISSION (GPL-3.0 section 7)
@@ -19,26 +19,27 @@ CONTRIBUTIONS
 Contributions (for example synth / FX plugins, synth_sdk/PLUGINS.md) are accepted under the same terms:
 GPL-3.0-or-later with the additional permission above. Contributors keep their copyright lines in their files.
 
+FROM HUNDEKRAFT (kennel 3.1.4, GPL-3.0-or-later with the same additional permission; their copyright lines are kept)
+- The plugins juni, juni_chorus, pew, father, elg, hollowsaint, washer, snowglobe, hail, stutter, wavetable, taffy,
+  monolit, mbira, eva, sid and sister (synth_sdk/plugins/<name>), synth_sdk/hk/, fx_spread.h, op1_l1.h,
+  and the L1 lease logic in synth_sdk/l1pool.c (after kennel's kn_l1.c). Copyright (C) 2026 Hundekraft.
+
 NOT COVERED by this license
 - The Teenage Engineering OP-1 firmware and any part of it, including the original firmware bytes in the patch data
   that the patcher uses to verify its input. Copyright Teenage Engineering. This repository contains no firmware;
   the patcher needs your own copy of the official image.
-- synth_sdk/l1_patches.json: byte differences inside the firmware's encrypted code (original and patched bytes
-  at the patched places only), like the op1r patch data. They are used to verify and patch your own copy.
 - Oblique Strategies card texts: by Brian Eno and Peter Schmidt (list from
   https://github.com/ultralazr/op1-oblique-strategies). Not ours and not licensed by us.
 
-THIRD-PARTY CODE (MIT or GPL-3.0, compatible with op1r's GPL-3.0-or-later; their notices are kept)
+THIRD-PARTY CODE (MIT License, compatible with the GPL; their notices are kept)
 - Fixed-point ports of Mutable Instruments Clouds and the Elements reverb: original code (c) 2014 Emilie Gillet,
   MIT License.
-- grids (synth_sdk/grids, plugins/grids): a port of Mutable Instruments Grids' pattern generator and drum map
-  (generated from its resources.cc), original code (c) 2011 Emilie Gillet, GPL-3.0 (AVR code of
-  pichenettes/eurorack).
-- nostromo (plugins/nostromo): the plate tank's topology, coefficients and output taps after the Synthstrom
-  Deluge's "Digital" reverb (src/deluge/dsp/reverb/digital.hpp), (c) 2024 Katherine Whitlock, GPL-3.0, itself
-  after J. Dattorro, "Effect Design, Part 1" (1997); fixed-point helpers from plugins/reverb (the Elements port).
 - blot (plugins/blot): the filter's coefficient fits, stage updates, feedback high-pass and gain follow the TB-303 mode of
   Open303's TeeBeeFilter (rosic_TeeBeeFilter), (c) 2009 Robin Schmidt (rs-met.com), MIT License.
+- hail (plugins/hail): a port of Mutable Instruments Beads, (c) 2017 Emilie Gillet, MIT License
+  (plugins/hail/LICENSE.beads).
+- sid (plugins/sid): oscillator / filter primitives and 8580 tables from cRSID 1.58 by Hermit (Mihaly Horvath),
+  under its permissive notice (kept in the sources).
 - iter-lab.svg and the LZMA settings of op1repacker: (c) 2016 op1hacks, MIT License
   (https://github.com/op1hacks/op1repacker).
 - svgfont.py and the Oblique Strategies idea: (c) 2026 Martin Mairinger, MIT License

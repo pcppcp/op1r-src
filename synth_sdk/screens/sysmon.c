@@ -41,7 +41,10 @@ static volatile uint32_t aud_busy, aud_max, aud_last_t0, aud_max_period;   /* IS
 void sm_audio_cb(void *a, void *b, void *c)                  /* replaces the callback pointer (audio::init) */
 {
     uint32_t t0 = READ_CYCLES();
+    extern void l1_begin(void), l1_end(void);
+    l1_begin();                                              /* L1 pool: leases move only inside the callback */
     AUDIO_CB(a, b, c);
+    l1_end();
     uint32_t d = READ_CYCLES() - t0, p = t0 - aud_last_t0;
     aud_last_t0 = t0;
     aud_busy += d;

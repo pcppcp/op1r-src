@@ -37,7 +37,12 @@ void synth_note_on(void *self, const int16_t *params)
 {
     int e = engine_of(params);
     voice_engine[op1_voice_index(self)] = (uint8_t)e;
+    /* core_note_on runs this on the key / sequencer thread too, where the callback can preempt it: the L1 pool moves
+     * no partition while it runs (l1pool.c), so a state lease never changes hands under a note_on */
+    extern uint32_t l1_thread_enter(void); extern void l1_thread_leave(uint32_t);
+    uint32_t t = l1_thread_enter();
     if (e) op1_engines[e]->note_on(self, params); else ITER_NOTE_ON(self, params);
+    l1_thread_leave(t);
 }
 
 /* per-voice output peak of stock iter voices (screens/iterlab.c), Q15, written once per block */
@@ -1080,7 +1085,8 @@ void key_event_hook(int code, int pressed)
     }
     if (code >= 0x3B && code <= 0x3E) {
         int n = custom_engine_page();
-        if (n && op1_engines[n]->press[press_knob[code - 0x3B]] == OP1_PRESS_PAGE) {   /* engine page 2 */
+        if (n && (op1_engines[n]->press[press_knob[code - 0x3B]] == OP1_PRESS_PAGE ||
+                  op1_press_steps(op1_engines[n]->press[press_knob[code - 0x3B]]))) {   /* engine page 2 */
             if (pressed) op1_eng_page[press_knob[code - 0x3B]] ^= 1;
             return;
         }
@@ -1157,7 +1163,7 @@ void midi_start_hook(void)
 static int eng_turn_word(int n, int knob)
 {
     uint8_t m = op1_engines[n]->press[knob];
-    if (m == OP1_PRESS_PAGE && op1_eng_page[knob]) return OP1_ENG_PAGE_WORD(knob);
+    if ((m == OP1_PRESS_PAGE || op1_press_steps(m)) && op1_eng_page[knob]) return OP1_ENG_PAGE_WORD(knob);
     if (m == OP1_PRESS_SHIFT && knob < 3 && *(volatile uint8_t *)0x01DD7F78) return OP1_ENG_PAGE_WORD(knob);
     return -1;
 }
@@ -1206,6 +1212,23 @@ void knob_event_hook(int knob, int16_t *delta)
             acc[knob] -= st * 1024;
             int32_t v = (w[wi] < 0 ? 0 : w[wi]) + st * 4681;     /* 32767 / 7: 8 positions */
             w[wi] = (int16_t)(v < 0 ? 0 : (v > 32767 ? 32767 : v));
+            PATCH_SET_KNOBS(PATCH_OBJ(0, *(volatile int *)0xFF8016D4), w);
+        }
+        return;
+    }
+    if (pw >= 0 && op1_press_steps(op1_engines[n]->press[knob])) {   /* stepped page 2 (kennel): a step per click */
+        static int32_t sacc[4];
+        int ns = op1_press_steps(op1_engines[n]->press[knob]);
+        int16_t *w = (int16_t *)op1_synth_knobs(*(volatile int *)0xFF8016D4 & 7);
+        if ((sacc[knob] > 0 && *delta < 0) || (sacc[knob] < 0 && *delta > 0)) sacc[knob] = 0;
+        sacc[knob] += *delta;
+        int st = sacc[knob] / 1024;
+        if (st) {
+            sacc[knob] -= st * 1024;
+            int32_t i = (((w[pw] > 0 ? w[pw] : 8192) * ns) >> 15) + st;
+            i = i < 0 ? 0 : (i > ns - 1 ? ns - 1 : i);
+            int32_t v = ((2 * i + 1) * 32768) / (2 * ns);
+            w[pw] = (int16_t)(v > 32767 ? 32767 : v);
             PATCH_SET_KNOBS(PATCH_OBJ(0, *(volatile int *)0xFF8016D4), w);
         }
         return;
@@ -1262,11 +1285,19 @@ void knob_event_hook(int knob, int16_t *delta)
         }
         return;
     }
-    if (e && knob >= 0 && knob < 3 && op1_fxs[e]->press[knob] == OP1_PRESS_PAGE) {
+    if (e && knob >= 0 && knob < 3 && (op1_fxs[e]->press[knob] == OP1_PRESS_PAGE || op1_fxs[e]->press[knob] == OP1_PRESS_PAGE_SEMI)) {
         int pos = op1_fx_screen_pos();
         if (op1_fx_page[pos][knob]) {
             int16_t *w = (int16_t *)op1_fx_knobs(pos);   /* this slot's FX words */
             int32_t v = w[5 + knob] + *delta;
+            if (op1_fxs[e]->press[knob] == OP1_PRESS_PAGE_SEMI) {   /* pitch (kennel): semitone steps, Shift = cents */
+                int steps = *delta / 1024;                   /* 1024 per detent, more when turned fast */
+                if (!steps) steps = *delta < 0 ? -1 : 1;
+                int c = op1_semi_cents(w[5 + knob] < 1 ? 16384 : w[5 + knob]);   /* unset: 0 semitones */
+                if (*(volatile uint8_t *)0x01DD7F78) c += steps;
+                else c = (c < 0 ? -((-c + 50) / 100) : (c + 50) / 100) * 100 + steps * 100;   /* snap, then step */
+                v = op1_semi_word(c);
+            }
             w[5 + knob] = (int16_t)(v < 1 ? 1 : (v > 32767 ? 32767 : v));   /* >= 1: 0 = "unset" (sounds before page 2) */
             if (pos != OP1_FX_MASTER)                    /* master: saved from the live words (0x019D9B94) */
                 PATCH_SET_FX(PATCH_OBJ(pos, *(volatile int *)(pos ? 0xFF8016D8 : 0xFF8016D4)), w);

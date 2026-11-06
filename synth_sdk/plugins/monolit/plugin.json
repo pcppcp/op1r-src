@@ -1,0 +1,26 @@
+{
+  "name": "monolit",
+  "kind": "synth",
+  "symbol": "ENGINE_monolit",
+  "sources": [
+    "monolit.c",
+    "monolit_dsp.S"
+  ],
+  "defaults": [
+    16384,
+    14745,
+    11469,
+    9830
+  ],
+  "screen": {
+    "svg": "monolit.svg",
+    "symbol": "SCREEN_monolit"
+  },
+  "loadable": true,
+  "claims": [],
+  "author": "hundekraft",
+  "cost": {
+    "voice": 24130,
+    "start": 252
+  }
+}

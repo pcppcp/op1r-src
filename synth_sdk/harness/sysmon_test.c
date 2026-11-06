@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+void l1_begin(void) {} void l1_end(void) {}                 /* l1pool.c: harness/l1pool_test.c */
 #include "../screens/sysmon.c"
 
 uint32_t sm_host_cycles, sm_host_idle_lo, sm_host_midi_fill[2], sm_host_stage[12];

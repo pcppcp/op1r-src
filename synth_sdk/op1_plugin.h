@@ -40,6 +40,7 @@ extern const int16_t *op1_sine_q;
 #define OP1_SINE_Q OP1_SINE_TABLE
 #endif
 static inline int32_t op1_sin(int32_t k) { return OP1_SINE_Q[k & 8191]; }
+#include "op1_l1.h"                              /* the L1 pool (l1pool.c, kennel's API) */
 
 #define OP1_BLOCK        128
 #define OP1_VOICES       6
@@ -94,6 +95,15 @@ typedef struct {
 } op1_engine_t;
 /* page-2 word per knob: blue 5, green 6, white 7, red 7 (white and red share word 7: page one of them only) */
 #define OP1_ENG_PAGE_WORD(k) ((k) < 3 ? 5 + (k) : 7)
+/* Synth engines (press[k], kennel's values, needs op1r 56+): OP1_PRESS_PAGE_STEPS(n), n = 2..63, is OP1_PRESS_PAGE whose
+ * page-2 word turns in n steps, one per encoder detent (a selector). Step i is the word ((2i+1) * 32768) / (2n), the step
+ * of a word is (word * n) >> 15. (FX use 0x40 | n for OP1_PRESS_LIST: a different struct.) */
+#define OP1_PRESS_PAGE_STEPS(n)  (0x40 + (n))
+static inline int op1_press_steps(unsigned p) { return p >= 0x42 && p <= 0x7F ? (int)p - 0x40 : 0; }
+/* kennel's preset level trim: engines without a page 2 read preset word 7 as a hidden Q13 gain, 8192 = 1x (0 or unset
+ * = 1x, 32767 = 4x); presets set it, no knob shows it */
+#define OP1_TRIM_ONE 8192
+static inline int32_t op1_preset_trim(const int16_t *params) { return params[7] > 0 ? params[7] : OP1_TRIM_ONE; }
 extern volatile uint8_t op1_eng_page[4];   /* synth engine screen: page 2 on per knob (blue..red) */
 #ifndef OP1_HOST
 static inline int op1_shift_held(void) { return *(volatile uint8_t *)0x01DD7F78 != 0; }   /* any thread, read only */
@@ -165,6 +175,14 @@ typedef struct {
      * own left / right (64 samples each, in place); synth / drum FX still get render (their bus is mono) */
     void (*render_stereo)(int pos, int16_t *l, int16_t *r, const int16_t *params);
 } op1_fx_t;
+/* Hundekraft kennel's name for a stereo FX: the same layout as op1_fx_t ({ { init, render, press }, render_stereo }) */
+typedef struct {
+    struct { void (*init)(int pos); void (*render)(int pos, int16_t *buf, const int16_t *params); uint8_t press[4]; } mono;
+    void (*render_stereo)(int pos, int16_t *l, int16_t *r, const int16_t *params);
+} op1_fx_stereo_t;
+_Static_assert(sizeof(op1_fx_stereo_t) == sizeof(op1_fx_t), "op1_fx_stereo_t layout");
+/* kennel's cached static SVG prefix: op1r draws the whole screen */
+#define op1_screen_draw_cached(scr, dt, first_live) ((void)(first_live), op1_screen_draw((scr), (dt)))
 /* Encoder presses on a custom FX page (dispatcher.c hooks the KeyHandler dispatch):
  *  OP1_PRESS_PAGE : press toggles the knob between its normal parameter (params[k]) and a second
  *                   parameter in params[5 + k] (k = 0..2 only: words 5..7, 0..32767, saved with the patch)
@@ -172,6 +190,28 @@ typedef struct {
  * State per FX position (0 synth, 1 drum, 2 master): op1_fx_page[pos][k] = 1 while page 2 / latch is on.
  * FX state must be kept per position 0..2 (the master can run the same custom FX as an instrument). */
 enum { OP1_PRESS_NONE = 0, OP1_PRESS_PAGE = 1, OP1_PRESS_LATCH = 2, OP1_PRESS_BROWSE = 3, OP1_PRESS_SHIFT = 4 };   /* BROWSE, SHIFT: synth engines */
+/* FX only (kennel's value, needs op1r 56+): OP1_PRESS_PAGE_SEMI = OP1_PRESS_PAGE whose page-2 word is a pitch of -24 .. +24
+ * semitones: one encoder detent = one semitone (snapped), Shift + turn = one cent; the word law below */
+#define OP1_PRESS_PAGE_SEMI 4
+/* OP1_PRESS_PAGE_SEMI word law (Hundekraft kennel): centre 16384 = 0 with a dead band of +-600, then 15784 units for
+ * 24 semitones each way; op1_semi_word / op1_semi_cents convert between the word and cents (-2400 .. +2400) */
+#define OP1_SEMI_DEAD  600
+#define OP1_SEMI_SPAN  (16384 - OP1_SEMI_DEAD)
+static inline int op1_semi_word(int cents)
+{
+    if (cents > 2400) cents = 2400;
+    if (cents < -2400) cents = -2400;
+    if (!cents) return 16384;
+    const int a = cents < 0 ? -cents : cents, u = OP1_SEMI_DEAD + (a * OP1_SEMI_SPAN + 2399) / 2400;
+    return cents < 0 ? 16384 - u : (16384 + u > 32767 ? 32767 : 16384 + u);
+}
+static inline int op1_semi_cents(int word)
+{
+    int pv = word - 16384;
+    pv = pv > OP1_SEMI_DEAD ? pv - OP1_SEMI_DEAD : (pv < -OP1_SEMI_DEAD ? pv + OP1_SEMI_DEAD : 0);
+    const int a = pv < 0 ? -pv : pv, c = (a * 2400 + OP1_SEMI_SPAN / 2) / OP1_SEMI_SPAN;
+    return pv < 0 ? -c : c;
+}
 /* FX list knob (press[k] = OP1_PRESS_LIST(n), n 2..63, needs op1r 52+): the core turns the knob one of n entries per
  * encoder click, wrapping at both ends; the word holds entry i at i / (n - 1) of the knob's range, so patches and
  * MIDI CCs keep working. Read it with op1_fx_list(op1_fx_param_q15(p, k), n). Older cores: a plain knob. */

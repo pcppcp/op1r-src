@@ -1,0 +1,28 @@
+{
+  "name": "sid",
+  "kind": "synth",
+  "symbol": "ENGINE_sid",
+  "sources": [
+    "sid.c",
+    "sid_dsp.c",
+    "sid_kernels.S",
+    "sid_screen.c"
+  ],
+  "defaults": [
+    6656,
+    16384,
+    32136,
+    8192
+  ],
+  "loadable": true,
+  "claims": [],
+  "author": "Hermit (Mihaly Horvath); kennel adaptation by Hundekraft",
+  "screen": {
+    "svg": "sid.svg",
+    "symbol": "SCREEN_sid"
+  },
+  "cost": {
+    "voice": 20514,
+    "start": 4175
+  }
+}

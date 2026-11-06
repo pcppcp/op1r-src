@@ -1,0 +1,29 @@
+{
+  "name": "pew",
+  "kind": "synth",
+  "order": 6,
+  "symbol": "ENGINE_pew",
+  "sources": [
+    "pew_plugin.c",
+    "pew_src_pew.c",
+    "pew_src_screen.c",
+    "pew_dsp.S"
+  ],
+  "defaults": [
+    16384,
+    12000,
+    8000,
+    16384
+  ],
+  "screen": {
+    "svg": "pew.svg",
+    "symbol": "SCREEN_pew"
+  },
+  "loadable": true,
+  "claims": [],
+  "author": "hundekraft",
+  "cost": {
+    "voice": 6845,
+    "start": 1495
+  }
+}

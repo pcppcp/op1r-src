@@ -1,0 +1,44 @@
+{
+  "name": "hollowsaint",
+  "kind": "synth",
+  "loadable": true,
+  "symbol": "ENGINE_hollow_saint",
+  "sources": [
+    "hollow_saint.c",
+    "hs_string.S",
+    "hs_post.S",
+    "hs_voice.S",
+    "hs_bus.S"
+  ],
+  "cflags": [
+    "-fno-tree-loop-distribute-patterns",
+    "-DHS_SHARED_ROOM",
+    "-DHS_SHARED_RELIC",
+    "-DHS_CAT11K",
+    "-DHS_RELIC_LITE",
+    "-DHS_BOW_CHEAP",
+    "-DHS_HIGH_HALF"
+  ],
+  "defaults": [
+    16384,
+    16384,
+    12000,
+    12000
+  ],
+  "page2_defaults": [
+    0,
+    8192,
+    21064
+  ],
+  "screen": {
+    "svg": "hollow_saint.svg",
+    "symbol": "SCREEN_hollow_saint"
+  },
+  "claims": [],
+  "author": "SammiBabe666",
+  "version": "0.7.0",
+  "cost": {
+    "voice": 13443,
+    "start": 1805
+  }
+}

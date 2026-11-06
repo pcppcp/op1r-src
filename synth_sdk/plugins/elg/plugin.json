@@ -1,0 +1,29 @@
+{
+  "name": "elg",
+  "kind": "synth",
+  "order": 7,
+  "symbol": "ENGINE_elg",
+  "sources": [
+    "elg_plugin.c",
+    "elg_src_elg.c",
+    "elg_src_screen.c",
+    "elg_dsp.S"
+  ],
+  "defaults": [
+    16384,
+    8192,
+    20000,
+    8192
+  ],
+  "screen": {
+    "svg": "elg.svg",
+    "symbol": "SCREEN_elg"
+  },
+  "loadable": true,
+  "claims": [],
+  "author": "hundekraft",
+  "cost": {
+    "voice": 8193,
+    "start": 157
+  }
+}

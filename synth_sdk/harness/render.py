@@ -149,6 +149,7 @@ def draw_svg(ctx, el, nodes, hidden=()):
         ctx.transform(cairo.Matrix(*v) if el.get('transform').startswith('matrix') else cairo.Matrix(1, 0, 0, 1, *v[:2]))
     if nid in nodes:
         a, b, _, c, d, _, tx, ty, _ = [v / 1024 for v in nodes[nid]]
+        if a * d - b * c == 0: ctx.restore(); return     # scaled to nothing: the device draws nothing either
         ctx.transform(cairo.Matrix(a, b, c, d, tx, ty))
     f = lambda k, dflt=0: float(el.get(k, dflt))
     if tag in ('svg', 'g'):

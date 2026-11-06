@@ -1,0 +1,29 @@
+{
+  "name": "father",
+  "kind": "fx",
+  "symbol": "FX_father",
+  "stereo": true,
+  "sources": [
+    "father.c",
+    "father_dsp.c",
+    "father_kern.S",
+    "father_screen.c"
+  ],
+  "defaults": [
+    16384,
+    0,
+    18022,
+    9830
+  ],
+  "screen": {
+    "svg": "father.svg",
+    "symbol": "SCREEN_father"
+  },
+  "loadable": true,
+  "claims": [],
+  "author": "Hundekraft",
+  "cost": {
+    "call": 13597,
+    "init": 1671
+  }
+}
