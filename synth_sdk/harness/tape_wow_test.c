@@ -15,6 +15,11 @@ void host_node_set_transform(void *n, const int32_t *m) { (void)n; (void)m; }
 void host_screen_draw(void *s, int dt) { (void)s; (void)dt; }
 void *host_raster(void) { return 0; }
 void host_raster_line(void *r, const void *a, const void *b, int32_t w, const uint8_t *c) { (void)r; (void)a; (void)b; (void)w; (void)c; }
+void *host_text_ctor(void *o, int32_t x, int32_t y, int32_t z, const uint8_t *c) { (void)x; (void)y; (void)z; (void)c; return o; }
+void host_text_set(void *t, const char *s) { (void)t; (void)s; }
+void host_node_set_visible(void *n, int on) { (void)n; (void)on; }
+uint8_t *host_node_style_rgba(void *scr, const char *id) { static uint8_t c[4]; (void)scr; (void)id; return c; }
+void host_text_draw(void *t, void *r, const int32_t *m) { (void)t; (void)r; (void)m; }
 
 #define SECS 6
 static float wet[44100 * SECS];

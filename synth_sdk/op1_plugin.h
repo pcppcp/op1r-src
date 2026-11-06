@@ -167,6 +167,12 @@ enum { OP1_PRESS_NONE = 0, OP1_PRESS_PAGE = 1, OP1_PRESS_LATCH = 2, OP1_PRESS_BR
  * MIDI CCs keep working. Read it with op1_fx_list(op1_fx_param_q15(p, k), n). Older cores: a plain knob. */
 #define OP1_PRESS_LIST(n)   (0x40 | (n))
 #define OP1_PRESS_IS_LIST(v) (((v) & 0xC0) == 0x40)
+/* FX extend knob (press[k] = OP1_PRESS_EXTEND(n), k = 0..2, n 1..63, needs op1r 53+): the knob works as usual; turned up
+ * further at the top of its range it steps page word 5 + k through 1..n (one per click), turned down it steps back to
+ * 0 and then moves the knob again. Word 5 + k = 0: off (sounds from before). The press does nothing. E.g. tape: time,
+ * then the tempo-sync divisions. Older cores: a plain knob. */
+#define OP1_PRESS_EXTEND(n)   (0x80 | (n))
+#define OP1_PRESS_IS_EXTEND(v) (((v) & 0xC0) == 0x80)
 static inline int op1_fx_list(int32_t q15, int n)
 {
     int i = (int)((q15 * (n - 1) + 16384) >> 15);

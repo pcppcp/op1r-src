@@ -52,6 +52,12 @@ STATES_BY_NAME['aether'] = [                     # HOST_ACCEL: sensor X,Y,Z afte
     ('all knobs max, front up 40 deg', (32767,) * 4, 1, 60, -1, 0, 0, 0, 0, {'HOST_ACCEL': '0,-10531,12551'}),
 ]
 FX_STATES_BY_NAME = {
+    'tape': [('defaults, input bursts (page 2 unset: mix 50 %)', None, 12, 50, -1),
+             ('blue page 2: heads 3 (bright), dial dimmed', None, 12, 50, -1, 0b0001, 15000, 16384, 0),
+             ('green page 2: mix 80 % (bar bright), dial dimmed', None, 12, 50, -1, 0b0010, 0, 26214, 0),
+             ('white past the top: sync 1/8. (window)', (12000, 14000, 32767, 6000), 12, 50, -1, 0, 0, 16384, 6),
+             ('swing heads, mix 30 %, sync 1/16 (no page)', (12000, 14000, 32767, 6000), 12, 50, -1, 0, 29000, 9830, 1),
+             ('dotted heads, mix 100 %, free', None, 12, 50, -1, 0, 21000, 32767, 0)],
     'reverb': [('defaults', None, 0, 4, -1),
                ('all min: 1 arm, dim skulls, no fire', (0, 0, 0, 0), 0, 4, -1),
                ('all max: 6 arms, mix full, bright skulls, fire', (32767,) * 4, 0, 4, -1),

@@ -470,6 +470,8 @@ _sp_adsr_stock:
 	jump.l _fr_snap;
 
 /* delayed patch saves (bgsave.c): the SaveSlotJob queue call goes to bgs_queue_slot; bgs_queue_stock = the original */
+	.section .hook_crash,"ax"
+	jump.l _crash_print;                     /* LINK 0x10 of the FP-chain printer 0x0191995C: our crash lines */
 	.section .hook_bgsgc,"ax"
 	call _bgs_idle_gc;
 	.section .hook_bgsqueue,"ax"

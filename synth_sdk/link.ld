@@ -78,6 +78,7 @@ SECTIONS {
   .hook_frsnap 0x019C9D04 : { KEEP(*(.hook_frsnap)) }
   .hook_bgsqueue 0x019411B8 : { KEEP(*(.hook_bgsqueue)) }
   .hook_bgsgc 0x019F0C46 : { KEEP(*(.hook_bgsgc)) }
+  .hook_crash 0x0191995C : { KEEP(*(.hook_crash)) }
   .hook_dpload 0x01A04BC0 : { KEEP(*(.hook_dpload)) }
   .hook_dpbrowse 0x01977900 : { KEEP(*(.hook_dpbrowse)) }
   .hook_usbbuf1 0x01A69730 : { KEEP(*(.hook_usbbuf1)) }

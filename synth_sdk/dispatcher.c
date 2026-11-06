@@ -1089,7 +1089,7 @@ void key_event_hook(int code, int pressed)
             int k = press_knob[code - 0x3B];
             uint8_t mode = op1_fxs[e]->press[k];
             if (mode) {                                  /* handled: swallow press and release */
-                if (pressed) op1_fx_page[op1_fx_screen_pos()][k] ^= 1;
+                if (pressed && !OP1_PRESS_IS_EXTEND(mode) && !OP1_PRESS_IS_LIST(mode)) op1_fx_page[op1_fx_screen_pos()][k] ^= 1;
                 return;
             }
         }
@@ -1220,6 +1220,26 @@ void knob_event_hook(int knob, int16_t *delta)
         return;
     }
     int e = custom_fx_page();
+    if (e && knob >= 0 && knob < 3 && OP1_PRESS_IS_EXTEND(op1_fxs[e]->press[knob])) {   /* extend knob: past the top, word 5+k */
+        static int32_t acc[3];
+        int pos = op1_fx_screen_pos(), n = op1_fxs[e]->press[knob] & 0x3F;
+        int16_t *w = (int16_t *)op1_fx_knobs(pos);
+        const int16_t *rg = (const int16_t *)(0x01DE5C50 + 5 * 0x30 + knob * 6);
+        int32_t hi = rg[1] > rg[0] ? rg[1] : fx_rng_default[knob][1];
+        int ext = w[5 + knob] < 0 ? 0 : w[5 + knob] > n ? n : w[5 + knob];
+        if (ext > 0 || (*delta > 0 && w[knob] >= hi - 16)) {         /* at the top or already extended */
+            if ((acc[knob] > 0 && *delta < 0) || (acc[knob] < 0 && *delta > 0)) acc[knob] = 0;
+            acc[knob] += *delta;
+            int st = acc[knob] / 1024;                               /* one step per click, as the list knob */
+            if (!st) return;
+            acc[knob] -= st * 1024;
+            ext += st; ext = ext < 0 ? 0 : ext > n ? n : ext;
+            w[5 + knob] = (int16_t)ext;
+            if (pos != OP1_FX_MASTER) PATCH_SET_FX(PATCH_OBJ(pos, *(volatile int *)(pos ? 0xFF8016D8 : 0xFF8016D4)), w);
+            return;
+        }
+        acc[knob] = 0;                                               /* below: the stock knob */
+    }
     if (e && knob >= 0 && knob < 4 && OP1_PRESS_IS_LIST(op1_fxs[e]->press[knob])) {   /* list knob: an entry per click */
         static int32_t acc[4];
         if ((acc[knob] > 0 && *delta < 0) || (acc[knob] < 0 && *delta > 0)) acc[knob] = 0;
@@ -1247,7 +1267,7 @@ void knob_event_hook(int knob, int16_t *delta)
         if (op1_fx_page[pos][knob]) {
             int16_t *w = (int16_t *)op1_fx_knobs(pos);   /* this slot's FX words */
             int32_t v = w[5 + knob] + *delta;
-            w[5 + knob] = (int16_t)(v < 0 ? 0 : (v > 32767 ? 32767 : v));
+            w[5 + knob] = (int16_t)(v < 1 ? 1 : (v > 32767 ? 32767 : v));   /* >= 1: 0 = "unset" (sounds before page 2) */
             if (pos != OP1_FX_MASTER)                    /* master: saved from the live words (0x019D9B94) */
                 PATCH_SET_FX(PATCH_OBJ(pos, *(volatile int *)(pos ? 0xFF8016D8 : 0xFF8016D4)), w);
             return;

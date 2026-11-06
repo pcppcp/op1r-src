@@ -13,6 +13,7 @@
     12000,
     6000
   ],
+  "page2_defaults": [16384, 0, 0],
   "screen": {
     "svg": "tapeecho.svg",
     "symbol": "SCREEN_tape"

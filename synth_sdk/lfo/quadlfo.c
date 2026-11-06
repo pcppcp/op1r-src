@@ -131,7 +131,7 @@ static void ql_p2_mod(int16_t *w, int16_t mod, int engine)
     int v = *w;
     if (engine && !v) v = 8192;
     v += mod;
-    *w = (int16_t)(v < engine ? engine : v > 32767 ? 32767 : v);
+    *w = (int16_t)(v < 1 ? 1 : v > 32767 ? 32767 : v);             /* >= 1: 0 = unset (engine 8192, tape mix 50 %) */
 }
 
 /* page-2 values as modulated last (0 engine, 1 synth FX, 2 drum FX; words 5..7) and when (CYCLES): plugin screens show
@@ -427,7 +427,7 @@ static int32_t fox_lv(ql_st *s, const ql_lfo *o, uint32_t adv, int i)
                 int32_t g = (int32_t)(ql_rng >> 24) + (int32_t)((ql_rng >> 16) & 0xFF) - 255;   /* -255..255, sd ~104 */
                 int32_t *x = c ? &s->d2 : &s->d1;
                 *x += (-(*x) * kk >> 12) + (((g * amp) >> 8) * (int32_t)sq * 3 >> 7);        /* OU step */
-                if (*x > 3000) *x = 3000; if (*x < -3000) *x = -3000;
+                *x = *x > 3000 ? 3000 : *x < -3000 ? -3000 : *x;
             }
             ga += s->d1; gc += s->d2;
         }
