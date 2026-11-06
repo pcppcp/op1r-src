@@ -61,8 +61,11 @@ void spc_sync(int editor_open_on_6) { if (op1_sampler) op1_sampler->sync(editor_
 int spc_knob(int knob, int delta) { return op1_sampler ? op1_sampler->knob(knob, delta) : 0; }
 int spc_key(int code, int pressed) { return op1_sampler ? op1_sampler->key(code, pressed) : 0; }
 int sb_job(void *job, void (*type_job)(void *));                 /* screens/sbrowse.c: engine sample browser load */
+void pj_begin(void), pj_end(void);                                /* patchjob.c: a patch job runs (docs/66) */
 void sp_type_job(void *job)
 {
     void (*j)(void *) = op1_sampler ? op1_sampler->type_job : STOCK_TYPE_JOB;
+    pj_begin();
     if (!sb_job(job, j)) j(job);
+    pj_end();
 }

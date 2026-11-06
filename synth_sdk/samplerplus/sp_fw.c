@@ -299,10 +299,10 @@ static void spx_type_job(void *job)
         sp_fw_store(slot);
     }
     sp_isplus[slot] = 1;
+    struct { uint32_t vt; uint8_t drum, pad[3]; int32_t slot; } save = { 0, 0, { 0, 0, 0 }, slot };
+    SAVE_SLOT(&save);                                             /* serialize first, then wake the UI (docs/66) */
     UI_SLOT(slot);
     UI_SIGNAL();
-    struct { uint32_t vt; uint8_t drum, pad[3]; int32_t slot; } save = { 0, 0, { 0, 0, 0 }, slot };
-    SAVE_SLOT(&save);
 }
 
 static int spx_is_plus(int slot) { return (unsigned)slot < SP_SLOTS && sp_isplus[slot]; }

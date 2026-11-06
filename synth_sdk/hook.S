@@ -470,6 +470,22 @@ _sp_adsr_stock:
 	jump.l _fr_snap;
 
 /* delayed patch saves (bgsave.c): the SaveSlotJob queue call goes to bgs_queue_slot; bgs_queue_stock = the original */
+/* sampler presets over R246's limit (patchjob.c, after kennel): the loader's panic branch (0x01A05984; the count [P3]
+ * already limit + 1, R1 = the limit) -> count back to the limit, continue with the next row (0x01A0596A) */
+	.section .hook_smpover,"ax"
+	jump.l _pj_sampler_over;
+	.text
+	.align 2
+	.global _pj_sampler_over
+_pj_sampler_over:
+	[P3] = R1;
+	P0.L = _pj_skipped; P0.H = _pj_skipped;
+	R0 = [P0]; R0 += 1; [P0] = R0;
+	P0.L = 0x596a; P0.H = 0x01a0;
+	jump (P0);
+/* disk-mode export (0x0199DA6C), sampler row: CALL yaffs_open at 0x0199DD7A, never closed -> pj_probe_open */
+	.section .hook_diskprobe,"ax"
+	call _pj_probe_open;
 	.section .hook_crash,"ax"
 	jump.l _crash_print;                     /* LINK 0x10 of the FP-chain printer 0x0191995C: our crash lines */
 	.section .hook_bgsgc,"ax"

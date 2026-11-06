@@ -112,7 +112,8 @@ int dp_browser_id(int slot, uint8_t *found)
     if (!dp_list_has(id)) { id = 0; *found = 0; }
     return id;
 }
-void dp_type_job(void *job) { if (op1_drum) op1_drum->type_job(job); else TYPE_JOB(job); }
+void pj_begin(void), pj_end(void);                                /* patchjob.c: a patch job runs (docs/66) */
+void dp_type_job(void *job) { pj_begin(); if (op1_drum) op1_drum->type_job(job); else TYPE_JOB(job); pj_end(); }
 
 /* ---- the drum+ pages: the plugin's screens (built at boot from dispatcher.c), the forwarded calls ---- */
 void dpu_ui_build(void) { if (op1_drum) op1_drum->ui_build(); }

@@ -189,6 +189,14 @@ extern volatile uint8_t op1_fx_page[3][4];
 #ifndef OP1_HOST
 int16_t op1_page2_live(int fx, int pos, int k, int16_t stored);
 #endif
+/* before changing a slot's live patch JSON from a UI / key thread (needs op1r 54+): waits while R246's background
+ * file worker serializes a patch (a save or type job), which our change would corrupt (docs/66). Never from inside a
+ * type job. */
+#ifndef OP1_HOST
+int op1_patch_wait(void);
+#else
+static inline int op1_patch_wait(void) { return 0; }
+#endif
 static inline const int16_t *op1_knobs_shown(int fx, int pos, const int16_t *w, int16_t *buf)
 {
     for (int i = 0; i < 8; i++) buf[i] = w[i];

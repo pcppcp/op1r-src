@@ -56,6 +56,7 @@ static int32_t acc[4];
 static int16_t gain_w;                                 /* gain word being edited (knob 7) */
 static void changed(int slot, int extras)
 {
+    op1_patch_wait();                                             /* not while a save / type job serializes it */
     if (extras) { sp_plus_prepare(&sp_x[slot], &sp_c[slot]); sp_fw_store(slot); }
     PATCH_SET_KNOBS(PATCH_OBJ(slot), op1_synth_knobs(slot));   /* marks the patch changed (JSON saved) */
 }

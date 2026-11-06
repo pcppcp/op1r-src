@@ -353,6 +353,7 @@ int dpu_page(void)                                               /* 0 / 1 if a d
 static void dpu_changed(int what, int slot, int pad)
 {
     if (what & 1) dp_plus_prepare(&dp_x[slot][pad], &dp_c[slot][pad]);
+    op1_patch_wait();                                             /* not while a save / type job serializes the patch */
     if (what & 1) dp_fw_store_pad(slot, pad);                    /* JSON: op1r */
     DRUM_TO_PATCH(DRUM_PATCH(slot));                             /* pad words -> JSON, marks the patch changed */
 }
