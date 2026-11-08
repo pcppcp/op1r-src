@@ -76,8 +76,9 @@ void host_eu_note_off(int pos, int note);
 /* firmware: notes go through VoiceCtl like the stock sequencers (ok_player). A slot stores the absolute pitch taken
  * when its key was pressed (key + 0x35 + octave * 12), so later octave changes do not move it.
  *  synth: record {midi, vel, send midi = 1, 0} -> key_down 0x01A85750 -> note_on_synth (uses midi as is).
- *  drums: note_on_drum takes the SOUND from record midi - 0x35 (key 0..23) and the PITCH (semitones) from the
- *         param, to which key_down adds the current drum octave * 12 -> param = pitch - current drum octave * 12. */
+ *  drums: note_on_drum takes the SOUND from record midi - 0x35 (key 0..23) and the PITCH from the param, relative
+ *         to the pad's own pitch; key_down adds the current drum octave * 12 -> param = note - (key + 0x35) - current
+ *         drum octave * 12 (seq/seq_core.c). */
 #define SYNTH_OCT() (((const int *)0x01DFE4E0)[*(volatile int *)0xFF8016D4 & 7])
 #define DRUM_OCT()  (((const int *)0x01DFE500)[*(volatile int *)0xFF8016D8 & 7])
 int  eu_fw_note_on(int pos, int note, int key, int vel);    /* seq/seq_core.c (core, shared with the other sequencers) */
