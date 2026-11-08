@@ -82,9 +82,9 @@ try:
     j.check('single-note-one-sid-voice',len(active)==1,active)
     one=native('single-held');j.check('single-native-held-note',one['count']==1,one['held'])
     base_note=one['held'][0]['note']
-    inc=struct.unpack_from('<I',state,active[0]*voice_size+step_offset)[0];expected_hz=inc*44100/(1<<28)
+    inc=struct.unpack_from('<I',state,active[0]*voice_size+step_offset)[0];expected_hz=inc*88200/(1<<28)
     from pitch_check import observe
-    pitch=observe(f.samples(mark,end),expected_hz)
+    pitch=observe(f.samples(mark,end),expected_hz,sample_rate=44100)
     stats=f.audio_since(mark,end);r['audio']['single-c4']={**stats,**pitch}
     j.check('actual-note-pitch-matches-sid-phase',pitch['root_present'] and stats['rms']>.0001,r['audio']['single-c4'])
     j.action('single-note-release','release c4\nwait-frames 180')

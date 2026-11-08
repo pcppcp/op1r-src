@@ -4,7 +4,8 @@
   "symbol": "ENGINE_monolit",
   "sources": [
     "monolit.c",
-    "monolit_dsp.S"
+    "monolit_dsp.S",
+    "monolit_fc.S"
   ],
   "defaults": [
     16384,
@@ -20,7 +21,7 @@
   "claims": [],
   "author": "hundekraft",
   "cost": {
-    "voice": 24130,
-    "start": 252
+    "voice": 15976,
+    "start": 1620
   }
 }

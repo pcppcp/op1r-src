@@ -3,7 +3,8 @@
  * the per-callback scratch rows) compared after every callback. Scenarios: every control endpoint with full-scale
  * alternating input then a tail (the saturating paths), changing controls on full-scale noise alternating mono / stereo, the gate closing and
  * opening on bursts, and long runs so every ring head passes every position (the rings wrap inside callbacks).
- * Prints "KERN ok blocks=N" or the first difference.
+ * Every scenario runs twice, the second time in CLASSIC (s.classic: 3.1.x's counts).
+ * Prints "KERN ok (both modes) blocks=N" or the first difference.
  * Copyright (C) 2026 Hundekraft. GPL-3.0-or-later with the OP-1 firmware permission (see LICENSE and NOTICE). */
 #include <stdint.h>
 #include "father_dsp.h"
@@ -13,6 +14,8 @@ void t2_write(const char *, int);
 uint32_t t2_r246_calls[2];
 static mw_state s __attribute__((aligned(32))), t __attribute__((aligned(32)));
 static unsigned blocks, bad;
+static int classic;                                        /* the second pass: every scenario again in CLASSIC */
+#define INIT() (mw_init(&s), mw_ref_init(&t), s.classic = t.classic = (uint8_t)classic)
 static char line[96];
 static int n;
 static void put(const char *p) { while (*p) line[n++] = *p++; }
@@ -34,7 +37,7 @@ static void block(int16_t *l, int16_t *r, const int32_t q[4], int stereo, unsign
     if (!same(l, a, sizeof a) || (stereo && !same(r, b, sizeof b)) || !same(&s, &t, __builtin_offsetof(mw_state, rows))
         || !same(&s.phase, &t.phase, sizeof s - __builtin_offsetof(mw_state, phase))) {
         bad = 1;
-        put("KERN differ scenario="); num(what); put(" block="); num(blocks);
+        put("KERN differ scenario="); num(what); put(classic ? " CLASSIC" : ""); put(" block="); num(blocks);
         put(same(l, a, sizeof a) ? " (state)\n" : " (output)\n");
     }
 }
@@ -44,34 +47,36 @@ int main(void)
 {
     int32_t q[4];
     int16_t l[64], r[64];
-    for (unsigned e = 0; e < 16 && !bad; e++) {                  /* endpoints, full scale, then a tail */
-        for (unsigned j = 0; j < 4; j++) q[j] = (e & (1u << j)) ? 32767 : 0;
-        mw_init(&s); mw_ref_init(&t);
-        for (unsigned k = 0; k < 160 && !bad; k++) {
-            for (unsigned i = 0; i < 64; i++) { l[i] = k < 40 ? (i & 1 ? 32767 : -32768) : 0; r[i] = k < 40 ? (i & 2 ? 32767 : -32768) : 0; }
-            block(l, r, q, e & 1, 1);
+    for (classic = 0; classic < 2 && !bad; classic++) {
+        for (unsigned e = 0; e < 16 && !bad; e++) {                  /* endpoints, full scale, then a tail */
+            for (unsigned j = 0; j < 4; j++) q[j] = (e & (1u << j)) ? 32767 : 0;
+            INIT();
+            for (unsigned k = 0; k < 160 && !bad; k++) {
+                for (unsigned i = 0; i < 64; i++) { l[i] = k < 40 ? (i & 1 ? 32767 : -32768) : 0; r[i] = k < 40 ? (i & 2 ? 32767 : -32768) : 0; }
+                block(l, r, q, e & 1, 1);
+            }
+        }
+        INIT();                              /* changing controls, noise, mono / stereo */
+        for (unsigned k = 0; k < 1200 && !bad; k++) {
+            for (unsigned j = 0; j < 4; j++) q[j] = (int32_t)((k * (j + 17) * 193u) & 32767);
+            for (unsigned i = 0; i < 64; i++) { l[i] = rnd(); r[i] = rnd(); }
+            block(l, r, q, k & 1, 2);
+        }
+        INIT();                              /* gate: bursts and silence, gate on */
+        for (unsigned k = 0; k < 900 && !bad; k++) {
+            q[0] = 20000; q[1] = k < 450 ? 9000 : 30000; q[2] = 12000; q[3] = 26000;
+            for (unsigned i = 0; i < 64; i++) { l[i] = (k % 60) < 8 ? rnd() >> 1 : 0; r[i] = l[i]; }
+            block(l, r, q, k >= 600, 3);
+        }
+        INIT();                              /* a long mono run at defaults: every head position */
+        q[0] = 16384; q[1] = 0; q[2] = 18022; q[3] = 9830;
+        for (unsigned k = 0; k < 1700 && !bad; k++) {
+            for (unsigned i = 0; i < 64; i++) l[i] = (k & 63) < 20 ? rnd() >> 2 : 0;
+            if ((k & 255) == 128) q[0] = (q[0] + 7919) & 32767;   /* the predelay slews through the ring */
+            block(l, r, q, 0, 4);
         }
     }
-    mw_init(&s); mw_ref_init(&t);                              /* changing controls, noise, mono / stereo */
-    for (unsigned k = 0; k < 1200 && !bad; k++) {
-        for (unsigned j = 0; j < 4; j++) q[j] = (int32_t)((k * (j + 17) * 193u) & 32767);
-        for (unsigned i = 0; i < 64; i++) { l[i] = rnd(); r[i] = rnd(); }
-        block(l, r, q, k & 1, 2);
-    }
-    mw_init(&s); mw_ref_init(&t);                              /* gate: bursts and silence, gate on */
-    for (unsigned k = 0; k < 900 && !bad; k++) {
-        q[0] = 20000; q[1] = k < 450 ? 9000 : 30000; q[2] = 12000; q[3] = 26000;
-        for (unsigned i = 0; i < 64; i++) { l[i] = (k % 60) < 8 ? rnd() >> 1 : 0; r[i] = l[i]; }
-        block(l, r, q, k >= 600, 3);
-    }
-    mw_init(&s); mw_ref_init(&t);                              /* a long mono run at defaults: every head position */
-    q[0] = 16384; q[1] = 0; q[2] = 18022; q[3] = 9830;
-    for (unsigned k = 0; k < 1700 && !bad; k++) {
-        for (unsigned i = 0; i < 64; i++) l[i] = (k & 63) < 20 ? rnd() >> 2 : 0;
-        if ((k & 255) == 128) q[0] = (q[0] + 7919) & 32767;   /* the predelay slews through the ring */
-        block(l, r, q, 0, 4);
-    }
-    if (!bad) { put("KERN ok blocks="); num(blocks); put("\n"); }
+    if (!bad) { put("KERN ok (both modes) blocks="); num(blocks); put("\n"); }
     t2_write(line, n);
     return 0;
 }

@@ -22,19 +22,19 @@ with tempfile.TemporaryDirectory(prefix='father-check-') as tmp:
                     str(P/'father_dsp.c'),str(P/'father_reference.c'),'-o',str(wrapper)],check=True)
     subprocess.run([str(wrapper)],check=True)
 x=np.fromfile(out/'default.raw',dtype='<i2').reshape(-1,2).astype(float)/32768
-energy=[float(np.sum(x[i*22050:(i+1)*22050]**2)) for i in range(12)]
+energy=[float(np.sum(x[i*44100:(i+1)*44100]**2)) for i in range(12)]
 # The retained integer network settles at a roughly one-LSB quantization floor.
-assert energy[0]>0 and energy[1]<energy[0]*.01 and energy[8]<=2*22050*(2/32768)**2,energy
+assert energy[0]>0 and energy[1]<energy[0]*.01 and energy[8]<=2*44100*(2/32768)**2,energy
 assert np.max(abs(x))<.8
 assert np.count_nonzero(x[:,0]-x[:,1])>1000
-assert abs(float(np.corrcoef(x[:22050].T)[0,1]))<.98
+assert abs(float(np.corrcoef(x[:44100].T)[0,1]))<.98
 with wave.open(str(out/'impulse.wav'),'wb') as w:
-    w.setparams((2,2,22050,0,'NONE','not compressed'));w.writeframes(np.round(x*32768).astype('<i2').tobytes())
+    w.setparams((2,2,44100,0,'NONE','not compressed'));w.writeframes(np.round(x*32768).astype('<i2').tobytes())
 near=np.fromfile(out/'near.raw',dtype='<i2').astype(float)/32768
 far=np.fromfile(out/'far.raw',dtype='<i2').astype(float)/32768
 gated=np.fromfile(out/'gated.raw',dtype='<i2').astype(float)/32768
-assert np.sum(far[22050*2:]**2)>np.sum(near[22050*2:]**2)+1e-5
-assert np.sum(gated[22050*4:]**2)<np.sum(x.reshape(-1)[22050*4:]**2)
+assert np.sum(far[44100*2:]**2)>np.sum(near[44100*2:]**2)+1e-5
+assert np.sum(gated[44100*4:]**2)<np.sum(x.reshape(-1)[44100*4:]**2)
 dark=np.fromfile(out/'dark.raw',dtype='<i2').reshape(-1,2).astype(float)
 bright=np.fromfile(out/'bright.raw',dtype='<i2').reshape(-1,2).astype(float)
 def brightness(v):
@@ -43,8 +43,8 @@ assert brightness(bright)>brightness(dark)*2
 for name in ('chord-dry','chord-mix','chord-wet'):
     raw=(out/(name+'.raw')).read_bytes()
     with wave.open(str(out/(name+'.wav')),'wb') as w:
-        w.setparams((2,2,22050,0,'NONE','not compressed'));w.writeframes(raw)
-report=dict(status='PASS',reference_output_exact=True,sample_rate=22050,energy_seconds=energy,peak=float(np.max(abs(x))),stereo_correlation=float(np.corrcoef(x[:22050].T)[0,1]),color_brightness=dict(dark=brightness(dark),bright=brightness(bright)),native_runtime='pending')
+        w.setparams((2,2,44100,0,'NONE','not compressed'));w.writeframes(raw)
+report=dict(status='PASS',reference_output_exact=True,sample_rate=44100,energy_seconds=energy,peak=float(np.max(abs(x))),stereo_correlation=float(np.corrcoef(x[:44100].T)[0,1]),color_brightness=dict(dark=brightness(dark),bright=brightness(bright)),native_runtime='pending')
 report['source_sha256']={n:hashlib.sha256((P/n).read_bytes()).hexdigest() for n in ('father_dsp.c','father_dsp.h','father_tables.h','father_reference.c','father_test.c','check.py')}
 (out/'result.json').write_text(json.dumps(report,indent=2)+'\n')
 print(json.dumps(report))

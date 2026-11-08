@@ -86,7 +86,7 @@ static int grid(st_t *s, int div, int32_t *slen)
     const int32_t np = p - step;
     s->bp = np < 0 ? np + len : np;
     const int32_t sq = step >> 14;
-    const int32_t bl = sq > 0 && sq != 64 ? len / sq * 64 : len >> 14;      /* the beat in real time, samples */
+    const int32_t bl = sq > 0 && sq != 64 ? (len / sq) >> 8 : len >> 14;    /* the beat in real time, samples */
     *slen = bl / div;
     const int32_t q = len / div;
     for (int j = div - 1; j >= 0; j--) {                                     /* the earliest point in [0, step) */

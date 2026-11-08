@@ -42,9 +42,10 @@ extern const int16_t *op1_sine_q;
 static inline int32_t op1_sin(int32_t k) { return OP1_SINE_Q[k & 8191]; }
 #include "op1_l1.h"                              /* the L1 pool (l1pool.c, kennel's API) */
 
-#define OP1_BLOCK        128
+#define OP1_BLOCK        128             /* voice render: 128 samples at OP1_VOICE_RATE (one 64-frame audio block) */
 #define OP1_VOICES       6
-#define OP1_SAMPLE_RATE  44100
+#define OP1_SAMPLE_RATE  44100           /* output / FX rate (FX: OP1_FX_BLOCK samples per call) */
+#define OP1_VOICE_RATE   88200           /* voices run 2x oversampled; R246 decimates the instrument bus 2:1 (docs/29) */
 #define OP1_ENGINE_MAGIC 0x5300          /* knobs[4] = 0x5300 + engine index (21248 + n) */
 #define OP1_MAX_ORDER    63              /* highest selector number per kind (synth, FX); gaps allowed */
 #define OP1_SLOTS        (OP1_MAX_ORDER + 1)

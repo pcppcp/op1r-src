@@ -25,7 +25,7 @@ void *host_text_ctor(void *o, int32_t x, int32_t y, int32_t s, const uint8_t *c)
 void host_text_set(void *t, const char *s) { (void)t; (void)s; }
 void host_text_draw(void *t, void *r, const int32_t *m) { (void)t; (void)r; (void)m; }
 
-#define SR 44100
+#define SR OP1_VOICE_RATE                                   /* voices: 88.2 kHz (op1_plugin.h) */
 static int16_t buf[SR * 10];
 static int32_t inc_of(double hz) { return (int32_t)lrint(4294967296.0 * hz / SR); }
 static void *V = host_voice_mem;
@@ -71,25 +71,25 @@ int main(void)
 
     /* the envelope sweeps the filter down: bright at the start, darker 300 ms later */
     play(k, 55, 64, SR / 2, 1);
-    double b0 = bright(0, 1323), b1 = bright(13230, 14553);
+    double b0 = bright(0, SR * 3 / 100), b1 = bright(SR * 3 / 10, SR * 33 / 100);
     printf("sweep: brightness %.0f Hz -> %.0f Hz\n", b0, b1);
     assert(b0 > 1.2 * b1);                   /* blot: darker overall (the 303 ladder is ~10x below its cutoff at -3 dB), a smaller sweep */
 
     /* accent: brighter at the start and louder */
-    play(k, 55, 64, SR / 4, 1); double bn = bright(0, 1323); int pn = peak(0, 4410);
-    play(k, 55, 127, SR / 4, 1); double ba = bright(0, 1323); int pa = peak(0, 4410);
+    play(k, 55, 64, SR / 4, 1); double bn = bright(0, SR * 3 / 100); int pn = peak(0, SR / 10);
+    play(k, 55, 127, SR / 4, 1); double ba = bright(0, SR * 3 / 100); int pa = peak(0, SR / 10);
     printf("accent: brightness %.0f Hz -> %.0f Hz, peak %d -> %d\n", bn, ba, pn, pa);
     assert(ba > 1.2 * bn && pa > pn);
 
     /* decay knob: short decay is darker 150 ms in than long decay */
-    k[3] = 0; play(k, 55, 64, SR / 4, 1); double ds = bright(6615, 7938);
-    k[3] = 32767; play(k, 55, 64, SR / 4, 1); double dl = bright(6615, 7938);
+    k[3] = 0; play(k, 55, 64, SR / 4, 1); double ds = bright(SR * 15 / 100, SR * 18 / 100);
+    k[3] = 32767; play(k, 55, 64, SR / 4, 1); double dl = bright(SR * 15 / 100, SR * 18 / 100);
     printf("decay: brightness at 150 ms %.0f Hz (short) vs %.0f Hz (long)\n", ds, dl);
     assert(dl > 1.3 * ds);
 
     /* decay knob on accented notes (the keys play at velocity 127): short decay is darker 60 ms in than long decay */
-    k[3] = 0; play(k, 55, 127, SR / 4, 1); double as = bright(2646, 3969);
-    k[3] = 32767; play(k, 55, 127, SR / 4, 1); double al = bright(2646, 3969);
+    k[3] = 0; play(k, 55, 127, SR / 4, 1); double as = bright(SR * 6 / 100, SR * 9 / 100);
+    k[3] = 32767; play(k, 55, 127, SR / 4, 1); double al = bright(SR * 6 / 100, SR * 9 / 100);
     printf("accent decay: brightness at 60 ms %.0f Hz (short) vs %.0f Hz (long)\n", as, al);
     assert(al > 1.2 * as);
 
@@ -98,8 +98,8 @@ int main(void)
     for (int c = 12000; c <= 27000; c += 5000) {
         static double m0[NH], m1[NH];
         k[0] = (int16_t)c;
-        k[1] = 0; play(k, 55, 64, SR / 2, 1); spectrum(SR / 4, 8820, m0);
-        k[1] = 30000; play(k, 55, 64, SR / 2, 1); spectrum(SR / 4, 8820, m1);
+        k[1] = 0; play(k, 55, 64, SR / 2, 1); spectrum(SR / 4, SR / 5, m0);
+        k[1] = 30000; play(k, 55, 64, SR / 2, 1); spectrum(SR / 4, SR / 5, m1);
         double fc = 30 * pow(2, c * 9.0 / 32768);
         int hb = 0;                                     /* within two octaves of the cutoff (the stop band is ~0 in both) */
         for (int h = 1; h < NH; h++) if (h * 55.0 > fc / 4 && h * 55.0 < fc * 4 && (!hb || m1[h] / m0[h] > m1[hb] / m0[hb])) hb = h;
@@ -152,7 +152,7 @@ int main(void)
         host_voice_vel[0] = (int16_t)((acc[i] ? 127 : 80) << 8);
         if (!sld[i]) ENGINE_blot.note_on(V, kl);
         for (int b = 0; b < step / 128; b++) {
-            double f = sld[i] && b < 8 ? from * pow(hz / from, b / 8.0) : hz;               /* 23 ms glide */
+            double f = sld[i] && b < 16 ? from * pow(hz / from, b / 16.0) : hz;             /* 23 ms glide */
             for (int j = 0; j < 128; j++) host_pitch_inc[j] = inc_of(f);
             ENGINE_blot.render(V, line + pos, kl);
             /* the 303's VCA gate: open for 3/4 of the step (the slide's step stays open), a 3 ms release */

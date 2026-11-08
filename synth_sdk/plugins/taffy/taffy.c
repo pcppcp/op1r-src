@@ -17,7 +17,8 @@ typedef struct {
     int32_t env;   /* Q15, 32767 at note on */
     int32_t wave, dcw, resonance;
     int control_ready;
-    int32_t dc_q10; /* per-voice mean estimate, before native voice mixing */
+    int32_t dc_q11; /* per-voice mean estimate, before native voice mixing (Q11) */
+    uint32_t tick;  /* calls: the bend envelope steps every other call */
 } voice_t;
 
 static voice_t voices[ENGINE_VOICES];
@@ -112,8 +113,8 @@ uint32_t tf_eval_square_pulse(int16_t *, const uint32_t *, uint32_t, const int32
 uint32_t tf_eval_square_pulse_r(int16_t *, const uint32_t *, uint32_t, const int32_t *, const uint32_t *);
 uint32_t tf_eval_pulse_sawpulse(int16_t *, const uint32_t *, uint32_t, const int32_t *, const uint32_t *);
 uint32_t tf_eval_pulse_sawpulse_r(int16_t *, const uint32_t *, uint32_t, const int32_t *, const uint32_t *);
-void tf_out(int16_t *out, const int16_t *y, int32_t *dc_q10, int32_t gain);
-void tf_out_fade(int16_t *out, const int16_t *y, const int16_t *yp, int32_t *dc_q10, int32_t gain, const uint32_t *w);
+void tf_out(int16_t *out, const int16_t *y, int32_t *dc_q11, int32_t gain);
+void tf_out_fade(int16_t *out, const int16_t *y, const int16_t *yp, int32_t *dc_q11, int32_t gain, const uint32_t *w);
 static const tf_eval_t tf_evals[4][2] = {
     { tf_eval_saw, tf_eval_saw_r }, { tf_eval_saw_square, tf_eval_saw_square_r },
     { tf_eval_square_pulse, tf_eval_square_pulse_r }, { tf_eval_pulse_sawpulse, tf_eval_pulse_sawpulse_r },
@@ -188,7 +189,7 @@ void engine_note_on(void *self, const int16_t *knobs)
     (void)knobs;
     v->control_ready = 0;
     v->ph = 0;
-    v->dc_q10 = 0;
+    v->dc_q11 = 0;
     v->env = 32767;
 }
 
@@ -218,7 +219,7 @@ void engine_render(void *self, int16_t *out, const int16_t *knobs)
 
     int32_t dcw = k1 + ((k2 * v->env) >> 15);
     if (dcw > 32767) dcw = 32767;
-    v->env -= v->env >> 6;                                  /* ~0.19 s time constant */
+    if (v->tick++ & 1) v->env -= v->env >> 6;               /* ~0.19 s time constant: 64 steps of 2 calls (689 calls/s) */
     setup_t p, previous = {0};
     int changing = v->control_ready && (v->wave != k0 || v->dcw != dcw || v->resonance != k3);
 #ifdef __bfin__
@@ -245,19 +246,19 @@ void engine_render(void *self, int16_t *out, const int16_t *knobs)
     if (gain > 32767) gain = 32767;                            /* tf_out takes it as a 16-bit operand */
 
 #ifdef __bfin__
-    int32_t dc_q10 = v->dc_q10;
+    int32_t dc_q11 = v->dc_q11;
     const uint32_t end = tf_eval(&tf_y[0][1], v->ph, &p);
     if (changing) {
         tf_eval(&tf_y[1][1], v->ph, &previous);
-        tf_out_fade(out, &tf_y[0][1], &tf_y[1][1], &dc_q10, gain, tf_fade_at);
+        tf_out_fade(out, &tf_y[0][1], &tf_y[1][1], &dc_q11, gain, tf_fade_at);
     } else {
-        tf_out(out, &tf_y[0][1], &dc_q10, gain);
+        tf_out(out, &tf_y[0][1], &dc_q11, gain);
     }
     v->ph = end;
-    v->dc_q10 = dc_q10;
+    v->dc_q11 = dc_q11;
 #else
     uint32_t ph = v->ph;
-    int32_t dc_q10 = v->dc_q10;
+    int32_t dc_q11 = v->dc_q11;
     for (int i = 0; i < ENGINE_BLOCK; i++) {
         ph += ENGINE_PITCH[i];
         const int32_t x = (int32_t)(ph >> 17);
@@ -269,15 +270,15 @@ void engine_render(void *self, int16_t *out, const int16_t *knobs)
             const int32_t before = sample(&previous, x);
             y = before + (((y - before) * i) >> 7);
         }
-        /* ~6.86Hz DC rejection at44.1kHz, before gain/voice summing. Q10
+        /* ~6.86Hz DC rejection at 88.2 kHz (a 2048-sample pole), before gain/voice summing. Q11
          * estimate avoids a coarse integer dead band. No division or 64-bit
          * sample operations; |y-mean| <=65535 keeps the gain product safe. */
-        dc_q10 += (y * 1024 - dc_q10) >> 10;
-        y -= dc_q10 >> 10;
+        dc_q11 += (y * 2048 - dc_q11) >> 11;
+        y -= dc_q11 >> 11;
         out[i] = engine_sat16((y * gain) >> 15);
     }
     v->ph = ph;
-    v->dc_q10 = dc_q10;
+    v->dc_q11 = dc_q11;
 #endif
     const uint32_t blocks = taffy_blocks + 1;
     taffy_blocks = blocks;

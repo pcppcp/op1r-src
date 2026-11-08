@@ -34,8 +34,8 @@ typedef struct {
 static ae_t st[OP1_VOICES];
 static volatile int ae_cur;           /* voice of the last note-on (screen) */
 
-#define A_SM    3016                  /* 1 - exp(-128 / 44100 / 0.03)  Q15 */
-#define A_SLOW  629                   /* 1 - exp(-128 / 44100 / 0.15)  Q15 */
+#define A_SM    1547                  /* 1 - exp(-128 / 88200 / 0.03)  Q15 (blocks at OP1_VOICE_RATE) */
+#define A_SLOW  316                   /* 1 - exp(-128 / 88200 / 0.15)  Q15 */
 #define SHAKE0  (48 << 8)             /* sum of |velocity change| per block, raw << 8: below = still (noise ~35) */
 #define SHAKE_S 95                    /* ... full shake 95 raw per block above that (2.5 g/s) */
 #define VOL_FULL 8192                 /* sin 30 deg: right side raised this far = silent at full red */
@@ -83,9 +83,10 @@ static void ae_render(void *self, int16_t *out, const int16_t *params)
         s->slow[i] += (int32_t)(((int64_t)(vel - s->slow[i]) * A_SLOW) >> 15);
         hp += iabs(vel - s->slow[i]);
     }
+    hp <<= 1;                                                 /* change per 344.5 / s, as SHAKE0 / SHAKE_S were set */
     int32_t m = hp > SHAKE0 ? (hp - SHAKE0) / SHAKE_S : 0;     /* Q8 (256 = full) */
     m = m > 256 ? 32767 : m << 7;
-    s->env += m > s->env ? (m - s->env) * 10 >> 5 : -(s->env >> 8) - (s->env > 0);   /* fast attack, ~1 s release */
+    s->env += m > s->env ? (m - s->env) * 11 >> 6 : -(s->env >> 9) - (s->env > 0);   /* fast attack, ~1 s release (689 blocks / s) */
 
     /* pitch: forward tilt (front edge up = Y down) relative to home, dead zone, linear in sin(angle) */
     int32_t dead = sin_deg_q10(page_word(params, 5) * 10 * 1024 / 32767);
@@ -99,7 +100,7 @@ static void ae_render(void *self, int16_t *out, const int16_t *params)
     if (d < 0) semis = -semis;
     /* vibrato */
     int32_t rate_mhz = 3000 + page_word(params, 7) * 5000 / 32767;
-    s->vph += (uint32_t)rate_mhz * 12466u;                     /* 2^32 * Hz * 128 / 44100 / 1000 */
+    s->vph += (uint32_t)rate_mhz * 6233u;                      /* 2^32 * Hz * 128 / 88200 / 1000 */
     int32_t depth = (int32_t)((int64_t)params[2] * s->env >> 15);              /* Q15 of 0.5 semitone */
     semis += (int32_t)((int64_t)depth * op1_sin(s->vph >> 19) >> 15);  /* +-32768 Q16 = 0.5 semitone */
     s->semis = semis;

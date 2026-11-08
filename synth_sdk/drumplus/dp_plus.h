@@ -4,6 +4,11 @@
 #define DP_PLUS_H
 #include "dp_voice.h"
 
+/* R246 renders a drum voice at 88,200 Hz (128 samples a call, decimated 2:1 with the synth voices). Times are set and
+ * shown in 44.1 kHz samples (dp_time_samples, the labels) and counted in voice samples: DP_VOICE_X per 44.1 kHz
+ * sample (2026-11-03; before, the voice counted them 1:1, so every time ran at half its label). */
+#define DP_VOICE_X 2
+
 /* per-pad extras (stored in the patch JSON "op1r" key; 0 = off / neutral everywhere) */
 typedef struct {
     uint8_t env_on;                 /* per-pad envelope instead of the plain velocity */
@@ -30,10 +35,10 @@ typedef struct {
 /* constants of a pad's extras, prepared when they change (dp_plus_prepare): no divisions in the render */
 typedef struct {
     uint8_t active;
-    uint32_t t_att, t_hold, t_dec, t_rel;
+    uint32_t t_att, t_hold, t_dec, t_rel;               /* voice samples */
     int32_t a_step, d_step, r_step;                     /* linear envelope steps, Q30 */
-    int32_t kd, kr;                                     /* exponential envelope factors, Q15 */
-    int32_t p_start, p_step, fine_u;                    /* pitch envelope (1/96 octave << 16), fine (<< 8) */
+    uint32_t kd, kr;                                    /* exponential envelope decrements per voice sample, 6.9 / T, Q22 */
+    int32_t p_start, p_step, fine_u;                    /* pitch envelope (1/96 octave << 20), fine (<< 8) */
     int32_t f_k;                                        /* filter damping, Q14 (coefficients per hit) */
     int16_t f_k16;                                      /* k in Q16 for the per-hit coefficients */
     int32_t drive_q12;                                  /* drive gain, Q12 (0: off) */
@@ -44,8 +49,8 @@ typedef struct {
     int32_t env;                    /* Q30 level 0..1 */
     uint8_t stage;                  /* 0 attack, 1 hold, 2 decay, 3 release, 4 done */
     uint32_t stage_n;               /* samples spent in the stage */
-    int32_t pitch_u;                /* current pitch envelope offset, 1/96 octave << 16 */
-    uint32_t until_retrig;          /* samples to the next retrig hit */
+    int32_t pitch_u;                /* current pitch envelope offset, 1/96 octave << 20 */
+    uint32_t until_retrig;          /* voice samples to the next retrig hit */
     uint8_t hits_left;
     int16_t hit_gain;               /* Q15 gain of the current hit (falls per retrig) */
     int32_t ic1, ic2;               /* filter integrators (signal << 8) */
@@ -61,9 +66,9 @@ int  dp_extra_active(const dp_extra *x);
 #define DP_NFIELDS 21
 int  dp_extra_set(dp_extra *x, int i, int32_t v);
 int  dp_extra_get(const dp_extra *x, int i);
-uint32_t dp_time_samples(uint8_t t);                     /* 0..127 -> 0 .. ~4.6 s */
+uint32_t dp_time_samples(uint8_t t);                     /* 0..127 -> 0 .. ~4.6 s, in 44.1 kHz samples */
 void dp_plus_prepare(const dp_extra *x, dp_pre *c);     /* when a pad's extras change (not in the audio loop) */
-/* velocity 0..127 (the stock note_on's velocity, before << 8) */
+/* velocity 0..127 (the stock note_on's velocity, before << 8); samples_per_beat in 44.1 kHz output frames */
 void dp_plus_note_on(dp_voice *v, dp_xvoice *s, const dp_pad *pad, const dp_extra *x, const dp_pre *c,
                      int velocity, uint32_t samples_per_beat);
 void dp_plus_note_off(dp_voice *v, dp_xvoice *s, const dp_pad *pad, const dp_extra *x, const dp_pre *c);

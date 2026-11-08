@@ -7,7 +7,7 @@
  *   body_voice's HS_CAT11K loop (32 pairs): the body combs on the pair's mean / 8, the body mixed into hb, the room
  *   input (+ bells / 16 when bl != 0) x w into racc. k: 0 cb1, 1 p1 (in/out), 2 cb2, 3 p2 (in/out), 4 bp (in/out),
  *   5 w, 6 racc, 7..22 { gdry, gbw << 16 | bfb (16 bits each) } per sub-block, 23..24 spare. The combs are circular
- *   I2 / I3 (L 90 / 114 bytes). 28 packets per pair (25 without bells).
+ *   I2 / I3 (L 178 / 226 bytes: 89 and 113 entries at 22.05 kHz, 4.04 / 5.12 ms). 28 packets per pair (25 without bells).
  * void hs_share(int32_t *hb, const int32_t *k, int taping)
  *   bus_voice's loop: k: 0 BUS.inv, 1 BUS.out, 2 BUS.acc, 3 OP1_VOICE_ENV, 4..11 BUS.gd. 8 packets per sample, 13
  *   taping.
@@ -16,9 +16,10 @@
  * void hs_tape_out(const int32_t *rb, int32_t *o, const int32_t *k)
  *   o[m] = (((clamp(rb[m], +-32767) * k[0]) >> 15) * mix) >> 15, k[1..8] = mix per sub-block. 6 per sample.
  * void hs_room(int32_t *rx, int32_t *k)
- *   bus_stage's diffusers and room (32 samples at 11.025 kHz): k: 0 ca1, 1 pa1, 2 ca2, 3 pa2, 4 cr, 5 pr - 1 (the
+ *   bus_stage's diffusers and room (32 samples at 22.05 kHz on R246): k: 0 ca1, 1 pa1, 2 ca2, 3 pa2, 4 cr, 5 pr - 1 (the
  *   comb one entry behind, circularly: its writes run a sample behind; out: pr), 6 rdl (in/out), 7 rfb, 8 rdamp,
- *   9 room (r per sample into room[1..32]), 10 8036, 11 -8036. rx is cleared. 28 packets per sample.
+ *   9 room (r per sample into room[1..32]), 10 8036, 11 -8036. rx is cleared. 28 packets per sample. The lines are
+ *   the bus's room_a1 / room_a2 / room_r, circular I1 / I2 / I3 (L 312 / 480 / 2064 bytes: 7.1, 10.9, 46.8 ms).
  * void hs_room_out(int32_t *o, const int32_t *k)
  *   the room into o, darkened: k: 0 room (room[0] = the last block's last r, room[1..32] this block's), 1 spare,
  *   2 dark (in/out), 3 dcoef, 4..11 grw per sub-block, 12 32767, 13 -32767, 14 spare. 22 packets per pair.
@@ -68,13 +69,13 @@ _hs_body:
 	B2 = R1;
 	R1 = [P5 + 4];
 	I2 = R1;
-	R1 = 90;
+	R1 = 178;
 	L2 = R1;
 	R1 = [P5 + 8];
 	B3 = R1;
 	R1 = [P5 + 12];
 	I3 = R1;
-	R1 = 114;
+	R1 = 226;
 	L3 = R1;
 	R1 = [P5 + 24];
 	I0 = R1;
@@ -415,19 +416,19 @@ _hs_room:
 	B1 = R1;
 	R1 = [P5 + 4];
 	I1 = R1;
-	R1 = 156;
+	R1 = 312;
 	L1 = R1;
 	R1 = [P5 + 8];
 	B2 = R1;
 	R1 = [P5 + 12];
 	I2 = R1;
-	R1 = 240;
+	R1 = 480;
 	L2 = R1;
 	R1 = [P5 + 16];
 	B3 = R1;
 	R1 = [P5 + 20];
 	I3 = R1;
-	R1 = 1032;
+	R1 = 2064;
 	L3 = R1;
 	R1 = 0;
 	L0 = R1;

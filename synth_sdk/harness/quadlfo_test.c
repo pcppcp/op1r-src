@@ -4,6 +4,8 @@
  * amount 0 = no call, modulation depth, quad detection vs. midi LFO defaults, encoder editing.
  * With "render": prints JSON frames (screen states) for harness/render_quadlfo.py. */
 #include "../lfo/quadlfo.c"
+#define BPS   689                                  /* audio blocks per second (64 frames at 44.1 kHz) */
+#define BPS_L 689L
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,8 +85,8 @@ int main(int argc, char **argv)
     int render = argc > 1 && !strcmp(argv[1], "render");
 
     /* frequency range: inc per 128-sample block -> Hz */
-    double fmin = ql_inc(0) / 4294967296.0 * 44100 / 128, fmax = ql_inc(32767) / 4294967296.0 * 44100 / 128;
-    double fmid = ql_inc(16384) / 4294967296.0 * 44100 / 128;
+    double fmin = ql_inc(0) / 4294967296.0 * 44100 / 64, fmax = ql_inc(32767) / 4294967296.0 * 44100 / 64;
+    double fmid = ql_inc(16384) / 4294967296.0 * 44100 / 64;
     if (!render) printf("frequency: min %.4f Hz, mid %.3f Hz, max %.2f Hz\n", fmin, fmid, fmax);
     CHECK(fabs(fmin - 0.05) < 0.002, "min freq %.4f", fmin);
     CHECK(fabs(fmax - 20.0) / 20.0 < 0.02, "max freq %.3f", fmax);
@@ -95,13 +97,13 @@ int main(int argc, char **argv)
         uint32_t fast = ql_inc(32767) * 4;                           /* 20 Hz x 4 (LFO -> LFO frequency at full) */
         for (int rk = 0; rk < 8; rk++) {
             ql_st s = { 0 }; int ok = 1;
-            for (long b = 0; b < 10L * 60 * 345; b++) { int32_t v = ql_lorenz(&s, fast, rk, b & 1, 0);
+            for (long b = 0; b < 10L * 60 * BPS; b++) { int32_t v = ql_lorenz(&s, fast, rk, b & 1, 0);
                 ok &= v >= -32767 && v <= 32767 && s.lz > 0 && s.lx > -60 * QL_L1 && s.lx < 60 * QL_L1; }
             CHECK(ok, "lorenz rho_k %d: out of bounds after 10 min at full speed", rk);
         }
         uint32_t inc1 = ql_inc(16384);                               /* 1 loop per second */
         ql_st a = { 0 }, c = { 0 }; int same = 1, flips = 0, prev = 0;
-        for (int b = 0; b < 345 * 100; b++) {                        /* 100 s */
+        for (int b = 0; b < BPS * 100; b++) {                        /* 100 s */
             int32_t va = ql_lorenz(&a, inc1, 0, 0, 0), vc = ql_lorenz(&c, inc1, 0, 0, 0);
             same &= va == vc;
             int sg = va > 3000 ? 1 : va < -3000 ? -1 : prev;
@@ -111,7 +113,7 @@ int main(int argc, char **argv)
         CHECK(same, "lorenz not deterministic");
         CHECK(flips > 10 && flips < 90, "rho 28: %d wing jumps in ~100 loops (want irregular, some dozens)", flips);
         ql_st q = { 0 }; int32_t lo = 99999, hi = -99999;
-        for (int b = 0; b < 345 * 120; b++) { int32_t v = ql_lorenz(&q, inc1, 7, 0, 0); if (b > 345 * 100) { if (v < lo) lo = v; if (v > hi) hi = v; } }
+        for (int b = 0; b < BPS * 120; b++) { int32_t v = ql_lorenz(&q, inc1, 7, 0, 0); if (b > BPS * 100) { if (v < lo) lo = v; if (v > hi) hi = v; } }
         CHECK(hi - lo < 1500, "rho 14 settles: last 20 s spread %d", hi - lo);
         ql_st r1 = { 0 }; int32_t first[50]; int rep = 1;
         for (int b = 0; b < 50; b++) first[b] = ql_lorenz(&r1, inc1, 0, 0, 0);
@@ -135,38 +137,38 @@ int main(int argc, char **argv)
             memset(sh_st, 0, sizeof sh_st);
             fox_set h = f; h.bloom = (uint8_t)bl; int16_t hw[8] = { 0 }; fox_put(&h, hw);
             ql_lfo A, B; ql_dec(hw, 0, &A); ql_dec(hw, 1, &B);
-            int nb = 345 * 6, up = 0, prev = 0, t_first = -1, t_last = -1, rmax_t = 0, fmax_t = 0; int32_t rmax = -99999, fmax = -99999;
+            int nb = BPS * 6, up = 0, prev = 0, t_first = -1, t_last = -1, rmax_t = 0, fmax_t = 0; int32_t rmax = -99999, fmax = -99999;
             for (int b = 0; b < nb; b++) {
                 ql_step(&sh_st[0][0], &A, 65536, 0); ql_step(&sh_st[0][1], &B, 65536, 1);
                 int32_t r = sh_st[0][0].val, x = sh_st[0][1].val;
                 int sg = r > 0;
                 if (b > 0 && sg && !prev) { if (t_first < 0) t_first = b; t_last = b; up++; }
                 prev = sg;
-                if (b > 345 * 3 && b < 345 * 4) { if (r > rmax) { rmax = r; rmax_t = b; } if (x > fmax) { fmax = x; fmax_t = b; } }
+                if (b > BPS * 3 && b < BPS * 4) { if (r > rmax) { rmax = r; rmax_t = b; } if (x > fmax) { fmax = x; fmax_t = b; } }
             }
-            double per = up > 1 ? (t_last - t_first) / (double)(up - 1) / 345.0 * 128 / 128 : 0;
-            double hz = ql_inc((31 << 9) | 0x100) / 4294967296.0 * 44100 / 128;
+            double per = up > 1 ? (t_last - t_first) / (double)(up - 1) / (double)BPS * 128 / 128 : 0;
+            double hz = ql_inc((31 << 9) | 0x100) / 4294967296.0 * 44100 / 64;
             CHECK(fabs(per * hz - 1.0) < 0.06, "fox bloom %d: one orbit per LFO cycle (%.3f s at %.3f Hz)", bl, per, hz);
-            int lag = ((fmax_t - rmax_t) % 345 + 345) % 345;
-            CHECK(lag > 20 && lag < 172, "fox bloom %d: foxes peak after rabbits (%d blocks of 345)", bl, lag);
+            int lag = ((fmax_t - rmax_t) % BPS + BPS) % BPS;
+            CHECK(lag > 40 && lag < BPS / 2, "fox bloom %d: foxes peak after rabbits (%d blocks of BPS)", bl, lag);
         }
         {   /* bounded: fastest rate x 4, wild max, 10 minutes */
             memset(sh_st, 0, sizeof sh_st);
             fox_set h = f; h.bloom = 31; h.wild = 31; int16_t hw[8] = { 0 }; fox_put(&h, hw);
             ql_lfo A, B; ql_dec(hw, 0, &A); ql_dec(hw, 1, &B); A.inc = B.inc = ql_inc(32767) * 4;
             int ok = 1, outside = 0;
-            for (long b = 0; b < 345L * 600; b++) {
+            for (long b = 0; b < BPS_L * 600; b++) {
                 ql_step(&sh_st[0][0], &A, 65536, 0); ql_step(&sh_st[0][1], &B, 65536, 1);
                 ok &= sh_st[0][0].val >= -32767 && sh_st[0][0].val <= 32767;
                 outside += sh_st[0][0].lx < -5 * 4096 || sh_st[0][0].lx > 3 * 4096;   /* far beyond the bloom 100 % orbit */
             }
             CHECK(ok, "fox: wild max at 4 x the top speed for 10 min: outputs in range (%d of 207000 blocks beyond the bloom range: clamped)", outside);
             memset(sh_st, 0, sizeof sh_st); ql_dec(hw, 0, &A); ql_dec(hw, 1, &B); outside = 0;   /* ~1 Hz */
-            for (long b = 0; b < 345L * 600; b++) {
+            for (long b = 0; b < BPS_L * 600; b++) {
                 ql_step(&sh_st[0][0], &A, 65536, 0); ql_step(&sh_st[0][1], &B, 65536, 1);
                 outside += sh_st[0][0].lx < -5 * 4096 || sh_st[0][0].lx > 3 * 4096;
             }
-            CHECK(outside < 345, "fox: wild max at 1 Hz for 10 min stays near the orbit (%d blocks outside)", outside);
+            CHECK(outside < BPS, "fox: wild max at 1 Hz for 10 min stays near the orbit (%d blocks outside)", outside);
         }
         {   /* controls */
             int16_t cw[8] = { 0 }; fox_put(&f, cw);
@@ -188,14 +190,14 @@ int main(int argc, char **argv)
             fox_set h = f; h.bloom = 16; h.wild = (uint8_t)wl; int16_t hw[8] = { 0 }; fox_put(&h, hw);
             ql_lfo A, B; ql_dec(hw, 0, &A); ql_dec(hw, 1, &B);
             double pk[400], iv[400]; int np = 0, last = -1, rising = 0; int32_t prevv = -(1 << 30), umin = 1 << 30, umax = -(1 << 30);
-            for (int b = 0; b < 345 * 120; b++) {
+            for (int b = 0; b < BPS * 120; b++) {
                 ql_step(&sh_st[0][0], &A, 65536, 0); ql_step(&sh_st[0][1], &B, 65536, 1);
                 int32_t x = sh_st[0][0].lx;
                 if (x < umin) umin = x; if (x > umax) umax = x;
                 /* a boom: from above +0.3 down to below -0.3 (hysteresis), its height = the max in between */
                 if (x > prevv) prevv = x;
                 if (!rising && x > 1229) { rising = 1; prevv = x; }
-                else if (rising && x < -1229 && np < 400) { pk[np] = prevv / 4096.0; iv[np] = last >= 0 ? (b - last) / 345.0 : 0; last = b; np++; rising = 0; prevv = -(1 << 30); }
+                else if (rising && x < -1229 && np < 400) { pk[np] = prevv / 4096.0; iv[np] = last >= 0 ? (b - last) / (double)BPS : 0; last = b; np++; rising = 0; prevv = -(1 << 30); }
             }
             double m = 0, v = 0, mi = 0, vi = 0; int ni = 0;
             for (int k = 1; k < np; k++) { m += pk[k]; v += pk[k] * pk[k]; mi += iv[k]; vi += iv[k] * iv[k]; ni++; }
@@ -218,12 +220,12 @@ int main(int argc, char **argv)
             pond_set h = f; h.chaos = (uint8_t)(ci ? 31 : 0); int16_t hw[8] = { 0 }; pond_put(&h, hw);
             for (int i = 0; i < 4; i++) ql_dec(hw, i, &L[i]);
             int up = 0, prev = 0, last = -1; double sum = 0, sum2 = 0; int ok = 1;
-            for (int b = 0; b < 345 * 240; b++) {
+            for (int b = 0; b < BPS * 240; b++) {
                 for (int i = 0; i < 4; i++) ql_step(&sh_st[0][i], &L[i], 65536, i);
                 int32_t v = sh_st[0][0].val;
                 ok &= sh_st[0][0].lx >= 1049 && sh_st[0][0].lx <= 2097152 && v >= -32767 && v <= 32767;
                 int sg = v > 0;
-                if (b > 345 * 20 && sg && !prev) { if (last >= 0) { double d = (b - last) / 345.0; sum += d; sum2 += d * d; up++; } last = b; }
+                if (b > BPS * 20 && sg && !prev) { if (last >= 0) { double d = (b - last) / (double)BPS; sum += d; sum2 += d * d; up++; } last = b; }
                 prev = sg;
             }
             double m = sum / up, sd = sqrt(fabs(sum2 / up - m * m));
@@ -231,7 +233,7 @@ int main(int argc, char **argv)
             CHECK(ok, "pond chaos %d: in range", ci ? 31 : 0);
             if (!render) printf("pond chaos %2d: %d swings, interval %.2f +- %.2f s\n", ci ? 31 : 0, up, m, sd);
         }
-        double hz = ql_inc((31 << 9) | 0x100) / 4294967296.0 * 44100 / 128;
+        double hz = ql_inc((31 << 9) | 0x100) / 4294967296.0 * 44100 / 64;
         CHECK(fabs(per0 * hz - 1.0) < 0.15, "pond chaos 0: ~1 swing per LFO cycle (%.2f s at %.2f Hz)", per0, hz);
         CHECK(cv[0] < 0.05 && cv[1] > 0.12, "pond: chaos 0 regular (cv %.3f), chaos 31 irregular (cv %.2f)", cv[0], cv[1]);
         {   /* bounded at 4 x the top speed for 10 minutes, full chaos */
@@ -239,7 +241,7 @@ int main(int argc, char **argv)
             pond_set h = f; h.chaos = 31; int16_t hw[8] = { 0 }; pond_put(&h, hw);
             for (int i = 0; i < 4; i++) { ql_dec(hw, i, &L[i]); L[i].inc = ql_inc(32767) * 4; }
             int ok = 1;
-            for (long b = 0; b < 345L * 600; b++) for (int i = 0; i < 4; i++) { ql_step(&sh_st[0][i], &L[i], 65536, i); ok &= sh_st[0][i].val >= -32767 && sh_st[0][i].val <= 32767; }
+            for (long b = 0; b < BPS_L * 600; b++) for (int i = 0; i < 4; i++) { ql_step(&sh_st[0][i], &L[i], 65536, i); ok &= sh_st[0][i].val >= -32767 && sh_st[0][i].val <= 32767; }
             CHECK(ok && sh_st[0][0].lx >= 1049 && sh_st[0][0].d1 <= 2097152, "pond: bounded at full speed for 10 min");
         }
         {   /* controls: the selected species */
@@ -280,14 +282,14 @@ int main(int argc, char **argv)
 
     /* frequency: rate 0 / 31 / 63 */
     { int16_t q[8] = { fq(0,0,0,0,0), fq(31,0,0,0,0), fq(63,0,0,0,0), 0, ct(0,0,0), ct(0,0,0), ct(0,0,0), ct(0,0,0) }; pk(q);
-      double f0 = D(q,0).inc / 4294967296.0 * 44100 / 128, f1 = D(q,1).inc / 4294967296.0 * 44100 / 128, f2 = D(q,2).inc / 4294967296.0 * 44100 / 128;
+      double f0 = D(q,0).inc / 4294967296.0 * 44100 / 64, f1 = D(q,1).inc / 4294967296.0 * 44100 / 64, f2 = D(q,2).inc / 4294967296.0 * 44100 / 64;
       if (!render) printf("rate 0/31/63: %.3f %.3f %.2f Hz\n", f0, f1, f2);
       CHECK(f0 > 0.049 && f0 < 0.06 && f1 > 0.8 && f1 < 1.2 && f2 > 17 && f2 < 21, "rates %.3f %.3f %.3f", f0, f1, f2); }
 
     /* clock calibration */
-    for (int b = 0; b < 300; b++) { host_cycles += 750000; ql_apply_synth(host_lfo_obj[0], w, 0);
-                                    host_cycles += 750000; ql_apply_synth(host_lfo_obj[3], w, 0); }
-    CHECK(cpb > 1450000 && cpb < 1550000, "cpb did not converge: %u", cpb);
+    for (int b = 0; b < 300; b++) { host_cycles += 375000; ql_apply_synth(host_lfo_obj[0], w, 0);
+                                    host_cycles += 375000; ql_apply_synth(host_lfo_obj[3], w, 0); }
+    CHECK(cpb > 725000 && cpb < 775000, "cpb did not converge: %u", cpb);
 
     /* editing: blue rate, green amount, white target wraps over 12, red type wraps over 6; Shift: offset, smooth, wave, sync */
     {
@@ -316,7 +318,7 @@ int main(int argc, char **argv)
         CHECK(D(e, 2).smooth == 3 && D(e, 2).wave == 4, "smooth / wave");
         host_tempo_rate = 1662149u * 120;
         ql_turn(e, 0, 3, 1024, 1);
-        double hz = D(e, 2).inc / 4294967296.0 * 44100 / 128;
+        double hz = D(e, 2).inc / 4294967296.0 * 44100 / 64;
         CHECK(D(e, 2).sync && D(e, 2).rate == 4 && fabs(hz - 2.0) < 0.01, "sync 1/4 at 120 bpm: %.3f Hz", hz);
         ql_turn(e, 0, 0, 30 * 1024, 0); CHECK(D(e, 2).rate == QL_DIVS - 1, "division clamp");
         ql_turn(e, 0, 3, -1024, 1); CHECK(!D(e, 2).sync && D(e, 2).rate == 31, "sync off");
@@ -484,7 +486,7 @@ int main(int argc, char **argv)
             fox_set f = { 31, 0, 0, (uint8_t)fs[k].bloom, (uint8_t)fs[k].wild, { 0, 9 }, { 31, -19 } };
             memset(host_lfo_words, 0, 16); fox_put(&f, host_lfo_words); memset(sh_st, 0, sizeof sh_st); memset((void *)fox_trail, 0, sizeof fox_trail);
             host_pos = 0;
-            for (int b = 0; b < 345 * 3 + 120 * (int)k; b++) { host_cycles += cpb; ql_apply_synth(host_lfo_obj[0], host_lfo_words, 0); }
+            for (int b = 0; b < BPS * 3 + 120 * (int)k; b++) { host_cycles += cpb; ql_apply_synth(host_lfo_obj[0], host_lfo_words, 0); }
             host_shift = fs[k].shift;
             fx_screen_update(0, 16);
             frame_json(fs[k].label);
@@ -500,7 +502,7 @@ int main(int argc, char **argv)
             memset(host_lfo_words, 0, 16); pond_put(&f, host_lfo_words); memset(sh_st, 0, sizeof sh_st);
             memset((void *)pond_trail, 0, sizeof pond_trail);
             host_pos = 0; ql_sel[0] = (uint8_t)ps[k].sel;
-            for (int b = 0; b < 345 * 40; b++) { host_cycles += cpb; ql_apply_synth(host_lfo_obj[0], host_lfo_words, 0); }
+            for (int b = 0; b < BPS * 40; b++) { host_cycles += cpb; ql_apply_synth(host_lfo_obj[0], host_lfo_words, 0); }
             host_shift = ps[k].shift;
             pd_screen_update(0, 16);
             frame_json(ps[k].label);

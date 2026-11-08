@@ -3,6 +3,10 @@
 #include <stdio.h>
 #include <string.h>
 int main(void){
+ /* sync / ring interval in semitones (2026-11-07): the nearest semitone to the old 1 + 3 * green ratio */
+ {unsigned prev=0;for(int q=0;q<=32767;q+=7){unsigned n=sid_interval_semi(q);assert(n<=24&&n>=prev&&n-prev<=1);prev=n;}
+  assert(sid_interval_semi(0)==0&&sid_interval_semi(32767)==24&&sid_interval_semi(10923)==12&&sid_interval_semi(16384)==16);   /* 2x, 2.5x -> 16 st (2.52x): the presets keep their sound */}
+
  sid_state a,b;int16_t q[4]={0,16384,24576,8192};
  for(int mode=0;mode<6;mode++)for(int pitch=0;pitch<5;pitch++)for(int edge=0;edge<4;edge++){
   q[0]=mode*5462;q[1]=(edge&1)?32767:0;q[2]=(edge&2)?32767:0;q[3]=(edge&1)?32767:0;

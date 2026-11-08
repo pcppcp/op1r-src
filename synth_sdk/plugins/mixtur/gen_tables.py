@@ -12,7 +12,7 @@ formant pair roughly constant over Q (measured with harness analysis, see README
 """
 import math, os
 
-FS = 44100
+FS = 88200                            # voice rate (OP1_VOICE_RATE)
 N = 33
 HERE = os.path.dirname(os.path.abspath(__file__))
 xs = [i / (N - 1) for i in range(N)]

@@ -31,7 +31,7 @@ typedef char ac_size_check[sizeof(ac_voice_t) <= OP1_VOICE_SIZE ? 1 : -1];
 
 #define AC_ACCENT_VEL (100 * 258)   /* op1_voice_vel_gain of velocity 100 */
 #define AC_ACCENT_TAU(t) (30 + (((t) * 5) >> 4))   /* ms: an accented note's decay follows the knob's: 42 .. 230 ms (about 55 ms at the default) */
-#define AC_HP_C 1371                /* feedback high-pass, Q16: c / (1 + c), c = 2 pi 150 Hz / 44100 */
+#define AC_HP_C 693                 /* feedback high-pass, Q16: c / (1 + c), c = 2 pi 150 Hz / 88200 (OP1_VOICE_RATE) */
 #define AC_R_MAX 32440              /* resonance cap, Q15 (0.99) */
 #define AC_STATE_MAX (1 << 24)      /* bound for the ladder / high-pass states: 16x full scale (blot itself stays below
                                      * about 10x, all knobs up; was 128x) */
@@ -178,7 +178,7 @@ static void ac_render(void *self, int16_t *out, const int16_t *params)
     int32_t kd = params[3] < 0 ? 0 : params[3] >> 11, kf = params[3] < 0 ? 0 : params[3] & 2047;
     int32_t tau = ac_tau_ms[kd] + (((ac_tau_ms[kd + (kd < 16)] - ac_tau_ms[kd]) * kf) >> 11);
     if (v->acc) tau = AC_ACCENT_TAU(tau);
-    int32_t dstep = (int32_t)(1342177280 / (441 * tau));                /* 8 / (44.1 tau) per 8 samples, Q24 */
+    int32_t dstep = (int32_t)(1342177280 / (882 * tau));                /* 8 / (88.2 tau) per 8 samples, Q24 */
     b->wave = params[5] > 0 ? params[5] : 0;                            /* saw .. square, Q15 */
     int32_t drive = 4096 + ((params[7] > 0 ? params[7] : 0) >> 2);      /* 1x .. 3x, Q12 */
     b->gain = 19661 + ((acc * 13106) >> 15);                            /* 0.6, accent up to 1.0 */

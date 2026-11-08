@@ -27,7 +27,7 @@ static int noise(void) { seed = seed * 1664525u + 1013904223u; return (int)(seed
 static int hold_n;
 static void tilt(double fwd_deg, double side_deg, int with_noise)       /* sensor as measured (docs/36) */
 {
-    if (with_noise && hold_n++ % 5) return;                              /* firmware reads every 640 samples */
+    if (with_noise && hold_n++ % 10) return;                             /* firmware reads every 640 output samples (10 blocks) */
     double f = fwd_deg * M_PI / 180, s = side_deg * M_PI / 180;
     double v[3] = { sin(s), -sin(f) * cos(s), cos(f) * cos(s) * 0.95 + 0.094 };
     for (int i = 0; i < 3; i++) host_accel[i] = (int16_t)(lrint(v[i] * 16384 / 64 + (with_noise ? noise() : 0)) * 64);
@@ -49,41 +49,41 @@ int main(void)
         double e = 1200 * log2(exp2_q14(x) / 16384.0) - 1200.0 * x / 65536;
         assert(fabs(e) < 1.0);                                           /* cents */
     }
-    double base = 110.0 / 44100 * 128;                                   /* cycles per block at A2 (< 1: phase does not wrap) */
-    for (int i = 0; i < 128; i++) host_pitch_inc[i] = (int32_t)lrint(110.0 / 44100 * 4294967296.0);
+    double base = 110.0 / OP1_VOICE_RATE * 128;                                   /* cycles per block at A2 (< 1: phase does not wrap) */
+    for (int i = 0; i < 128; i++) host_pitch_inc[i] = (int32_t)lrint(110.0 / OP1_VOICE_RATE * 4294967296.0);
     host_voice_vel[0] = 127 << 8;
     int16_t out[128];
 
     tilt(10, 0, 0); ae_note_on(host_voice_mem, knobs);                   /* home: 10 deg forward */
-    double c = settle(200, out);
+    double c = settle(400, out);
     assert(fabs(1200 * log2(c / base)) < 1);                             /* home: the key's pitch */
-    int pk = 0; for (int i = 0; i < 50; i++) { block(out); if (peak(out) > pk) pk = peak(out); }
+    int pk = 0; for (int i = 0; i < 100; i++) { block(out); if (peak(out) > pk) pk = peak(out); }
     assert(pk > 12000 && pk < 32767);
-    tilt(11.5, 0, 0); c = settle(200, out);                              /* inside the 2.5 deg dead zone */
+    tilt(11.5, 0, 0); c = settle(400, out);                              /* inside the 2.5 deg dead zone */
     assert(fabs(1200 * log2(c / base)) < 1);
     /* full range: sin(30 deg) beyond home (in g, as the engine measures) -> +12 semitones */
     double full = asin(sin(10 * M_PI / 180) + 0.5) * 180 / M_PI;
-    tilt(full + 1, 0, 0); c = settle(200, out);
+    tilt(full + 1, 0, 0); c = settle(400, out);
     assert(fabs(1200 * log2(c / base) - 1200) < 3);
-    tilt(-40, 0, 0); c = settle(200, out);                               /* back: down, clamped at -12 */
+    tilt(-40, 0, 0); c = settle(400, out);                               /* back: down, clamped at -12 */
     assert(fabs(1200 * log2(c / base) + 1200) < 3);
-    tilt(10, 0, 0); settle(200, out);
+    tilt(10, 0, 0); settle(400, out);
     /* volume: right side up 30 deg (X -0.5 g) -> silent; left side up: unchanged */
-    tilt(10, -31, 0); settle(100, out); assert(peak(out) < 300);
-    tilt(10, 25, 0); settle(100, out); assert(peak(out) > 12000);
-    tilt(10, 0, 0); settle(700, out);                                    /* (the steps above were "shakes": decay) */
+    tilt(10, -31, 0); settle(200, out); assert(peak(out) < 300);
+    tilt(10, 25, 0); settle(200, out); assert(peak(out) > 12000);
+    tilt(10, 0, 0); settle(1400, out);                                    /* (the steps above were "shakes": decay) */
     /* shake envelope: noise / slow tilt stay low, a 6 Hz hand shake opens it */
     int32_t emax = 0;
-    for (int b = 0; b < 1000; b++) { tilt(10, 0, 1); block(out); if (b > 500 && st[0].env > emax) emax = st[0].env; }
+    for (int b = 0; b < 2000; b++) { tilt(10, 0, 1); block(out); if (b > 1000 && st[0].env > emax) emax = st[0].env; }
     fprintf(stderr, "noise env %d\n", emax); assert(emax < 3000);
     emax = 0;
-    for (int b = 0; b < 1200; b++) {                                    /* 0 -> 35 deg and back in 3.5 s */
-        double t = b * 128.0 / 44100;
+    for (int b = 0; b < 2400; b++) {                                    /* 0 -> 35 deg and back in 3.5 s */
+        double t = b * 128.0 / OP1_VOICE_RATE;
         tilt(10 + 35 * pow(sin(M_PI * t / 3.5), 2), 0, 1); block(out); if (st[0].env > emax) emax = st[0].env;
     }
     assert(emax < 6000);
-    for (int b = 0; b < 700; b++) {                                     /* sideways 6 Hz shake, 0.15 g */
-        double t = b * 128.0 / 44100;
+    for (int b = 0; b < 1400; b++) {                                     /* sideways 6 Hz shake, 0.15 g */
+        double t = b * 128.0 / OP1_VOICE_RATE;
         double s = asin(0.15 * sin(2 * M_PI * 6 * t)) * 180 / M_PI;
         tilt(10, s, 1); block(out);
     }

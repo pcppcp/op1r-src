@@ -58,11 +58,11 @@
 #define K_SINE   100
 #define K_DT     104
 #define K_INV8   108
-#define K_NIN1   112      /* pass 1's inner count: 8 (4 at 11.025 kHz), halved with HS_BOW_CHEAP (pairs) */
+#define K_NIN1   112      /* pass 1's inner count: 8 (4 at 22.05 kHz), halved with HS_BOW_CHEAP (pairs) */
 #define K_NIN2   116      /* pass 2's: 8 or 4 */
-#define K_HALF   120      /* HS_HIGH_HALF: 1 at 11.025 kHz (HALF_IN before pass 1, HALF_OUT after pass 2) */
+#define K_HALF   120      /* HS_HIGH_HALF: 1 at 22.05 kHz (HALF_IN before pass 1, HALF_OUT after pass 2) */
 #define K_HINC   124      /* its summed increments (33 words) */
-#define K_SPREV  128      /* the string's last 22.05 kHz sample */
+#define K_SPREV  128      /* the string's last 44.1 kHz sample */
 #define K_GBQ    132      /* 8 words */
 #define K_SUB    164      /* 8 x { G = ga | gp, GN = 1 | gn, GF = -gf | gf } */
 
@@ -205,8 +205,8 @@
 .endm
 
 /* ---- HS_HIGH_HALF: HALF_IN sums the increments in pairs (hinc[2m] = inc[4m] + inc[4m + 1], hinc[2m + 1] = inc[4m + 2]
- * + inc[4m + 3]) and points k[INC] at them, 3 packets per 11.025 kHz sample; HALF_OUT brings pass 2's 32 samples (hb[32..63])
- * back to 22.05 kHz in place: hb[2m] = (prev + y[m]) >> 1, hb[2m + 1] = y[m], 3 packets per sample ---- */
+ * + inc[4m + 3]) and points k[INC] at them, 3 packets per 22.05 kHz sample; HALF_OUT brings pass 2's 32 samples (hb[32..63])
+ * back to 44.1 kHz in place: hb[2m] = (prev + y[m]) >> 1, hb[2m + 1] = y[m], 3 packets per sample ---- */
 .macro HALF_IN n
 #ifdef HS_HIGH_HALF
 	R0 = [P5 + K_HALF];

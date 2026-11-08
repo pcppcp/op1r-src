@@ -2,8 +2,8 @@
  * one SVF, fold / clip / crush, the stutter gate, DC blocker; per block: taps, filter coefficient, limiter gain. */
 #include "dd_core.h"
 
-static const uint32_t per_c[12] = { 1380856, 1303354, 1230203, 1161157, 1095986, 1034473, 976413, 921611,
-                                    869885, 821062, 774979, 731483 };   /* samples per cycle (Q8), midi 0 .. 11 */
+static const uint32_t per_c[12] = { 2761712, 2606709, 2460405, 2322314, 2191972, 2068946, 1952825, 1843221,
+                                    1739769, 1642124, 1549958, 1462966 };   /* samples per cycle at DD_SR (Q8), midi 0 .. 11 */
 static const int16_t inv_n[DD_TAPS + 1] = { 0, 32767, 16384, 10923, 8192 };
 
 static inline int32_t clampi(int32_t x, int32_t lo, int32_t hi) { return x < lo ? lo : x > hi ? hi : x; }
@@ -21,7 +21,7 @@ void dd_init(dd_t *d, uint32_t seed)
     for (unsigned i = 0; i < sizeof *d; i++) p[i] = 0;
     d->rng = seed ? seed : 0x2545F491u;
     d->chaos_x = 12345; d->gain = 32767; d->gate_g = 32767;
-    d->ntaps = 1; d->tap[0] = 168; d->inc = 25480000u;
+    d->ntaps = 1; d->tap[0] = 337; d->inc = 12740000u;     /* C4 at DD_SR */
 }
 
 void dd_reset_loop(dd_t *d)
@@ -68,7 +68,10 @@ void dd_render(dd_t *d, const dd_par *p, int16_t *out, int n)
     const int32_t fbg = (clampi(p->feedback, 0, 32767) * 5) >> 2;                  /* 0 .. 1.25: past 0.8 it screams */
     int32_t cut = 12000 + ((p->env * 20000) >> 15) + d->h_cut;   /* open enough at the attack: no muffled start */
     cut = clampi(cut, 300, 32767);
-    const int32_t f = 300 + ((((cut * cut) >> 15) * 29000) >> 15), q = 20000;   /* SVF: f ~ 2 sin(pi fc / fs), damping */
+    /* SVF: f = 2 sin(pi fc / fs), damping q. The cutoff curve was made for 44.1 kHz (f0); at 88.2 kHz the same cutoffs
+     * need f = 2 sin(asin(f0 / 2) / 2) = (f0 / 2) (1 + f0^2 / 32), within 0.3 % (as kennel 3.2) */
+    const int32_t f0 = 300 + ((((cut * cut) >> 15) * 29000) >> 15), q = 20000;
+    const int32_t f = (f0 >> 1) + (((f0 >> 1) * (((f0 * f0) >> 15) >> 5)) >> 15);
     const int32_t fm = clampi(p->filter, 0, 32767);
     const int32_t src = clampi(p->source + d->h_src, 0, 32767) * 3;              /* 0 .. 3 sources, Q15 */
     const int seg = src >> 15 > 2 ? 2 : src >> 15, sfrac = seg == 2 && src >= 3 * 32767 ? 32767 : src & 32767;
@@ -78,8 +81,9 @@ void dd_render(dd_t *d, const dd_par *p, int16_t *out, int n)
     const int32_t g1 = 4096 + ((d1 * 3) >> 3), g2 = 4096 + ((d2 * 7) >> 3);     /* Q12: fold 1 .. 4, clip 1 .. 8 */
     const int32_t bits = 16 - ((d3 * 13) >> 15);                                  /* crush: 16 .. 3 bits */
     const int32_t mask = (int32_t)(0xFFFFFFFFu << (16 - bits));
-    const int32_t hold_len = 1 + ((clampi(p->crush, 0, 32767) * 31) >> 15);
-    const int32_t interval = 88200 >> ((hands * 7) >> 15);                        /* the hands: 2 s .. 15 ms */
+    const int32_t hold_n = 1 + ((clampi(p->crush, 0, 32767) * 31) >> 15);          /* 1/N of 44.1 kHz */
+    const int32_t hold_len = hold_n == 1 ? 1 : 2 * hold_n;                          /* in 88.2 kHz samples */
+    const int32_t interval = 2 * DD_SR >> ((hands * 7) >> 15);                    /* the hands: 2 s .. 15 ms */
     const int stutter = hands > 26000;
     const uint32_t inc = d->inc;
     int32_t peak = 0, pre[256];                                 /* (n <= 256) the block before the limiter */
@@ -96,18 +100,18 @@ void dd_render(dd_t *d, const dd_par *p, int16_t *out, int n)
         }
         if (stutter && --d->gate_n <= 0) {                     /* stutter: random cuts */
             uint32_t g = xr(d);
-            d->gate_n = 200 + (int32_t)(g % 1800u);            /* (per cut, not per sample) */
+            d->gate_n = 400 + (int32_t)(g % 3600u);            /* (per cut, not per sample) */
             d->gate = (g >> 30) == 0;                          /* a quarter of the time: silent */
         }
         int32_t gt = stutter && d->gate ? 0 : 32767;
-        d->gate_g += gt > d->gate_g ? 1024 : gt < d->gate_g ? -1024 : 0;
+        d->gate_g += gt > d->gate_g ? 512 : gt < d->gate_g ? -512 : 0;
         d->gate_g = clampi(d->gate_g, 0, 32767);
 
         /* sources */
         int32_t s[4];
         s[0] = (int16_t)(r >> 16);                             /* white */
-        if ((r & 0xFFF) < 40) d->crackle = (int16_t)(xr(d) >> 16);   /* crackle: sparse impulses */
-        d->crackle -= d->crackle >> 5;
+        if ((r & 0xFFF) < 20) d->crackle = (int16_t)(xr(d) >> 16);   /* crackle: sparse impulses (~430 / s) */
+        d->crackle -= (d->crackle + (d->crackle > 0 ? 63 : 0)) >> 6;   /* rounded up so a tail reaches 0 */
         s[1] = d->crackle;
         uint32_t cph = d->chaos_ph + inc;
         int step = cph < d->chaos_ph;                          /* wrapped: a step at the key's pitch */
@@ -150,7 +154,7 @@ void dd_render(dd_t *d, const dd_par *p, int16_t *out, int n)
 
         /* stutter, DC blocker, limiter */
         y = (y * d->gate_g) >> 15;
-        int32_t o = y - d->dcx + ((d->dcy * 32604) >> 15);    /* 0.995 */
+        int32_t o = y - d->dcx + ((d->dcy * 32686) >> 15);    /* 0.9975 (35 Hz at DD_SR) */
         d->dcx = y; d->dcy = clampi(o, -65536, 65535);
         int32_t a = d->dcy < 0 ? -d->dcy : d->dcy;
         if (a > peak) peak = a;
@@ -164,7 +168,7 @@ void dd_render(dd_t *d, const dd_par *p, int16_t *out, int n)
     for (int i = 0; i < n; i++) {                              /* + a second DC blocker after the gain (the clipped */
         g += step;                                             /* loop's rails are lopsided) */
         int32_t x = (pre[i] * g) >> 15;
-        y1 = clampi(x - x1 + ((y1 * 32604) >> 15), -65536, 65535); x1 = x;
+        y1 = clampi(x - x1 + ((y1 * 32686) >> 15), -65536, 65535); x1 = x;
         out[i] = (int16_t)clampi(y1, -16384, 16384);           /* half scale */
     }
     d->dc2x = x1; d->dc2y = y1;

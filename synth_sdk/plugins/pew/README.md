@@ -14,16 +14,27 @@ has the sound, `pew_macro.h` the knob maps the sound and the screen share, `scre
 
 Saved PEW sounds play differently (the knobs mean other things now); the owner accepted that for the redesign.
 
+## Rate (2026-11-03)
+
+A voice call is 128 samples at 88.2 kHz, 689 calls a second, not 344. Everything counted per call ran twice as fast:
+the Leslie (13.4 / 11.7 Hz measured in the emulator's output, design 6.7 / 5.86), the rotors' spin-up and brake, the
+scanner (13.7 Hz, design 6.86), the percussion decay (0.22 / 0.09 s, design 0.45 / 0.18) and the key click. Now
+`PEW_SLOW` / `PEW_FAST` are 4986000 / 41763000 per call, the rotor ramps use shifts one larger (horn 0.19 s, drum
+0.74 s), the stop-easing threshold is 2^21 per call, the scanner step is 42750000, the percussion decays every other
+call (the `m_dec` values are unchanged), and the click decays with `c -= c >> 6` (0.73 ms) over a 512-sample burst, four blocks, 5.8 ms (the buffer is 2 KB, was 1 KB).
+The table rebuild takes about half the time it was said to (48 ms, 12 ms): left as it is. `pew_dsp.S` is unchanged.
+Check: `harness/rate_pew_test.c`.
+
 ## Sound
 
 Three shared wave tables of one 16' period (512 points): low (16', 5 1/3', 8') through the drum, upper (the other six
 bars) and percussion (4' and 2 2/3' sines) through the horn, which wobbles in pitch (Leslie Doppler plus the scanner
 vibrato). The tables carry the sounding level and a loudness compensation ((E_ref / E)^(1/4), 0.8 .. 1.3), so a thin
 registration is not much quieter than a full one. They are rebuilt only when a drawbar step or the percussion's
-harmonic changes, 16 points a block into a second copy that then takes over (about 95 ms from a step to its sound;
-64 points a block, 23 ms, when a phrase starts with no key held, as after loading a preset; the first tables are
+harmonic changes, 16 points a block into a second copy that then takes over (about 48 ms from a step to its sound;
+64 points a block, 12 ms, when a phrase starts with no key held, as after loading a preset; the first tables are
 built whole at boot, from the screen's load). Blue moves in drawbar steps, so an LFO belongs on green or white.
-The key click is one noise burst for all keys, rebuilt 64 samples a block when its level steps.
+The key click is one noise burst for all keys, rebuilt 64 samples a block (eight blocks) when its level steps.
 
 On the OP-1 the sample loop runs as two hand-scheduled passes in `pew_dsp.S` (host builds keep the C loop in `pew.c`):
 

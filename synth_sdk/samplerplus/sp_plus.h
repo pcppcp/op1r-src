@@ -6,6 +6,12 @@
 #define SP_PLUS_H
 #include "sp_voice.h"
 
+/* R246 renders a synth voice at 88,200 Hz (128 samples a call; the firmware's sampler step is 88200 / (freq 16384)).
+ * Times are set and shown in 44.1 kHz samples (sp_time_samples, the labels) and counted in voice samples: SP_VOICE_X
+ * per 44.1 kHz sample (2026-11-03; before, the voice counted them 1:1, so every time ran at half its label). Sample
+ * positions (crossfade, start offsets) are sample-data positions and stay as they are. */
+#define SP_VOICE_X 2
+
 /* per-slot extras (patch JSON "op1r"; 0 = off / neutral, except sustain 127 = full) */
 typedef struct {
     uint8_t attack, hold, decay, sustain, release;   /* 0..127 (times: sp_time_samples; sustain level 0..127) */
@@ -30,15 +36,14 @@ typedef struct {
 int  sp_extra_set(sp_extra *x, int i, int32_t v);     /* field i (struct order) clamped; returns the stored value */
 int  sp_extra_get(const sp_extra *x, int i);
 void sp_extra_default(sp_extra *x);                   /* the stock-like start: sustain full, short release */
-uint32_t sp_time_samples(uint8_t t);                  /* 0..127 -> 0 .. ~11 s */
+uint32_t sp_time_samples(uint8_t t);                  /* 0..127 -> 0 .. ~11 s, in 44.1 kHz samples */
 
 typedef struct {
     uint8_t render_active;                            /* any render extra on (else the stock render) */
-    uint32_t t_att, t_hold, t_dec, t_rel;
+    uint32_t t_att, t_hold, t_dec, t_rel;             /* voice samples */
     int32_t a_step, d_step, r_step, sus;              /* Q30 */
-    int32_t kd, kr;                                   /* exponential factors, Q15 */
-    int32_t kd16, kr16;                               /* the same over 16 samples (kd^16), Q15 */
-    int32_t p_start, p_step;                          /* pitch envelope, 1/96 octave << 16 */
+    uint32_t kd16, kr16;                              /* exponential decrements over 16 voice samples, 1 - (1 - 6.9 / T)^16, Q20 */
+    int32_t p_start, p_step;                          /* pitch envelope, 1/96 octave << 20 */
     int32_t f_k;                                      /* filter damping Q14 */
     int32_t fa[128][3];                               /* filter coefficients per cutoff step (Q15) */
     int32_t drive_q12;

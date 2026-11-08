@@ -15,10 +15,10 @@ extern volatile int16_t juni_chorus_level[3];
 
 /* The shown sway runs at half the chorus LFO, so the trees move calmer than the sound (I 0.25 Hz, II 0.4 Hz), locked
  * to half the plugin's phase while the LFO is slower than this; above it (I+II, 9 Hz) it runs on its own at half
- * this rate (1.25 Hz), so the frame rate can't alias it into a slow wave. 2^32 * 2.5 / 22050. */
-#define SHOW_INC_MAX 486958u
+ * this rate (1.25 Hz), so the frame rate can't alias it into a slow wave. 2^32 * 2.5 / 44100 (the FX rate). */
+#define SHOW_INC_MAX 243479u
 #define LEAN_MAX     (8 * 256)          /* Q8 px: a tree top's lean at the full sweep (DEPTH 99 in I / II) */
-#define SWEEP_FULL   10240              /* the plugin's full sweep, Q8 samples (SWEEP) */
+#define SWEEP_FULL   20480              /* the plugin's full sweep, Q8 samples at 44.1 kHz (SWEEP) */
 #define RIPPLE_MAX   (3 * 256)          /* Q8 px: the reflections' ripple at MIX 99 and a loud input */
 #define TONE_REST    5898               /* TONE at or below the default 18 %: the moon as drawn */
 
@@ -112,7 +112,7 @@ static void update(void *scr, int dt)
  const int32_t mixs = e_mix * 2 > 32767 ? 32767 : e_mix * 2;                 /* full sway from MIX 50 % */
  if (running) {
   const uint32_t inc = juni_chorus_inc[pos];
-  const uint32_t samples = (uint32_t)dt * 441u / 20u;                        /* 22.05 kHz */
+  const uint32_t samples = (uint32_t)dt * 441u / 10u;                        /* 44.1 kHz */
   if (inc <= SHOW_INC_MAX) {
    show_ph += (inc >> 1) * samples;
    /* locked to half the plugin's phase: the error mod 2^31 (either half-phase will do), sign-extended from 31 bits */

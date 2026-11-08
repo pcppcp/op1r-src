@@ -8,9 +8,9 @@ settings along a tuned path, so any position should sound usable.
 | Knob | Page 1 | Page 2 (press the encoder) |
 |---|---|---|
 | Blue | Shape: one saw, then saw + sub square, two detuned saws, three saws, and a wide stack | Body: osc 3's interval: SUB (-1 octave), UNI, 5TH, OCT, SUB2 (-2 octaves) |
-| Green | Cutoff: 80 Hz to about 7 kHz, 60 % key tracking, never below half an octave over the note | Vel: how much velocity opens the filter and changes the level. At 0 it only changes the level, a little |
-| White | Contour: the filter envelope. The left half goes from short pluck to longer pluck. The right half adds sustain, then a slow attack, for swells | Age: oscillator drift (1 to 8 cents) and a small random cutoff offset on each note |
-| Red | Heat: resonance and drive together, with level compensation and the bass kept as resonance rises | (none) |
+| Green | Cutoff: 80 Hz to about 13 kHz over the first three quarters, then one more octave, so the filter opens fully at the top. 60 % key tracking, never below half an octave over the note | Vel: how much velocity opens the filter and changes the level. At 0 it only changes the level, a little |
+| White | Contour: the filter envelope. The sweep reaches its full 6.5 octaves by a fifth of the knob, so the left half goes from a deep, fast pluck (15 ms) to a longer one (400 ms). The right half adds sustain, then a slow attack, for swells | Age: oscillator drift (1 to 8 cents) and a small random cutoff offset on each note |
+| Red | Heat: three zones. The first half gets fuller and more driven (the Minimoog trick of feeding the output back into the mixer), towards 90 % it gets resonant, and at the top the filter whistles on its own (self-oscillation). The level is compensated | (none) |
 
 The amp envelope, glide (portamento) and play modes are the OP-1's own. Page-2 values start at 0, and 0 is a good
 default for each.
@@ -45,3 +45,33 @@ without the OP-1's envelope and effects, they land between -18 and -21 dBFS RMS;
   85k packets instead of 141k.
 - No fixed order yet: the loader gives it a number from 32 to 63. Claim one in `ORDERS.md` before it ships.
 - Not done yet: listening on the emulator and the OP-1, and a native audio review of the presets.
+
+## Rate (2026-11-03)
+
+On R246 a voice call is 128 samples at 88.2 kHz, 689 calls a second; MONOLIT was written and tuned (host renders) for
+44.1 kHz and 344 calls a second. On the unit the cutoff sat 0.4 octave high (the table an octave high, the key
+tracking 0.6 octave low; the floor half an octave over the note was right, the two errors cancelling there) and the
+contour and the age drift ran twice as fast. Now derived for 88.2 kHz, toward the design: `gen_tables.py` at
+`FS = 88200` with the cap at the design's 7.19 kHz, `C4_INC` / `F40_INC` in 88.2 kHz steps, the contour at
+1.451 ms a block (`47554 / ms`), the drift walk with its rates halved and its noise / sqrt 2 (same spread and speed
+within 3 %), and the resonance's ease at high cutoff from the design's 44.1 kHz g. Not re-derived: the ladder's
+feedback amount (k) and the soft clip (rate-free in the code; with the lower g per sample the unit-delay loop is
+closer to an analog ladder, so resonance may sit a little differently: a listening check). The ladder states have no
+fractional bits, so at the lowest cutoffs (g 186 at 80 Hz, was 371) their truncation dead band is twice as wide.
+`harness/rate_monolit_test.c` (in `make check`): cutoff at C4 / C5, the floor, the contour's decay in R246 units.
+
+## Ladder (2026-11-04)
+
+Next to Moai, MONOLIT's filter barely rang: at full Heat the resonance stood 5 to 10 dB over the dry sound, where
+Moai's stands 33 to 44 dB, right on the cutoff. The old ladder fed one saw in only about 5 dB under its soft clip,
+and Heat raised the drive along with the resonance, so the clip, which also carries the feedback, crushed the peak.
+Its unit-delay feedback also put the peak under the cutoff and needed the 7.19 kHz cap.
+
+MONOLIT now runs Moai's zero-delay ladder (PROVENANCE.md): `mo_coef` solves the coefficients per 64 samples,
+`monolit_fc.S` (from `gen_fc.py`, which drives Moai's own generator) runs the samples, and `mo_chunk_c` is the C twin.
+The oscillators sum at half scale into the mix, which the kernels read directly. The ladder runs about 10 dB under its
+clip, and the resonance's make-up is applied after it. Heat's three zones and the folded feedback are described in
+`monolit.c`. Checks: `kern_check.py` (asm = C, 34,097 random blocks), `exact_check.py` with the L1 pool off and on,
+and `rate_monolit_test` (the position and the stage coefficient agree within 1 %). bcore per voice call: default
+14,240, all max 16,610 (was 14,279, 16,646). `plugin_cost`: voice 15,976, start 1,620 (was 15,916, 1,481; the burst
+blocks with random knobs and retriggers cost a little more).

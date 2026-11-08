@@ -1,23 +1,26 @@
 /* EVA's block passes, hand-scheduled for the Blackfin: the same arithmetic as eva.c's C loops (kept there for host
  * builds), bit for bit, with each pass's state in registers and its loads and stores in parallel slots. In render
- * order: eva_saw / eva_pul (the source below 5.5 kHz), eva_noise (breath), eva_pad, eva_vowel (per band), eva_ens,
+ * order: eva_saw / eva_pul (the source below 11 kHz), eva_noise (breath), eva_pad, eva_vowel (per band), eva_ens,
  * eva_noise (hiss), eva_rhp / eva_rlp / eva_rout (or eva_rsat, then eva_rcrush or the beeping voice's C tail); plus
  * eva_clear (note_on) and eva_inv (the polyBLEP's 1 / dt). Each is described above its code.
  *
  * void eva_ens(int32_t *pb, const int32_t *k)
- *   the ensemble: two interpolated taps of the doubled delay line, then the level and the carrier, in place on pb
- *   (64 samples, 8 sub-blocks of 8). k = { dl, wi, da, db, (256 - fb) << 16 | (256 - fa), fb << 16 | fa,
- *   then per sub-block cho, ag (8 pairs) and one spare pair (read after the last sub-block, not used) }.
- *   The line is a circle of 384 samples (768 bytes): the write through I0, the taps through I2 / I3, all three
+ *   the ensemble at half rate: per pair of samples (32 pairs, 8 sub-blocks of 4) the write w = clamp((y0 + y1) >> 1)
+ *   ((y0 + y1) << 15 saturated, its high half) goes to dl[wi + j], two interpolated taps of the line make the wet
+ *   sample wet = (ta + tb) >> 1, the pair's outputs mix in e0 = (wp + wet) >> 1 and wet (wp: the last pair's wet),
+ *   then the level and the carrier, in place on pb (64 samples). k = { dl, wi, da, db, (256 - fb) << 16 | (256 - fa),
+ *   fb << 16 | fa, then per sub-block cho, ag (8 pairs), then wp (in and out, through I1; read once more as the spare
+ *   pair after the last sub-block, not used) }.
+ *   The line is a circle of 384 half-rate samples (768 bytes): the write through I0, the taps through I2 / I3, all three
  *   circular over it (B = dl, L = 768); the taps start da, db samples (167 .. 376) behind dl[wi] (ra[-1], rb[-1]:
- *   I2 = I3 = &dl[wi], then I2 -= 2 da, I3 -= 2 db, wrapping on the circle). The write w = clamp(y, -32768, 32767) is y << 16 saturated (its high half);
- *   it goes to dl[wi]. A tap a + ((r - a) * f >> 8) is
+ *   I2 = I3 = &dl[wi], then I2 -= 2 da, I3 -= 2 db, wrapping on the circle). A tap a + ((r - a) * f >> 8) is
  *   (a * (256 - f) + r * f) >> 8 (a * 256 is a multiple of 256), both taps in one dual multiply-accumulate.
  *
  * Products of 32-bit values use the 32-bit multiply (it wraps as the C's int32 product does); 16 x 16 products only
  * where both operands are int16 by construction. No packet stores a register another of its ops writes, or loads a
  * register another of its ops reads; no shift beside a P-register store (anomaly 05000074). L0 .. L3 are 0 again on
- * return; eva.c restores the caller's L0..L3 after the block. M1 is not touched; eva_ens saves and restores M2 / M3.
+ * return; eva.c restores the caller's L0..L3 after the block. M1 is not touched; eva_ens saves and restores M2 / M3
+ * (and uses I1 with L1 = 0).
  * The per-block kernels go in .text.ev_hot (with eva.c's voice-call code, one run of lines), the rare ones (eva_rsat,
  * eva_rcrush, eva_clear, eva_inv) in .text.ev_rare after them.
  * Host builds (screen and golden harnesses) assemble it empty: eva.c keeps the C loops there.
@@ -25,10 +28,11 @@
  */
 #ifdef __bfin__
 
-/* ---- eva_ens: 13 packets per sample ---- */
-/* R4 = 256 - f (b | a), R5 = f (b | a), R6 cho, R7 ag; R3 y, R2 the write then the sample, R0 (a | b) and R1
- * (ra[-1] | rb[-1]) loaded a sample ahead; P4 reads pb a sample ahead, P5 stores it a sample behind (the first store
- * writes pb[-1] back unchanged), P3 k's pairs */
+/* ---- eva_ens: 24 packets per pair of samples (12 per sample; it was 13) ---- */
+/* R4 = 256 - f (b | a), R5 = f (b | a), R6 cho, R7 ag; R0 (a | b) and R1 (ra[-1] | rb[-1]) loaded a pair ahead, then
+ * temporaries; R2 = y0, then the pair's first output (stored in the pair); R3 = y1, then the second output, stored at
+ * the next pair's start (P5, a sample behind: the first store writes pb[-1] back unchanged); P4 reads pb ahead, P3
+ * k's pairs, I1 = &k[22] (wp) */
 	.section .text.ev_hot, "ax", @progbits
 	.align 4
 	.global _eva_ens
@@ -61,6 +65,12 @@ _eva_ens:
 	M3 = R0;
 	I2 -= M2;                                        /* &ra[-1], circular */
 	I3 -= M3;                                        /* &rb[-1] */
+	R0 = 0;
+	L1 = R0;
+	R0 = P5;
+	R1 = 88;
+	R0 = R0 + R1;
+	I1 = R0;                                         /* &k[22]: wp */
 	R4 = [P5 + 16];
 	R5 = [P5 + 20];
 	P3 = P5;
@@ -69,38 +79,50 @@ _eva_ens:
 	R7 = [P3++];
 	P5 = P4;
 	P5 += -4;
-	R2 = [P5];                                       /* pb[-1], stored back unchanged by the first lagging store */
-	R3 = [P4++];                                     /* y */
+	R3 = [P5];                                       /* pb[-1], stored back unchanged by the first lagging store */
+	R2 = [P4++];                                     /* y0 */
 	R1.L = W[I2++];                                  /* ra[-1] */
 	R1.H = W[I3++];                                  /* rb[-1] */
 	R0.L = W[I2];                                    /* a */
 	R0.H = W[I3];                                    /* b */
 	P1 = 8;
-	P2 = 8;
+	P2 = 4;
 	LSETUP (.Lens_ob, .Lens_oe) LC1 = P1;
 .Lens_ob:
 	LSETUP (.Lens_ib, .Lens_ie) LC0 = P2;
 .Lens_ib:
-	A1 = R0.H * R4.H, A0 = R0.L * R4.L (IS) || [P5++] = R2 || NOP;
-	R1 = (A1 += R1.H * R5.H), R0 = (A0 += R1.L * R5.L) (IS);
-	R2 = R3 << 16 (S);                               /* the write: clamp(y, -32768, 32767) in the high half */
-	R0 = R0 >>> 8 || W[I0++] = R2.H || NOP;          /* ta */
+	A1 = R0.H * R4.H, A0 = R0.L * R4.L (IS) || [P5++] = R3 || NOP;   /* the last pair's second output */
+	R1 = (A1 += R1.H * R5.H), R0 = (A0 += R1.L * R5.L) (IS) || R3 = [P4++] || NOP;   /* y1 */
+	R0 = R0 >>> 8;                                   /* ta */
 	R1 = R1 >>> 8;                                   /* tb */
-	R2 = R0 + R1 (NS);
-	R2 = R2 >>> 1 || R1.L = W[I2++] || NOP;
-	R2 = R2 - R3 (NS) || R1.H = W[I3++] || NOP;
-	R2 *= R6;
-	R2 = R2 >>> 15 || R0.L = W[I2] || NOP;
-	R2 = R2 + R3 (NS) || R0.H = W[I3] || NOP;
+	R0 = R0 + R1 (NS);
+	R1 = R2 + R3 (NS);
+	R1 = R1 << 15 (S);                               /* the write: clamp((y0 + y1) >> 1) in the high half */
+	R0 = R0 >>> 1 || W[I0++] = R1.H || NOP;          /* wet */
+	R1 = [I1];                                       /* wp */
+	R1 = R1 + R0 (NS) || [I1] = R0 || NOP;           /* wp = wet */
+	R1 = R1 >>> 1;                                   /* e0 */
+	R1 = R1 - R2 (NS);
+	R1 *= R6;
+	R1 = R1 >>> 15;
+	R2 = R1 + R2 (NS);
 	R2 *= R7;
+	R0 = R0 - R3 (NS) || R1.L = W[I2++] || NOP;      /* the next pair's ra[-1] */
+	R2 = R2 >>> 15 || R1.H = W[I3++] || NOP;         /* the first output; the next rb[-1] */
+	R0 *= R6;
+	R0 = R0 >>> 15;
+	R3 = R0 + R3 (NS) || [P5++] = R2 || NOP;
+	R3 *= R7;
+	R3 = R3 >>> 15 || R2 = [P4++] || R0.L = W[I2];   /* the second output; the next y0 and a */
 .Lens_ie:
-	R2 = R2 >>> 15 || R3 = [P4++] || NOP;
+	R0.H = W[I3];                                    /* the next b */
 	R6 = [P3++];
 .Lens_oe:
 	R7 = [P3++];
-	[P5] = R2;
+	[P5] = R3;
 	R0 = 0;
 	L0 = R0;
+	L1 = R0;
 	L2 = R0;
 	L3 = R0;
 	M3 = [SP++];
@@ -379,7 +401,7 @@ _eva_rcrush:
 	RTS;
 	.size _eva_rcrush, .-_eva_rcrush
 
-/* ---- the source below 5.5 kHz (eva.c's first loop): eva_saw, then eva_pul ----
+/* ---- the source below 11 kHz (eva.c's first loop): eva_saw, then eva_pul ----
  * BLEP \ph -> \s: eva.c's blep_saw(ph, dt, inv8) with dt / inv8 at [P5 + \dto] / [P5 + \io\()]; \t \x \k scratch. The
  * products are 32-bit multiplies (as the C's int32 products). */
 .macro BLEP ph, s, t, x, k, dto, io

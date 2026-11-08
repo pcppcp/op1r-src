@@ -3,7 +3,7 @@
  *   cc -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -DOP1_HOST -I<synth_sdk> \
  *      juni_chorus_test.c juni_chorus.c -lm -o juni_chorus_test
  *   ./juni_chorus_test check                      checks only (exit 1 on failure)
- *   ./juni_chorus_test render <dir>               WAVs (22.05 kHz stereo, the FX's own rate): dry, I, II, I+II
+ *   ./juni_chorus_test render <dir>               WAVs (44.1 kHz stereo, R246's FX rate): dry, I, II, I+II
  *   ./juni_chorus_test measure [dir]              depth figures as JSON (see measure() below); short WAVs into dir
  * Files per source (chord, pad): <src>_dry.wav, <src>_I.wav, _II.wav, _I+II.wav, and <src>_mono_I.wav ... through
  * the mono render at position 0. */
@@ -15,7 +15,7 @@
 
 extern const op1_fx_stereo_t FX_juni_chorus;
 volatile uint8_t op1_fx_page[3][4];
-#define FS 22050
+#define FS 44100                        /* R246 calls an FX with 64 samples at 44.1 kHz */
 static int fails;
 #define CHECK(c, ...) do { if (!(c)) { fails++; printf("FAIL: " __VA_ARGS__); printf("\n"); } } while (0)
 
@@ -89,11 +89,11 @@ static float fl[8 * FS], fr[8 * FS];
 static int16_t il[8 * FS], ir[8 * FS], ol[8 * FS], orr[8 * FS], lr[2 * 8 * FS];
 
 /* ---- measure: how much the chorus moves, per position and knob setting (host, source-only) ----
- * Two steady sources whose partials all sit on a 22.05 Hz grid (an exact 1000-sample period): a 441 Hz sine and a
+ * Two steady sources whose partials all sit on a 22.05 Hz grid (an exact 2000-sample period): a 441 Hz sine and a
  * JUNI-like saw chord (band-limited saws on grid harmonics 6, 7, 9, 12: 132.3, 154.35, 198.45, 264.6 Hz) and its lowest
  * note alone (saw132: partials 132 Hz apart, so its pitch figure is the clean one; the chord's partials sit one 22 Hz
  * bin apart in places, where the vibrato's sidebands leak into the neighbour and read high). A sliding
- * 1000-sample DFT (45 ms) follows each partial's complex amplitude c(t) every 50 samples, from 1 s to 7 s. Per
+ * 2000-sample DFT (45 ms) follows each partial's complex amplitude c(t) every 100 samples, from 1 s to 7 s. Per
  * channel, weighted by each partial's power (the chord's partials up to 1.5 kHz only: above it the vibrato's sidebands
  * reach the next partial one 22 Hz bin away):
  *   out cents   RMS of the output's instantaneous pitch deviation (the partial's phase slope), dry + wet together
@@ -103,14 +103,14 @@ static int16_t il[8 * FS], ir[8 * FS], ol[8 * FS], orr[8 * FS], lr[2 * 8 * FS];
  *               moves (pitch, comb sweep, beating); the dry and any static colour don't count
  *   flutter dB  RMS of the output partials' level in dB around their mean (the comb sweep as heard level change)
  * The 45 ms window smooths I+II's 9 Hz a little (about 0.75 x). */
-#define MW 1000
+#define MW 2000
 static double mtw_c[MW], mtw_s[MW];
 typedef struct { double out_c, wet_c, wet_db, mod_db, flut_db, lvl_db; } meas_t;
 
 static void measure_ch(const int16_t *dry, const int16_t *out, int a, int z, const int *bins, int nb, meas_t *m)
 {
     double sw = 0, so = 0, sc = 0, swc = 0, swe = 0, sd = 0, smod = 0, sfl = 0, sfw = 0, slv = 0;
-    enum { H = 50, L = MW / H };                                    /* 20 hops = one window */
+    enum { H = 100, L = MW / H };                                    /* 20 hops = one window */
     const int nf = (z - a) / H;
     static double cr[2][(8 * FS) / H + 2], ci[2][(8 * FS) / H + 2];
     for (int b = 0; b < nb; b++) {
@@ -147,8 +147,8 @@ static void measure_ch(const int16_t *dry, const int16_t *out, int a, int z, con
             sfl += pd * l * l; sfw += pd;
         }
         for (int s = 0; s < 2; s++) {
-            /* the phase slope over one window (1000 samples), unwrapped hop by hop: a neighbour partial's leakage
-             * turns a whole number of times in 1000 samples, so it drops out of the difference */
+            /* the phase slope over one window (2000 samples), unwrapped hop by hop: a neighbour partial's leakage
+             * turns a whole number of times in 2000 samples, so it drops out of the difference */
             static double ph[(8 * FS) / H + 2];
             ph[0] = 0;
             for (int f = 1; f < nf; f++) {

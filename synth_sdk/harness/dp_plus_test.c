@@ -55,7 +55,7 @@ int main(void)
     (dp_plus_prepare(&x, &c), dp_plus_note_on(&b, &s, &pad, &x, &c, 127, 22050)); p0 = b.pos;
     dp_plus_render(&b, &s, o2, &pad, &x, &c, inc, vel, data, fir, 22050);
     double first = (double)(b.pos - p0) / (DP_BLOCK * 1024);
-    uint32_t tg = dp_time_samples(60);
+    uint32_t tg = DP_VOICE_X * dp_time_samples(60);                  /* voice samples (88.2 kHz) */
     for (uint32_t k = 0; k < tg / DP_BLOCK + 2; k++) dp_plus_render(&b, &s, o2, &pad, &x, &c, inc, vel, data, fir, 22050);
     p0 = b.pos; dp_plus_render(&b, &s, o2, &pad, &x, &c, inc, vel, data, fir, 22050);
     double later = (double)(b.pos - p0) / (DP_BLOCK * 1024);
@@ -64,7 +64,7 @@ int main(void)
     /* 4. envelope: attack ramps up over t_att, linear decay ends the voice after t_dec */
     memset(&x, 0, sizeof x); x.env_on = 1; x.attack = 30; x.decay = 40;
     (dp_plus_prepare(&x, &c), dp_plus_note_on(&b, &s, &pad, &x, &c, 127, 22050));
-    uint32_t ta = dp_time_samples(30), td = dp_time_samples(40), n = 0, off_at = 0; int pk_att = 0, pk_full = 0;
+    uint32_t ta = DP_VOICE_X * dp_time_samples(30), td = DP_VOICE_X * dp_time_samples(40), n = 0, off_at = 0; int pk_att = 0, pk_full = 0;
     while (b.state != DP_OFF && n < 400000) {
         dp_plus_render(&b, &s, o2, &pad, &x, &c, inc, vel, data, fir, 22050);
         if (n == 0) pk_att = peak(o2);
@@ -80,8 +80,8 @@ int main(void)
     for (int k = 0; k < 20; k++) dp_plus_render(&b, &s, o2, &pad, &x, &c, inc, vel, data, fir, 22050);
     int held = peak(o2); dp_plus_note_off(&b, &s, &pad, &x, &c); n = 0;
     while (b.state != DP_OFF && n < 400000) { dp_plus_render(&b, &s, o2, &pad, &x, &c, inc, vel, data, fir, 22050); n += DP_BLOCK; }
-    printf("release: held %d, off %u samples after key-up (release %u)\n", held, n, dp_time_samples(50));
-    assert(held > 0 && n >= dp_time_samples(50) && n <= dp_time_samples(50) + DP_BLOCK);
+    printf("release: held %d, off %u samples after key-up (release %u)\n", held, n, DP_VOICE_X * dp_time_samples(50));
+    assert(held > 0 && n >= DP_VOICE_X * dp_time_samples(50) && n <= DP_VOICE_X * dp_time_samples(50) + DP_BLOCK);
     /* 6. retrig: 4 hits of 1/16 at 120 bpm (22050 samples / beat): restarts every 5512 samples, -2 dB each */
     setup(8192, 8192); memset(&x, 0, sizeof x); x.retrig = 4; x.retrig_div = 2;
     (dp_plus_prepare(&x, &c), dp_plus_note_on(&b, &s, &pad, &x, &c, 127, 22050));
@@ -101,7 +101,7 @@ int main(void)
     for (int type = 1; type <= 3; type++)
         for (int fi = 0; fi < 3; fi++) {
             setup(8192, 8192);
-            for (int i = 0; i < NS; i++) data[8 + i] = (int16_t)(12000 * sin(2 * M_PI * fq[fi] * i / 44100.0));
+            for (int i = 0; i < NS; i++) data[8 + i] = (int16_t)(12000 * sin(2 * M_PI * fq[fi] * i / 88200.0));   /* one buffer sample per 88.2 kHz output sample */
             for (int k = 0; k < DP_BLOCK; k++) inc[k] = 1 << 28;
             double lv[2];
             for (int pass = 0; pass < 2; pass++) {                  /* 0: filter off (drive 1 = reference), 1: on */
@@ -163,7 +163,7 @@ int main(void)
         dp_plus_render(&vv[2], &xs[2], o2, &pad, &px[3], &pc[3], inc, vel, data, fir, 22050);
         printf("choke: %d + %d voices fading, off after %d blocks (%d samples); untouched pad: state %d, peak %d\n",
                f1, f2, blocks, blocks * DP_BLOCK, vv[2].state, peak(o2));
-        assert(f1 == 1 && f2 == 1 && vv[0].state == DP_OFF && vv[1].state == DP_OFF && blocks * DP_BLOCK <= 128);
+        assert(f1 == 1 && f2 == 1 && vv[0].state == DP_OFF && vv[1].state == DP_OFF && blocks * DP_BLOCK <= 256);   /* ~2 ms at 88.2 kHz */
         assert(vv[2].state != DP_OFF && peak(o2) > 0);
         /* the stolen (fading) voice starts clean on its next note */
         dp_plus_note_on(&vv[0], &xs[0], &pad, &px[3], &pc[3], 127, 22050);

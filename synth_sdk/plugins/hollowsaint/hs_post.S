@@ -11,7 +11,7 @@
  *   transparent.
  * void hs_up(const int32_t *hb, int16_t *out, int32_t *up)
  *   section 5: the 2x half-band interpolation into out (128 samples, as 16-bit stores: nothing establishes that R246's
- *   out is 4-aligned); up = the last three 22.05 kHz samples (updated). Exact for any int32 in hb (32-bit products,
+ *   out is 4-aligned); up = the last three 44.1 kHz samples (updated). Exact for any int32 in hb (32-bit products,
  *   the int16 cast as a low-half store), so a step that rewrites hb between hs_dark and hs_up keeps it exact.
  *   5 packets per sample.
  *
@@ -111,9 +111,9 @@ _hs_dark:
 	R2 *= R5;
 	R2 = R2 >>> 14;
 	R3 = R3 + R2 (NS);
-	R2 = R3 << 8;                                    /* dc8 += (y * 256 - dc8) >> 8, y = dark */
+	R2 = R3 << 8;                                    /* dc8 += (y * 256 - dc8) >> 9, y = dark */
 	R2 = R2 - R4 (NS);
-	R2 = R2 >>> 8;
+	R2 = R2 >>> 9;
 	R4 = R4 + R2 (NS);
 	R2 = R4 >>> 8 || R1 = [P1 + 8];
 	R0 = R3 - R2 (NS) || R7 = [I0++];                /* y -= dc8 >> 8 */
@@ -139,7 +139,7 @@ _hs_dark:
 .Ldf_ib:
 	R2 = R7 << 8;
 	R2 = R2 - R4 (NS);
-	R2 = R2 >>> 8;
+	R2 = R2 >>> 9;
 	R4 = R4 + R2 (NS);
 	R2 = R4 >>> 8 || R1 = [P1 + 8];
 	R0 = R7 - R2 (NS);

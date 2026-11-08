@@ -7,6 +7,9 @@
   ev_bw      their bandwidths, Hz: wide, so the bands blend with the lowpass
   ev_level   their levels, Q15
   ev_recip_hz exact floor(2^24/hz) for the vowel frequency range
+  ev_lp2x    a one-pole coefficient k (Q15) made for 22.05 kHz -> the same pole at 44.1 kHz, 1 - sqrt(1 - k), for
+             k = i * 512 (eva.c lp2x interpolates): the pad's and the radio's lowpass curves keep their Hz (2026-11-03:
+             R246's voice call is 128 samples at 88.2 kHz, so EVA's 64 internal samples are 44.1 kHz, not 22.05)
 Copyright (C) 2026 Hundekraft. GPL-3.0-or-later with the OP-1 firmware permission (see LICENSE and NOTICE).
 """
 import math, os
@@ -39,4 +42,6 @@ out += ["/* vowels oo, ah, ee: two formants each */"]
 out += table("ev_hz", hz) + table("ev_bw", bw) + table("ev_level", lv)
 out += ["/* Reciprocal seed; vowel_ratio corrects its quotient to exact floor division. */", f"#define EV_VOWEL_HZ_MIN {min(hz)}", f"#define EV_VOWEL_HZ_MAX {max(hz)}", f"#define EV_VOWEL_BW_MAX {max(bw)}"]
 out += table("ev_recip_hz", [(1 << 24) // f for f in range(min(hz), max(hz) + 1)], "uint16_t")
+out += ["/* a 22.05 kHz one-pole coefficient -> 44.1 kHz: 1 - sqrt(1 - i / 64), Q15 (eva.c lp2x) */"]
+out += table("ev_lp2x", [min(32767, round(32768 * (1 - math.sqrt(1 - i / 64)))) for i in range(65)], "uint16_t")
 open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "eva_tables.h"), "w").write("\n".join(out))

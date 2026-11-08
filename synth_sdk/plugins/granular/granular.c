@@ -21,7 +21,8 @@
 
 #define MAX_GRAINS   4
 #define FRAC         10                        /* position fraction bits */
-#define INC_C4       25480370u                 /* phase inc of 261.63 Hz @44.1 kHz (2^32 = 1 cyc/sample) */
+#define INC_C4       25480370u                 /* phase inc of 261.63 Hz @44.1 kHz: R246's inc counts 88.2 kHz steps, so
+                                                * rate = 0.5 at C4 reads the 44.1 kHz recording at its own speed */
 
 typedef struct {
     uint32_t pos;       /* 22.10 sample position */
@@ -219,10 +220,10 @@ static void gr_render_body(void *self, int16_t *out, const int16_t *params)
     uint32_t rate = (uint32_t)OP1_PITCH_INC[0] / (INC_C4 >> FRAC);
     if (rate < 16) rate = 16;
 
-    int32_t size = 441 + (int32_t)(((uint32_t)params[1] * 16000u) >> 15);   /* 10 ms .. 373 ms */
+    int32_t size = 882 + (int32_t)(((uint32_t)params[1] * 32000u) >> 15);   /* 10 ms .. 373 ms in 88.2 kHz output samples */
     /* density: spawn interval = size / overlap, overlap 0.5 .. 4 */
     int32_t ovl8 = 4 + (params[3] >> 10);                                  /* overlap * 8: 4..35 */
-    int32_t interval = 0;                             /* (size * 8) / ovl8, at least 32: worked out at the block's first spawn */
+    int32_t interval = 0;                             /* (size * 8) / ovl8, at least 64 (0.73 ms): worked out at the block's first spawn */
     uint32_t winc = 0;                                /* 0x80000000 / size, the same */
     /* gain compensation for overlapping grains: min(32767, (32767 * 8) / ovl8 + 6000), from a table */
     int32_t gain = ovl8 <= 8 ? 32767 : gr_ovl_gain[ovl8 - 9];
@@ -242,7 +243,7 @@ static void gr_render_body(void *self, int16_t *out, const int16_t *params)
         if (at > n) gr_piece(v, data, len, n, at);
         if (!interval) {
             interval = (size * 8) / ovl8;
-            if (interval < 32) interval = 32;
+            if (interval < 64) interval = 64;
             winc = 0x80000000u / (uint32_t)size;
         }
         spawn(v, params, rate, winc);
@@ -343,7 +344,7 @@ static void gr_screen_update(void *scr, int dt)
     const uint8_t *sb = op1_sample_buffer(slot);
     int32_t len = sb ? recorded_length(sb) : 0;
     int32_t pos = (int32_t)(((uint64_t)(uint16_t)k[0] * (uint32_t)len) >> 15);
-    int32_t size = 441 + (int32_t)(((uint32_t)k[1] * 16000u) >> 15);
+    int32_t size = (882 + (int32_t)(((uint32_t)k[1] * 32000u) >> 15)) >> 1;   /* the grain as source samples at C4 (44.1 kHz) */
     int32_t spray = (int32_t)(((uint32_t)k[2] * 66150u) >> 15);
     int32_t ovl8 = 4 + (k[3] >> 10);                                   /* as gr_render */
 

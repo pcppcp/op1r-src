@@ -24,13 +24,24 @@ T2 is the only envelope, as on the originals: it sets the amp after render, and 
   fraction of that, capped at 92 % and tapered to 55 % below MIDI 48, so low cutoffs don't boom. States run at half
   scale, so each pole costs one 16-bit fractional multiply. Rounding keeps the noise floor equal to the 32-bit
   version (checked).
-- The chorus runs inside each voice, at 11.025 kHz: a 64-sample history (5.8 ms), two linearly interpolated taps
-  with opposite triangle LFOs, then interpolation back up to 22.05 kHz. Each voice's LFO starts at its own phase,
+- The chorus runs inside each voice, at half the internal rate (22.05 kHz): a 120-sample history (5.4 ms), two
+  linearly interpolated taps with opposite triangle LFOs, then interpolation back up to 44.1 kHz. Each voice's LFO starts at its own phase,
   so a chord drifts like an ensemble. A one-pole high-pass (~250 Hz) on the wet keeps the bass dry, so the comb
   doesn't cancel low fundamentals, and the level holds within 0.8 dB from off to I+II (no dry normalisation). The rates (0.5 / 0.83 / 8 Hz) and depths are approximations tuned by ear,
   not measured from an original. The real stereo chorus would be a separate master FX.
-- Synthesis runs at 22.05 kHz with 8-sample control steps, as Oxbow does, and four-point interpolation makes the
-  128 native samples.
+- Synthesis runs 64 internal samples a call at 44.1 kHz with 8-sample control steps, as Oxbow does, and four-point
+  interpolation makes the 128 voice samples (88.2 kHz).
+
+## Rate (2026-11-03, branch `rate-juni`)
+
+R246's voice call is 128 samples at 88.2 kHz (689 calls/s), so JUNI's internal rate is 44.1 kHz, not the 22.05 kHz it
+was designed for. On the unit the ladder and HPF sat an octave high, the PWM and chorus LFOs ran twice as fast
+(chorus 1.0 / 1.66 / 16 Hz, PWM RATE 1.8 to 14 Hz) and key tracking read the note 12 semitones low (the cutoff floor
+was right in Hz: the two errors cancelled). `FS_INC` and `gen_tables.py` now use 44,100 (`NOTE_OFF_Q8` 88.2 kHz
+steps), the HPF and the wet high-pass coefficients are re-derived, and the screen's LFOs step 735 samples a frame, so
+they follow the audio. The chorus delays are 3.5 ms +- 1.8 ms at 44.1 kHz again (they had been 1.75 +- 0.9): the
+history is 120 half-rate samples (dline32 1,152 -> 1,824 bytes; the owner approved it), +16 packets per voice call
+(cost_check default 13,775 -> 13,791). Check: `harness/rate_juni_test.c`.
 
 ## Screen
 

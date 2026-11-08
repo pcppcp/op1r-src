@@ -34,7 +34,7 @@ void sp_extra_default(sp_extra *x)
     x->sustain = 127; x->release = 30; x->vel_amt = 64; x->cutoff = 127;
 }
 
-/* 0..127 -> samples: 0, then 6 ms * 2^(t / 12) (127: ~11 s) */
+/* 0..127 -> 44.1 kHz samples: 0, then 6 ms * 2^(t / 12) (127: ~11 s); the voice counts SP_VOICE_X per sample */
 uint32_t sp_time_samples(uint8_t t)
 {
     static const uint16_t pow12[12] = { 256, 271, 287, 304, 323, 342, 362, 384, 406, 431, 456, 483 };
@@ -75,25 +75,31 @@ static inline int32_t mul14(int32_t s, int32_t c) { return (s >> 14) * c + (((s 
 #endif
 static inline int32_t mul12(int32_t s, int32_t c) { return (s >> 12) * c + (((s & 0xFFF) * c) >> 12); }
 
+/* the exponential curve's decrement over SP_ESUB (16) voice samples: per sample 1 - 6.9 / (T + 1) (~-60 dB after T),
+ * to the 16th power in Q30, as 1 - that in Q20 (within 1 % up to ~11 s); prepare only */
+static uint32_t sp_exp16(uint32_t t)
+{
+    if (!t) return 0;
+    int64_t k = ((int64_t)1 << 30) - 7408817357LL / (int64_t)(t + 1);   /* 6.9 * 2^30 */
+    if (k < 0) k = 0;
+    for (int i = 0; i < 4; i++) k = (k * k) >> 30;
+    return (uint32_t)((((int64_t)1 << 30) - k) >> 10);
+}
+
 void sp_plus_prepare(const sp_extra *x, sp_pre *c)
 {
     *(volatile uint8_t *)&c->render_active = 0;            /* the audio thread may read c meanwhile */
     sp_p2_init();
-    c->t_att = sp_time_samples(x->attack); c->t_hold = sp_time_samples(x->hold);
-    c->t_dec = sp_time_samples(x->decay); c->t_rel = sp_time_samples(x->release);
+    c->t_att = SP_VOICE_X * sp_time_samples(x->attack); c->t_hold = SP_VOICE_X * sp_time_samples(x->hold);
+    c->t_dec = SP_VOICE_X * sp_time_samples(x->decay); c->t_rel = SP_VOICE_X * sp_time_samples(x->release);
     c->sus = (int32_t)(((int64_t)x->sustain * Q30) / 127);
     c->a_step = c->t_att ? Q30 / (int32_t)c->t_att : Q30;
     c->d_step = c->t_dec ? (Q30 - c->sus) / (int32_t)c->t_dec : Q30;
     c->r_step = c->t_rel ? Q30 / (int32_t)c->t_rel : Q30;
-    c->kd = c->t_dec ? 32768 - (int32_t)(226100 / (c->t_dec + 1)) : 0;
-    c->kr = c->t_rel ? 32768 - (int32_t)(226100 / (c->t_rel + 1)) : 0;
-    c->kd = c->kd > 32767 ? 32767 : c->kd < 0 ? 0 : c->kd;
-    c->kr = c->kr > 32767 ? 32767 : c->kr < 0 ? 0 : c->kr;
-    c->kd16 = c->kd; c->kr16 = c->kr;
-    for (int i = 0; i < 4; i++) { c->kd16 = (c->kd16 * c->kd16) >> 15; c->kr16 = (c->kr16 * c->kr16) >> 15; }
-    uint32_t tp = sp_time_samples(x->pitch_time);
-    c->p_start = (int32_t)x->pitch_env * 524288;
-    c->p_step = tp ? c->p_start / (int32_t)tp : c->p_start;
+    c->kd16 = sp_exp16(c->t_dec); c->kr16 = sp_exp16(c->t_rel);
+    uint32_t tp = SP_VOICE_X * sp_time_samples(x->pitch_time);
+    c->p_start = (int32_t)x->pitch_env * 8388608;                       /* semitones -> 1/96 octave << 20 */
+    c->p_step = tp ? c->p_start / (int32_t)tp : c->p_start / SP_BLOCK;   /* 0: gone after one block (p_step * SP_BLOCK fits) */
     int32_t k = 131072 - (int32_t)x->resonance * 127100 / 127;          /* 1 / Q, Q16: 2 .. 0.06 */
     c->f_k = k >> 2 > 32767 ? 32767 : k >> 2;
     for (int i = 0; i < 128; i++) {                                    /* ZDF SVF coefficients per cutoff step */
@@ -162,8 +168,9 @@ void sp_plus_velocity(sp_voice *v, sp_xvoice *s, const int16_t *k, const sp_extr
     }
 }
 
-/* the envelope advances in steps of 16 samples (stage logic 8 times per block), the output is interpolated linearly
- * between them: stage times are rounded to 16 samples (0.36 ms), the exponential curves become 16-sample chords */
+/* the envelope advances in steps of 16 voice samples (stage logic 8 times per block), the output is interpolated
+ * linearly between them: stage times are rounded to 16 samples (0.18 ms), the exponential curves become 16-sample
+ * chords */
 #define SP_ESUB 16
 static void sp_env_step(sp_xvoice *s, const sp_extra *x, const sp_pre *c)
 {
@@ -172,14 +179,14 @@ static void sp_env_step(sp_xvoice *s, const sp_extra *x, const sp_pre *c)
     case 1: if (s->stage_n >= c->t_hold) { s->stage = 2; s->stage_n = 0; } break;
     case 2:
         if (!c->t_dec) s->env = c->sus;
-        else if (x->curve_exp) s->env = c->sus + ((s->env - c->sus) >> 15) * c->kd16;
+        else if (x->curve_exp) s->env -= (int32_t)(((uint32_t)(s->env - c->sus) >> 16) * c->kd16 >> 4);
         else s->env -= c->d_step * SP_ESUB;
         if (s->env <= c->sus + (x->curve_exp ? (Q30 >> 10) : 0)) { s->env = c->sus; s->stage = 3; }
         break;
     case 3: if (!c->sus) s->stage = 5; break;
     case 4:
         if (!c->t_rel) s->env = 0;
-        else if (x->curve_exp) s->env = (s->env >> 15) * c->kr16; else s->env -= c->r_step * SP_ESUB;
+        else if (x->curve_exp) s->env -= (int32_t)(((uint32_t)s->env >> 16) * c->kr16 >> 4); else s->env -= c->r_step * SP_ESUB;
         if (s->env <= (x->curve_exp ? (Q30 >> 10) : 0)) { s->env = 0; s->stage = 5; }
         break;
     case 6: s->env -= s->fade_step * SP_ESUB; if (s->env <= 0) { s->env = 0; s->stage = 5; } break;
@@ -191,7 +198,7 @@ int sp_plus_env(sp_xvoice *s, const sp_extra *x, const sp_pre *c, int32_t *state
 {
     if (*state == 7 || (fresh && *state == 1)) { s->stage = 0; s->stage_n = 0; s->env = 0; *state = 1; }
     else if ((*state == 4 || *state == 5) && s->stage < 4) { s->stage = 4; s->stage_n = 0; }   /* note-off (seen: 5) */
-    else if ((*state == 6 || *state == 8) && s->stage != 6) { s->stage = 6; s->fade_step = (s->env >> 7) + 1; }
+    else if ((*state == 6 || *state == 8) && s->stage != 6) { s->stage = 6; s->fade_step = (s->env >> 8) + 1; }   /* 256 voice samples, 2.9 ms */
     else if (*state == 0) { for (int n = 0; n < SP_BLOCK; n++) env[n] = 0; return 1; }
     if (s->stage == 0 && !c->t_att) { s->env = Q30; s->stage = c->t_hold ? 1 : 2; }
     int32_t e0 = ((s->env >> 15) * level) >> 15;
@@ -230,7 +237,7 @@ static inline int32_t sp_post(sp_xvoice *s, const sp_extra *x, const sp_pre *c, 
 /* per block: pitch multiplier (envelope + sync, Q12), then the envelope glides on */
 static int32_t sp_block_mult(sp_xvoice *s, const sp_pre *c)
 {
-    int32_t pu = s->pitch_u >> 8;
+    int32_t pu = s->pitch_u >> 12;
     int32_t mult = mul12(pu ? sp_pitch_q12(pu) : 4096, c->sync_q12);
     if (mult > 32768) mult = 32768;                                    /* 8x: inc * mult stays in 32 bits */
     if (s->pitch_u) {
