@@ -40,6 +40,7 @@ SLOTS = {'synth_render': (VT_ITER, 2, 0x019B99D4), 'synth_note_on': (VT_ITER, 3,
          'dp_fw_render': (VT_DRUM, 2, 0x019789EC), 'dp_fw_note_on': (VT_DRUM, 3, 0x01978926),
          'dp_fw_note_off': (VT_DRUM, 5, 0x01978898),
          'dp_type_job': (0x0190F34C, 2, 0x0193F86C),                        # drum type browser job (docs/31)
+         'fg_pb_draw': (0x01911224, 3, 0x01A16C00),                         # PresetBrowser update: FX group label (docs/73)
          'sp_fw_render': (VT_SAMPLER, 2, 0x01A51A7C), 'sp_fw_note_on': (VT_SAMPLER, 3, 0x01A518F4),
          'sp_fw_note_off': (VT_SAMPLER, 5, 0x01A51964),
          'sp_type_job': (0x0190F3FC, 2, 0x0193FFAC),                        # synth type browser job (docs/46)
@@ -61,6 +62,9 @@ HOOKS = {0x019B975C: ('hook_namecmp', bytes.fromhex('18300b32')),      # instr_t
          0x01A3BD58: ('hook_screenctor', bytes.fromhex('fbe3d0f2')),   # screen ctor list
          0x019F02EE: ('hook_plugboot', bytes.fromhex('fbe3cd65')),     # boot: CALL Clips::load -> + plugin loader (docs/37)
          0x019F054A: ('hook_masterload', bytes.fromhex('ffe3393a')),   # boot: CALL MasterController::load -> + name lookup
+         0x01A16936: ('hook_pbxf1', bytes.fromhex('fee311a2')),        # PresetBrowser cursor: CALL node_set_matrix -> FX list layout (docs/73)
+         0x01A16D7C: ('hook_pbxf2', bytes.fromhex('fee3ee9f')),        # PresetBrowser type thumb: CALL node_set_matrix
+         0x01A16048: ('hook_pbname', bytes.fromhex('02e3325d')),       # PresetBrowser type row: CALL text_set -> full FX name
          0x019C2E5E: ('hook_apsynth1', bytes.fromhex('01e34df1')),     # CALL apply_synth (key-handler job) -> name lookup
          0x01A01866: ('hook_apsynth2', bytes.fromhex('ffe349fc')),     # CALL apply_synth (boot patch load)
          0x01A50F1C: ('hook_apsynth3', bytes.fromhex('fde3ee80')),     # CALL apply_synth (synth_controller::load_patch)
@@ -271,7 +275,7 @@ def gen_table(engs, fxs):
 def build(engs, fxs):
     os.makedirs(os.path.join(HERE, 'build'), exist_ok=True)
     gen_table(engs, fxs)
-    srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'seq/tombola.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/usbtrack.c', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'plugload/op1p_load.c', 'screens/settings.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/mixdrop.c', 'crash.c', 'patchjob.c', 'l1pool.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c', 'input/in_host.c'] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
+    srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'seq/tombola.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/usbtrack.c', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'plugload/op1p_load.c', 'screens/settings.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/mixdrop.c', 'crash.c', 'patchjob.c', 'l1pool.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxgroups.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c', 'input/in_host.c'] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
     objs = []
     cmds = []
     flags = {}                                       # plugin.json "source_cflags": e.g. -O3 after the default -O2

@@ -1229,6 +1229,7 @@ void knob_event_hook(int knob, int16_t *delta)
     { extern void cc_fb_knob(int, int); cc_fb_knob(knob, *delta); }   /* CC feedback (midi/ccmap.c) */
     { extern void in_screen_sync(void); extern int in_knob(int, int); in_screen_sync(); if (in_knob(knob, *delta)) return; }   /* input engine tuner: gain */
     if (knob >= 0 && knob < 4 && se_is_open()) { se_knob(knob, *delta); return; }   /* sample editor */
+    { extern int fg_knob(int, int); if (fg_knob(knob, *delta)) return; }   /* FX list: white = group (screens/fxgroups.c) */
     if (dpu_knob(knob, *delta)) return;                          /* drum+ pages (pitch / volume: stock) */
     if (spc_knob(knob, *delta)) return;                          /* sampler+ pages */
     if (knob == 0 && sm_on == 1 && CUR_MODE_ID == 0x0C) { extern void sm_turn(int); sm_turn(*delta); return; }   /* monitor: metrics */

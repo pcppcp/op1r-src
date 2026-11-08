@@ -1,0 +1,14 @@
+{
+  "name": "tb3po",
+  "author": "pcppcp (after TB-3PO by Logarhythm / djphazer, MIT)",
+  "kind": "seq",
+  "symbol": "SEQ_tb3po",
+  "sources": [
+    "tb_fw.c",
+    "tb_core.c"
+  ],
+  "screen": {
+    "svg": "tb3poseq.svg",
+    "symbol": "SCREEN_tb3po"
+  }
+}

@@ -44,6 +44,12 @@ _fx_screen_case5:
 
 	.section .hook_masterload,"ax"
 	call _plug_master_load;
+	.section .hook_pbxf1,"ax"
+	call _fg_xform;
+	.section .hook_pbxf2,"ax"
+	call _fg_xform;
+	.section .hook_pbname,"ax"
+	call _fg_rowtext;
 	.section .hook_apsynth1,"ax"
 	call _plug_apply_synth;
 	.section .hook_apsynth2,"ax"

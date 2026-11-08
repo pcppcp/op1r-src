@@ -17,6 +17,9 @@ SECTIONS {
   .hook_screenctor 0x01A3BD58 : { KEEP(*(.hook_screenctor)) }
   .hook_plugboot 0x019F02EE : { KEEP(*(.hook_plugboot)) }
   .hook_masterload 0x019F054A : { KEEP(*(.hook_masterload)) }
+  .hook_pbxf1 0x01A16936 : { KEEP(*(.hook_pbxf1)) }
+  .hook_pbxf2 0x01A16D7C : { KEEP(*(.hook_pbxf2)) }
+  .hook_pbname 0x01A16048 : { KEEP(*(.hook_pbname)) }
   .hook_apsynth1 0x019C2E5E : { KEEP(*(.hook_apsynth1)) }
   .hook_apsynth2 0x01A01866 : { KEEP(*(.hook_apsynth2)) }
   .hook_apsynth3 0x01A50F1C : { KEEP(*(.hook_apsynth3)) }
