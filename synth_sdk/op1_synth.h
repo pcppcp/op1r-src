@@ -1,4 +1,6 @@
-/* op1r core header (private): the plugin API (op1_plugin.h) plus firmware helpers used only by core code. */
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * op1r core header (private): the plugin API (op1_plugin.h) plus firmware helpers used only by core code.
+ * GPL-3.0-or-later with the OP-1 firmware permission (see LICENSE and NOTICE). */
 #ifndef OP1_SYNTH_H
 #define OP1_SYNTH_H
 #include "op1_plugin.h"
@@ -50,10 +52,9 @@ static inline uint32_t op1_cycles(void) { return 0; }
 
 /* ---- the pitch a sequencer player's key_down key sounds ----
  * R246 calls a player's key_down (vtable +0x14) from the keyboard (key = the key; the note then gets the keyboard
- * octave) and from VoiceCtl's USB MIDI note-on (0x01A858D8..0x01A85C16, the call at 0x01A859DE): key = MIDI note -
- * 0x35, and an unconsumed key plays the MIDI note as it is, so no synth octave. Drum pads get the drum octave either
- * way. Take OP1_SEQ_CALLER() in key_down itself (not in a function it calls) and pass the mode's octave.
- * Copyright (C) 2026 Hundekraft. */
+ * octave) and from VoiceCtl's USB MIDI note-on (0x01A859E4, its key_down call at 0x01A85BF0; the range below also
+ * covers the note-off 0x01A858D8): key = MIDI note - 0x35, and an unconsumed key plays the MIDI note as it is, so
+ * no synth octave. Drum pads get the drum octave either way. Take OP1_SEQ_CALLER() in key_down itself (not in a function it calls) and pass the mode's octave. */
 #define OP1_SEQ_MIDI_CALLER(ret) ((uint32_t)(ret) >= 0x01A858D8u && (uint32_t)(ret) < 0x01A85C16u)
 #ifdef OP1_HOST
 #define OP1_SEQ_CALLER() 0u                                    /* host tests: the keyboard */

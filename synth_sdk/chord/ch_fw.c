@@ -75,12 +75,12 @@ static void ch_out(int note, int vel, int on, void *ctx)
 
 static void ch_cancel(ch_bank *b, int key) { b->npend[key] = b->ipend[key] = 0; }
 
-int ch_key_down(int m, int key)
+int ch_key_down_from(int m, int key, uint32_t caller)        /* caller: OP1_SEQ_CALLER() of the player's key_down */
 {
     ch_bank *b = &chb[m & 1];
     ch_init_bank(b);
     if (key < 0 || key >= CH_KEYS) return 0;
-    int midi = key + 0x35 + ch_oct(m) * 12;
+    int midi = op1_seq_key_note(m, key, ch_oct(m), caller);
     if (midi < 0 || midi > 127) return 1;
     if (b->raw[key]) { CH_KEY_PLAYED(b->raw[key] - 1, 0, 0); b->raw[key] = 0; }
     CH_KEY_PLAYED(midi, CH_VEL, 1);
@@ -112,6 +112,7 @@ int ch_key_down(int m, int key)
     b->due[key] = b->tick + (uint32_t)st;
     return 1;
 }
+int ch_key_down(int m, int key) { return ch_key_down_from(m, key, 0); }   /* host tests: the keyboard */
 
 void ch_key_up(int m, int key)
 {
@@ -316,7 +317,7 @@ void ch_host_draw(void *r, int m) { ch_screen_draw(r, m); }
 /* ======================= firmware player (type 3 + ch_active[mode], as peal) ======================= */
 #define CH_MODE() (*(volatile int *)0x01DE4C40 == 1)
 static int ch_nop(void *self) { (void)self; return 0; }
-static int ch_pkey_down(void *self, int key) { (void)self; return ch_key_down(CH_MODE(), key); }   /* consumed */
+static int ch_pkey_down(void *self, int key) { (void)self; return ch_key_down_from(CH_MODE(), key, OP1_SEQ_CALLER()); }   /* consumed */
 static void ch_pkey_up(void *self, int key) { (void)self; ch_key_up(0, key); ch_key_up(1, key); }   /* (mode switch while held) */
 static void ch_reset(void *self) { (void)self; ch_all_notes_off(CH_MODE()); }
 static void ch_ptick(void *self, int counter) { (void)self; (void)counter; ch_tick(CH_MODE()); }

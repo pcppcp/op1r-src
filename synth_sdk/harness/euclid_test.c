@@ -51,8 +51,8 @@ int main(int argc, char **argv)
 
     /* key_down's pitch (op1_synth.h op1_seq_key_note): the keyboard adds the octave, R246's USB MIDI note-on
      * (0x01A858D8..0x01A85C16) not in synth mode, drums always */
-    CHECK(op1_seq_key_note(0, 7, 1, 0x019AC100) == 0x35 + 7 + 12 && op1_seq_key_note(0, 7, 1, 0x01A859DE) == 0x35 + 7, "key note: synth");
-    CHECK(op1_seq_key_note(1, 7, 1, 0x01A859DE) == 0x35 + 7 + 12 && op1_seq_key_note(0, 7, -1, 0) == 0x35 + 7 - 12, "key note: drums, octave -1");
+    CHECK(op1_seq_key_note(0, 7, 1, 0x019AC100) == 0x35 + 7 + 12 && op1_seq_key_note(0, 7, 1, 0x01A85BF2) == 0x35 + 7, "key note: synth");
+    CHECK(op1_seq_key_note(1, 7, 1, 0x01A85BF2) == 0x35 + 7 + 12 && op1_seq_key_note(0, 7, -1, 0) == 0x35 + 7 - 12, "key note: drums, octave -1");
     CHECK(op1_seq_key_note(0, 0, 2, 0x01A85C16) == 0x35 + 24 && op1_seq_key_note(0, 0, 2, 0x01A858D7) == 0x35 + 24, "key note: range ends");
 
     /* patterns: pulse count, even spread, E(3,8) = x..x..x. */
