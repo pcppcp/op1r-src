@@ -795,6 +795,7 @@ static void dt_fw_fx_restore(int pos, int knob)
 static int dt_nop(void *self) { (void)self; return 0; }
 static int dt_key_down(void *self, int key)
 {
+    uint32_t caller = OP1_SEQ_CALLER();                                     /* keyboard or USB MIDI */
     (void)self;
     if (key < 0 || key > 23) return 0;
     if (*(volatile uint8_t *)0x01DD7F78) {                              /* Shift + key (any screen) */
@@ -804,7 +805,7 @@ static int dt_key_down(void *self, int key)
         if (h) return 1;
     }
     if (*(volatile int *)0x018B65C8 == 0x2D) {                          /* dots screen shown: record */
-        int note = key + 0x35 + (DT_MODE() ? DT_DRUM_OCT() : DT_SYNTH_OCT()) * 12;
+        int note = op1_seq_key_note(DT_MODE(), key, DT_MODE() ? DT_DRUM_OCT() : DT_SYNTH_OCT(), caller);   /* as it sounds */
         if (dt_live_down(DT_MODE(), note, key)) return 1;               /* LIVE: consumed, sounded by us */
         dt_key(DT_MODE(), note, key);
     }
