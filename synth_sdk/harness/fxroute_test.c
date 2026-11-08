@@ -98,7 +98,9 @@ int main(int argc, char **argv)
     fxroute_turn(0, 1024); fxroute_turn(0, 1024); fxroute_flush(); assert(fr_src == 2 && op1r_setting_get("mfxsrc", -1) == 4 && !fr_aux_live);
     frame("blue: aux", render);
     for (int i = 0; i < 64; i++) { tr_out[0][i] = 1000; tr_out[1][i] = 2000; tr_out[2][i] = 0; tr_out[3][i] = 0; l[i] = r[i] = 0; }
-    fr_route(fx_gain2, 0, l, r, 0); assert(l[0] == 0);                             /* no send up: FX on the mix */
+    for (int i = 0; i < 64; i++) l[i] = r[i] = 100;                               /* the mix: tape + live */
+    fr_route(fx_gain2, 0, l, r, 0); assert(l[0] == 100 && r[0] == 100);            /* every send at 0: nothing sent, the mix stays dry */
+    for (int i = 0; i < 64; i++) l[i] = r[i] = 0;
     for (int i = 0; i < 40; i++) fr_send_turn(0, 1024);                            /* track 1 send 40 */
     assert(fr_send[0] == 40 && fr_aux_live);
     fr_send_turn(1, 1024 * 200); assert(fr_send[1] == 100);                        /* clamped */
