@@ -9,6 +9,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 int host_shift; int16_t host_sine[8192]; int32_t host_pitch_inc[128]; uint8_t host_voice_mem[6 * 0x24]; int16_t host_voice_vel[6]; int16_t host_voice_env[128]; int16_t host_accel[3];
 int16_t host_knobs[8][8]; int host_slot; const uint8_t *host_sample_buffer[8];
 int16_t host_fx_knobs[3][8]; int16_t host_fx_meter[3]; void *host_fx_scratch[3];
@@ -107,15 +108,23 @@ int main(void)
         assert(f > fc / 1.6 && f < fc * 1.6 && m1[hb] > 2 * m0[hb]);
     }
 
-    /* a voice that another engine used before (its state is garbage, as on the OP-1): no run-away, a normal level */
+    /* a voice that another engine used before (its state is garbage, as on the OP-1): no run-away, a normal level,
+     * and from the first sample the level of a clean start (garbage states used to rail the ladder for 30 .. 60 ms),
+     * also when the garbage happens to carry blot's tag */
     {
         int16_t kd[8] = { 9000, 22000, 18000, 9000, 0x5301, 0, 0, 0 };
-        for (int t = 0; t < 8; t++) {
+        memset(host_voice_mem, 0, sizeof host_voice_mem);
+        play(kd, 261.63, 127, SR / 4, 1);
+        double e0 = 0; for (int i = 0; i < SR / 20; i++) e0 += (double)buf[i] * buf[i];
+        for (int t = 0; t < 16; t++) {
             uint32_t r = 12345u + t;
             for (int i = 4; i < 0x24; i++) { r = r * 1664525u + 1013904223u; host_voice_mem[i] = (uint8_t)(r >> 24); }
+            if (t & 1) { host_voice_mem[34] = AC_TAG & 255; host_voice_mem[35] = AC_TAG >> 8; }
             play(kd, 261.63, 127, SR / 4, 1);
             int pg = peak(SR / 8, SR / 4);
             assert(pg < 24000);
+            double e = 0; for (int i = 0; i < SR / 20; i++) e += (double)buf[i] * buf[i];
+            assert(e < 1.6 * e0 && e > 0.6 * e0);                     /* first 50 ms within ~2 dB of a clean start */
         }
         printf("garbage voice state: ok\n");
     }

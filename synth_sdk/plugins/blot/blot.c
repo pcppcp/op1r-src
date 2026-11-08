@@ -25,6 +25,7 @@ typedef struct {
     int32_t  env;               /* filter envelope, Q24 */
     int32_t  hp;                /* feedback high-pass state, Q20 */
     uint8_t  gate, acc;         /* key held (screen), accented note */
+    uint16_t tag;               /* AC_TAG once blot has rendered this voice object (its states are blot's) */
 } ac_voice_t;
 typedef char ac_size_check[sizeof(ac_voice_t) <= OP1_VOICE_SIZE ? 1 : -1];
 
@@ -32,7 +33,14 @@ typedef char ac_size_check[sizeof(ac_voice_t) <= OP1_VOICE_SIZE ? 1 : -1];
 #define AC_ACCENT_TAU(t) (30 + (((t) * 5) >> 4))   /* ms: an accented note's decay follows the knob's: 42 .. 230 ms (about 55 ms at the default) */
 #define AC_HP_C 1371                /* feedback high-pass, Q16: c / (1 + c), c = 2 pi 150 Hz / 44100 */
 #define AC_R_MAX 32440              /* resonance cap, Q15 (0.99) */
-#define AC_STATE_MAX (1 << 27)      /* clamp for a state left by another engine */
+#define AC_STATE_MAX (1 << 24)      /* bound for the ladder / high-pass states: 16x full scale (blot itself stays below
+                                     * about 10x, all knobs up; was 128x) */
+/* A voice object another engine used last still holds that engine's bytes where blot keeps its ladder and high-pass
+ * states. Clamped to 128x full scale they railed the ladder for 30 .. 60 ms: the first note after switching to blot
+ * was a click, then a stuck DC level (silence after R246's voice chain), then the note. So the render starts a voice
+ * object from rest (ladder and high-pass 0, as in a voice blot has never used) when it lacks blot's tag or holds a
+ * state beyond AC_STATE_MAX, and tags it; blot's own states carry on from note to note (legato) as before. */
+#define AC_TAG 0xB107
 
 volatile int16_t ac_level[OP1_VOICES];  /* filter envelope per voice, Q15 (screen) */
 
@@ -174,6 +182,12 @@ static void ac_render(void *self, int16_t *out, const int16_t *params)
     b->wave = params[5] > 0 ? params[5] : 0;                            /* saw .. square, Q15 */
     int32_t drive = 4096 + ((params[7] > 0 ? params[7] : 0) >> 2);      /* 1x .. 3x, Q12 */
     b->gain = 19661 + ((acc * 13106) >> 15);                            /* 0.6, accent up to 1.0 */
+    uint32_t big = 0;                                                   /* a state blot never reaches: not blot's */
+    for (int i = 0; i < 4; i++) big |= (uint32_t)v->y[i] + (uint32_t)AC_STATE_MAX > 2u * AC_STATE_MAX;
+    big |= (uint32_t)v->hp + (uint32_t)AC_STATE_MAX > 2u * AC_STATE_MAX;
+    if (v->tag != AC_TAG || big) {                                      /* another engine's bytes: start at rest */
+        v->y[0] = v->y[1] = v->y[2] = v->y[3] = 0; v->hp = 0; v->tag = AC_TAG;
+    }
     b->hp = clip(v->hp, AC_STATE_MAX);
 
     /* polyBLEP fraction t = p / inc in Q15 without a per-sample division: rinv from this block's first inc */
