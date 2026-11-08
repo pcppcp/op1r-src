@@ -15,6 +15,8 @@ plugin.json fields (paths relative to the plugin folder):
   uses_sample    (synth, optional) engine reads the slot's sampler recording (synth_<slot>.raw loaded at boot)
   stereo         (fx, optional) op1_fx_t.render_stereo is set: the master position renders left / right itself
   coarse         (synth, optional) knob numbers 0..3 turned in 8 steps over the range (both pages), e.g. a selector
+  input_engine   (synth, optional) `symbol` is an op1_input_engine_t (op1_input.h): plays the selected input; plugin
+                 files only (input/in_host.c)
   screen         (optional) {"svg": file name, must not clash with stock content/display, "symbol": op1_screen_t}
   source_cflags  (optional) {"file.c": ["-O3"]}: extra compiler flags for one source, keyed by its file name and
                  added after the default -O2. Only -O0 .. -O3 and -Os are accepted. For a hot loop that -O3 speeds

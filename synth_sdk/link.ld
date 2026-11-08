@@ -37,6 +37,7 @@ SECTIONS {
   .hook_rfp01a33fb2 0x01A33FB2 : { KEEP(*(.hook_rfp01a33fb2)) }
   .hook_keyev 0x019C2D3E : { KEEP(*(.hook_keyev)) }
   .hook_midicc 0x01A85C8A : { KEEP(*(.hook_midicc)) }
+  .hook_inputbus 0x019674F8 : { KEEP(*(.hook_inputbus)) }
   .hook_midistart 0x019E39D6 : { KEEP(*(.hook_midistart)) }
   .hook_knobev 0x019C2E94 : { KEEP(*(.hook_knobev)) }
   .hook_lforange 0x01A042A2 : { KEEP(*(.hook_lforange)) }

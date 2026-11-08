@@ -11,6 +11,7 @@
 #pragma GCC optimize ("Os", "no-tree-loop-distribute-patterns")   /* boot-time code: size; no strlen / memset calls */
 #include "op1_synth.h"
 #include "op1p_load.h"
+#include "op1_input.h"
 #include "seq/seq_text.h"
 
 /* plugin tables (RAM, used by dispatcher.c): built-ins copied from build/engines_table.c, then the files */
@@ -112,7 +113,8 @@ __attribute__((noinline, used)) void op1_dbg(const char *text, int a, int b)
 }
 extern int se_is_open(void);                                    /* screens/sampedit.c */
 static const struct { const char *name; void *addr; } exports[] = {
-    { "op1_eng_page", (void *)op1_eng_page }, { "op1_fx_page", (void *)op1_fx_page },
+    { "op1_eng_page", (void *)op1_eng_page }, { "op1_input_tuner_active", (void *)op1_input_tuner_active },
+    { "op1_input_gain_db", (void *)op1_input_gain_db }, { "op1_fx_page", (void *)op1_fx_page },
     { "read_fx_param_safe", (void *)read_fx_param_safe },
     { "op1_sc_source", (void *)op1_sc_source },
     { "op1_page2_live", (void *)op1_page2_live },
@@ -478,6 +480,11 @@ static int load_one(void *db, const char *file)
             op1_engine_screens[n] = scr; op1_engine_svgs[n] = svg;
             if (v.hdr->flags & OP1P_F_USES_SAMPLE) reg_list(op1_sample_engine_names, name);
             op1_engine_coarse[n] = (uint8_t)OP1P_COARSE(v.hdr->flags);
+            if (v.hdr->flags & OP1P_F_INPUT) {                       /* input engine (input/in_host.c): the extended entry */
+                extern const op1_input_engine_t *op1_input_engines[];
+                const op1_input_engine_t *ie = (const op1_input_engine_t *)op1_engines[n];
+                op1_input_engines[n] = ie->reset && ie->process ? ie : 0;
+            }
         } else {
             op1_fxs[n] = (const op1_fx_t *)(mem + v.hdr->entry_off);
             op1_fx_stereo[n] = (v.hdr->flags & OP1P_F_STEREO) != 0;     /* older files: the struct ends at press */

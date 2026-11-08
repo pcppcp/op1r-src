@@ -62,6 +62,7 @@ static void dump(const char *label)
 
 static const char *val(int row) { return ((txt_t *)txt_mem[2 * row + 1])->s; }
 
+void in_clock(uint32_t t) { (void)t; } void in_end(void) {}   /* input engines (input/in_host.c): none on the host */
 int main(int argc, char **argv)
 {
     int render = argc > 1 && !strcmp(argv[1], "render");

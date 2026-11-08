@@ -140,9 +140,11 @@ static void fr_route_aux(void (*fx)(void *, int16_t *, int16_t *, const int16_t 
     fr_meter(pk);
 }
 
+extern const int16_t *ml_params(const int16_t *params);   /* master LFO (lfo/ql_master.h): modulated copy */
 /* master FX call: run fx on the instrument part only when chosen and captured this block, else on l / r */
 void fr_route(void (*fx)(void *, int16_t *, int16_t *, const int16_t *), void *self, int16_t *l, int16_t *r, const int16_t *params)
 {
+    params = ml_params(params);                              /* every master FX render passes here */
     if (fr_src == 2) { fr_route_aux(fx, self, l, r, params); return; }
     if (!fr_src || !fr_have) { fx(self, l, r, params); return; }
     fr_have = 0;

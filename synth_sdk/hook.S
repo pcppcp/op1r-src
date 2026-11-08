@@ -177,6 +177,36 @@ _opz_hostmode_other:
 	.section .hook_midicc,"ax"
 	call _midi_cc_hook;
 
+/* ---- input engines (input/in_host.c, after Hundekraft kennel 3.2.2 kennel/kn_input.S) ----
+ * synth_bus_dc_block 0x019674F8: its 6-byte prologue ([--SP] = (R7:6); P0.L = 0xAC14) -> in_highpass_entry, which
+ * passes &(caller's has-input flag at SP+0x34) and the return address to in_bus. PmSynth keeps its frame pointer in M1
+ * across this call (0xFFA02896: P1 = M1) and C treats M1 as scratch: saved around in_bus. */
+	.section .hook_inputbus,"ax"
+	jump.l _in_highpass_entry;
+	nop;
+	.text
+	.align 2
+	.global _in_highpass_entry
+_in_highpass_entry:
+	R0 = SP;
+	R0 += 0x34;
+	R1 = RETS;
+	[--SP] = RETS;
+	[--SP] = M1;
+	SP += -12;
+	call _in_bus;
+	SP += 12;
+	M1 = [SP++];
+	RETS = [SP++];
+	rts;
+	.global _in_highpass_stock
+_in_highpass_stock:                     /* the stock prologue, then on at 0x019674FE */
+	[--SP] = (R7:6);
+	P0.L = 0xAC14;
+	P1.L = 0x74FE;
+	P1.H = 0x0196;
+	jump (P1);
+
 /* ---- quad LFO (lfo/quadlfo.c) ---- */
 /* lfo_types name compares (from_name 0x019C9C3A, is_valid 0x019C9BE2): "midi" also matches "quad" */
 	.section .hook_lfoname1,"ax"

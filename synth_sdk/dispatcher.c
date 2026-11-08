@@ -369,6 +369,15 @@ extern void fxroute_turn(int knob, int delta);
 static uint32_t fr_scr[32], fr_vt[10];
 static void *mixov_screen;
 static uint8_t fr_ready, fr_on;
+/* master LFO (lfo/ql_master.h): the same slot on T4; its page is the quad / pond screen (LFO page 2), Shift + T4 the type list */
+extern const op1_screen_t SCREEN_quadlfo, SCREEN_mlfolist;
+extern volatile uint8_t ml_view;
+extern void ml_load(void), ml_flush(void), ml_leave(void), ml_press(int knob), ml_turn(int knob, int delta, int shift);
+extern int ml_t4(int shift), ml_type_shown(void);
+static uint32_t mlq_scr[32], mlq_vt[10], mlp_scr[32], mlp_vt[10], mll_scr[32], mll_vt[10];
+static uint8_t ml_ready;
+static uint8_t ml_fxctx;                                      /* master FX shown from the master LFO page: T4 leads back */
+extern void *ql_master_scr[2];
 /* mixer T1 with FX2 = aux (screens/mixaux.c): encoder press toggles pan / aux (default aux), Shift + turn sets it */
 extern void mx_attach(void *scr);
 extern void fr_send_turn(int t, int delta), fr_save_sends(void);
@@ -624,6 +633,7 @@ void *screens_ctor_hook(void)
     fxscr[3] = (uint32_t)fxscr_vt;                            /* +0x0c vtable */
     ARRAY_CTOR(&fxscr[0x30 / 4], 8, 8, ITER_PT_CTOR);
     engine_screens_ctor();
+    { extern void in_ctor(void); in_ctor(); }                    /* input engines: their T2 tuner pages (input/in_host.c) */
     fx_screens_ctor();
     {                                                            /* quad LFO screen object */
         void *saved = SCREEN_TABLE[MIDI_LFO_SCREEN_ID];
@@ -703,6 +713,17 @@ void *screens_ctor_hook(void)
         fr_vt[3 * 2 + 1] = (uint32_t)SCREEN_fxroute.update;
         fr_vt[4 * 2 + 1] = (uint32_t)SCREEN_fxroute.init;
         fr_scr[3] = (uint32_t)fr_vt;
+        static const struct { uint32_t *scr, *vt; const char *svg; const op1_screen_t *s; } mo[3] = {   /* master LFO */
+            { mlq_scr, mlq_vt, "quadlfo.svg", &SCREEN_quadlfo }, { mlp_scr, mlp_vt, "pondlfo.svg", &SCREEN_pondlfo },
+            { mll_scr, mll_vt, "usbout.svg", &SCREEN_mlfolist } };
+        for (int k = 0; k < 3; k++) {
+            SCREEN_CTOR(mo[k].scr, MIXOV_SCREEN_ID, mo[k].svg);
+            SCREEN_TABLE[MIXOV_SCREEN_ID] = saved;
+            for (int i = 0; i < 10; i++) mo[k].vt[i] = ITER_SCREEN_VT[i];
+            mo[k].vt[3 * 2 + 1] = (uint32_t)mo[k].s->update;
+            mo[k].vt[4 * 2 + 1] = (uint32_t)mo[k].s->init;
+            mo[k].scr[3] = (uint32_t)mo[k].vt;
+        }
     }
     {                                                            /* sample editor screen object (id 6) */
         void *saved = SCREEN_TABLE[6];
@@ -741,6 +762,7 @@ void screens_load_hook(void *table)
     fx_sanitize();
     filter_screen = SCREEN_TABLE[FILTER_SCREEN_ID];
     engine_screens_load();
+    { extern void in_load(void); in_load(); }
     fx_screens_load();
     midi_lfo_screen = SCREEN_TABLE[MIDI_LFO_SCREEN_ID];
     if (ql_scr[2]) {
@@ -778,6 +800,16 @@ void screens_load_hook(void *table)
         fr_scr[0] = (uint32_t)SVG_LOAD((void *)fr_scr[2]);
         mixov_screen = SCREEN_TABLE[MIXOV_SCREEN_ID];
         if (fr_scr[0] && mixov_screen) { SCREEN_fxroute.init(fr_scr); fr_ready = 1; }
+    }
+    ml_load();                                                   /* master LFO: saved state (default: off, amounts 0) */
+    if (fr_ready && mlq_scr[2] && mlp_scr[2] && mll_scr[2]) {
+        mlq_scr[0] = (uint32_t)SVG_LOAD((void *)mlq_scr[2]);
+        mlp_scr[0] = (uint32_t)SVG_LOAD((void *)mlp_scr[2]);
+        mll_scr[0] = (uint32_t)SVG_LOAD((void *)mll_scr[2]);
+        if (mlq_scr[0] && mlp_scr[0] && mll_scr[0]) {
+            SCREEN_quadlfo.init(mlq_scr); SCREEN_pondlfo.init(mlp_scr); SCREEN_mlfolist.init(mll_scr);
+            ql_master_scr[0] = mlq_scr; ql_master_scr[1] = mlp_scr; ml_ready = 1;
+        }
     }
     mx_attach(SCREEN_TABLE[MIXER_SCREEN_ID]);
     if (se_scr[2]) {                                             /* sample editor (swapped into slot 6) */
@@ -908,6 +940,7 @@ static void se_swap(void)                                           /* the open 
     int ed6 = se_ready && se_is_open() && se_screen_id() == 6;
     if (se_ready) SCREEN_TABLE[6] = ed6 ? (void *)se_scr : spc_screen_for(6) ? spc_screen_for(6) : sampler_screen;
     spc_sync(ed6);                                               /* sampler+ T1 / T2 or stock */
+    { extern void in_screen_sync(void); in_screen_sync(); }   /* input engine: its T2 tuner over the stock / sampler+ page */
     int ed10 = sd_ready && se_is_open() && se_screen_id() == 0x10;
     if (ed10) SCREEN_TABLE[0x10] = (void *)sd_scr;
     else if (sd_ready) SCREEN_TABLE[0x10] = dpu_screen_for(0x10) ? dpu_screen_for(0x10) : drum_screen;
@@ -942,6 +975,8 @@ static uint8_t mode_keys;                                               /* synth
 void key_event_hook(int code, int pressed)
 {
     if (pressed) { extern void bgs_flush(void); bgs_flush(); }   /* delayed saves (bgsave.c): a key may change mode / start disk mode */
+    { extern void in_screen_sync(void), in_flush(void); extern int in_press(int); in_flush(); in_screen_sync();   /* input engines: T2 tuner */
+      if (in_press(code)) return; }
     if (code >= 0x02 && code <= 0x05) {                          /* the Lander combo: all four held -> swallowed */
         uint8_t bit = (uint8_t)(1u << (code - 2));
         if (!pressed) mode_keys &= (uint8_t)~bit;
@@ -1022,17 +1057,53 @@ void key_event_hook(int code, int pressed)
     { extern uint8_t fr_send_dirty;                             /* aux sends (encoder or MIDI): saved at the next key event */
       if (mx_changed || fr_send_dirty) { mx_changed = 0; fr_send_dirty = 0; fr_save_sends(); } }
     { extern void scale_flush(void), fxroute_flush(void), settings_flush(void);   /* page settings, likewise */
-      scale_flush(); fxroute_flush(); settings_flush(); }
+      scale_flush(); fxroute_flush(); settings_flush(); ml_flush(); }
     if (code >= 0x3B && code <= 0x3E && fr_src == 2 && CUR_SCREEN_ID == MIXER_SCREEN_ID) {   /* press: pan / aux */
         if (pressed) mx_pan[press_knob[code - 0x3B]] ^= 1;
         return;
     }
-    if (fr_ready) {                                             /* Shift + mixer: T1 overview (default), T2 FX source */
-        if (CUR_MODE_ID == 0x0D && (code == 0x06 || code == 0x07)) {
-            if (pressed) { fr_on = code == 0x07; SCREEN_TABLE[MIXOV_SCREEN_ID] = fr_on ? (void *)fr_scr : mixov_screen; }
+    if (ml_fxctx) {                                             /* master FX opened from the master LFO page (mixer mode 3) */
+        if (CUR_MODE_ID != 3 || (pressed && code == 0x05) || (pressed && (code == 0x06 || code == 0x07))) ml_fxctx = 0;   /* left */
+        else if (code == 0x09) {                                /* T4: back to the master LFO page (from the mixer: master out) */
+            if (pressed) {
+                ml_fxctx = 0;
+                KEY_DISPATCH(0x26, 1); KEY_DISPATCH(0x05, 1); KEY_DISPATCH(0x05, 0); KEY_DISPATCH(0x26, 0);   /* Shift + mixer */
+                if (CUR_MODE_ID == 0x0D) {
+                    fr_on = 0; ml_t4(0);
+                    SCREEN_TABLE[MIXOV_SCREEN_ID] = ml_type_shown() ? (void *)mlp_scr : (void *)mlq_scr;
+                }
+            }
             return;
         }
-        if (fr_on && CUR_MODE_ID != 0x0D) { fr_on = 0; SCREEN_TABLE[MIXOV_SCREEN_ID] = mixov_screen; }
+    }
+    if (fr_ready) {                                             /* Shift + mixer: T1 overview (default), T2 FX source, T4 master LFO */
+        if (CUR_MODE_ID == 0x0D && code == 0x08 && ml_view == 1) {   /* master LFO page: T3 = the master FX (as from the mixer) */
+            if (pressed) {
+                ml_leave(); SCREEN_TABLE[MIXOV_SCREEN_ID] = mixov_screen;
+                /* mixer, its T1 (the mixer remembers its last page: T3 straight from FX would switch the FX off), T3 */
+                KEY_DISPATCH(0x05, 1); KEY_DISPATCH(0x05, 0); KEY_DISPATCH(0x06, 1); KEY_DISPATCH(0x06, 0);
+                KEY_DISPATCH(0x08, 1); KEY_DISPATCH(0x08, 0);
+                ml_fxctx = CUR_MODE_ID == 3;
+            }
+            return;
+        }
+        if (CUR_MODE_ID == 0x0D && (code == 0x06 || code == 0x07)) {
+            if (pressed) { fr_on = code == 0x07; ml_leave(); SCREEN_TABLE[MIXOV_SCREEN_ID] = fr_on ? (void *)fr_scr : mixov_screen; }
+            return;
+        }
+        if (CUR_MODE_ID == 0x0D && code == 0x09 && ml_ready) {   /* T4: page / on-off; Shift + T4: type list */
+            if (pressed) {
+                fr_on = 0;
+                int v = ml_t4(*(volatile uint8_t *)0x01DD7F78);
+                SCREEN_TABLE[MIXOV_SCREEN_ID] = v == 2 ? (void *)mll_scr : ml_type_shown() ? (void *)mlp_scr : (void *)mlq_scr;
+            }
+            return;
+        }
+        if (ml_view && CUR_MODE_ID == 0x0D && code >= 0x3B && code <= 0x3E) {   /* master LFO: press selects LFO 1..4 */
+            if (pressed) ml_press(press_knob[code - 0x3B]);
+            return;
+        }
+        if ((fr_on || ml_view) && CUR_MODE_ID != 0x0D) { fr_on = 0; ml_leave(); SCREEN_TABLE[MIXOV_SCREEN_ID] = mixov_screen; }
     }
     if (((code == 0x06 && sm_ready) || (code == 0x07 && us_ready) || (code == 0x08 && st_ready) || (code == 0x09 && sc_ready)) && CUR_MODE_ID == 0x0C) {  /* clock + T1 / T2 / T3 */
         if (pressed) {                                          /* monitor / usb out / settings page on, again: base view */
@@ -1156,6 +1227,7 @@ static int eng_turn_word(int n, int knob)
 void knob_event_hook(int knob, int16_t *delta)
 {
     { extern void cc_fb_knob(int, int); cc_fb_knob(knob, *delta); }   /* CC feedback (midi/ccmap.c) */
+    { extern void in_screen_sync(void); extern int in_knob(int, int); in_screen_sync(); if (in_knob(knob, *delta)) return; }   /* input engine tuner: gain */
     if (knob >= 0 && knob < 4 && se_is_open()) { se_knob(knob, *delta); return; }   /* sample editor */
     if (dpu_knob(knob, *delta)) return;                          /* drum+ pages (pitch / volume: stock) */
     if (spc_knob(knob, *delta)) return;                          /* sampler+ pages */
@@ -1165,6 +1237,7 @@ void knob_event_hook(int knob, int16_t *delta)
     if (knob >= 0 && knob < 4 && sm_on == 3 && CUR_MODE_ID == 0x0C) { settings_turn(knob, *delta); return; }
     if (knob >= 0 && knob < 4 && sm_on == 4 && CUR_MODE_ID == 0x0C) { scale_turn(knob, *delta); return; }
     if (knob >= 0 && knob < 4 && fr_on && CUR_MODE_ID == 0x0D) { fxroute_turn(knob, *delta); return; }
+    if (knob >= 0 && knob < 4 && ml_view && CUR_MODE_ID == 0x0D) { ml_turn(knob, *delta, *(volatile uint8_t *)0x01DD7F78); return; }
     if (knob >= 0 && knob < 4 && !mx_pan[knob] && *(volatile uint8_t *)0x01DD7F78 && fr_src == 2 && CUR_SCREEN_ID == MIXER_SCREEN_ID) {
         fr_send_turn(knob, *delta); mx_changed = 1; return;
     }

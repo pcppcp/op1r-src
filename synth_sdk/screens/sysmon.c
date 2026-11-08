@@ -42,9 +42,12 @@ void sm_audio_cb(void *a, void *b, void *c)                  /* replaces the cal
 {
     uint32_t t0 = READ_CYCLES();
     extern void l1_begin(void), l1_end(void);
+    extern void in_clock(uint32_t), in_end(void);
+    in_clock(t0);                                            /* input engines: the block rate (input/in_host.c) */
     l1_begin();                                              /* L1 pool: leases move only inside the callback */
     AUDIO_CB(a, b, c);
     l1_end();
+    in_end();
     uint32_t d = READ_CYCLES() - t0, p = t0 - aud_last_t0;
     aud_last_t0 = t0;
     aud_busy += d;

@@ -31,6 +31,7 @@
 #define OP1P_NO_SCREEN 0xFFFFFFFFu
 #define OP1P_F_USES_SAMPLE 1u
 #define OP1P_F_STEREO      2u      /* fx: op1_fx_t has render_stereo (plugin.json "stereo") */
+#define OP1P_F_INPUT       4u      /* synth: the entry is an op1_input_engine_t (plugin.json "input_engine", op1_input.h) */
 #define OP1P_COARSE(flags) (((flags) >> 16) & 15)   /* synth: knobs turned in 8 steps (plugin.json "coarse": [k..]) */
 #define OP1P_PREF(flags) (((flags) >> 8) & 0xFF)   /* preferred number (plugin.json order 1..31: keeps old sounds), 0 none */
 

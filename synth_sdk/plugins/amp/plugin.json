@@ -1,0 +1,34 @@
+{
+  "name": "amp",
+  "author": "Hundekraft; input-engine workflow inspired by Teenage Engineering OP-1 Field",
+  "version": "1",
+  "kind": "synth",
+  "symbol": "ENGINE_amp",
+  "sources": [
+    "amp.c",
+    "st_pitch.c"
+  ],
+  "defaults": [
+    16384,
+    0,
+    16384,
+    0
+  ],
+  "input_engine": true,
+  "screen": {
+    "svg": "amp.svg",
+    "symbol": "SCREEN_amp"
+  },
+  "source_cflags": {
+    "amp.c": [
+      "-O3"
+    ],
+    "st_pitch.c": [
+      "-O3"
+    ]
+  },
+  "cost": {
+    "voice": 6872,
+    "start": 465
+  }
+}

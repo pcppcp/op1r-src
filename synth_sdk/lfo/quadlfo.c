@@ -48,6 +48,7 @@
  * advance there; shared LFOs advance by elapsed time from the Blackfin CYCLES counter (block length learned from
  * the per-voice calls), so they keep running between notes (screen included). */
 #include "../op1_synth.h"
+#include "../screens/op1r_settings.h"
 
 #ifndef OP1_HOST
 #define KNOB_RANGE_SYNTH ((void (*)(int, int16_t *, int, void *))0x01A1DFEC)
@@ -63,14 +64,15 @@
 #define SYNTH_LFO_OBJ    ((void *const *)0x01AAAD6C)          /* [6] per-voice LFO objects */
 #define SYNTH_ENGINE()   (((const int *)0xFF8016E4)[*(volatile int *)0xFF8016D4 & 7])
 #define SYNTH_FX_TYPE()  (((const int *)0xFF801734)[*(volatile int *)0xFF8016D4 & 7])
-#define PAGE_POS()       (*(volatile int *)0x01DE4C40 == 1)
-#define PAGE_WORDS(pos)  ((const int16_t *)(((pos) ? 0xFF801644 : 0xFF8014C4) + \
+#define PAGE_POS(scr)    (QL_MASTER_SCR(scr) ? 2 : *(volatile int *)0x01DE4C40 == 1)   /* 2: the master LFO page (ql_master.h) */
+#define PAGE_WORDS(pos)  ((pos) == 2 ? (const int16_t *)ml_words() : (const int16_t *)(((pos) ? 0xFF801644 : 0xFF8014C4) + \
                           (*(volatile int *)((pos) ? 0xFF8016D8 : 0xFF8016D4) & 7) * 16))
+#define MASTER_TYPE()    (*(volatile int32_t *)0xFF801090)        /* master FX type 0..7 */
 #define TEMPO_RATE()     (*(volatile uint32_t *)0x01AADAD4)   /* metronome: bpm x 1662149 = 8 cycles per beat per 128 samples at 44.1 kHz (2 audio blocks) */
 #define SHIFT_HELD()     (*(volatile uint8_t *)0x01DD7F78)
 /* LFO switched on (Shift + T4) in the current slot: synth 0x01AAAC28[synth slot], drum 0x01AAAC38[drum slot 0x01AAAC10]
  * (getters 0x0196726C / 0x0196724C; the stock note-on 0x019673DC / 0x0196735E checks the same bytes) */
-#define LFO_ON(pos)      (((volatile uint8_t *)((pos) ? 0x01AAAC38 : 0x01AAAC28))[(pos) ? (*(volatile int *)0x01AAAC10 & 7) \
+#define LFO_ON(pos)      ((pos) == 2 ? ml_on : ((volatile uint8_t *)((pos) ? 0x01AAAC38 : 0x01AAAC28))[(pos) ? (*(volatile int *)0x01AAAC10 & 7) \
                                                                                         : (*(volatile int *)0xFF8016D4 & 7)])
 extern int mx_engine_plugin(int n), mx_fx_plugin(int n);            /* dispatcher.c */
 #define ENGINE_PLUGIN(sel) mx_engine_plugin((sel) - OP1_ENGINE_MAGIC)
@@ -99,19 +101,26 @@ extern int16_t host_stage[8]; extern int host_eng_plugin, host_fx_plugin;
 #define SYNTH_LFO_OBJ    ((void *const *)host_lfo_obj)
 #define SYNTH_ENGINE()   14
 #define SYNTH_FX_TYPE()  5
-#define PAGE_POS()       (host_pos)
-#define PAGE_WORDS(pos)  ((const int16_t *)host_lfo_words)
+#define PAGE_POS(scr)    (QL_MASTER_SCR(scr) ? 2 : host_pos)
+#define PAGE_WORDS(pos)  ((pos) == 2 ? (const int16_t *)ml_words() : (const int16_t *)host_lfo_words)
+extern int host_master_type;
+#define MASTER_TYPE()    (host_master_type)
 extern uint32_t host_cycles, host_tempo_rate; extern int host_shift, host_pos;
 #define TEMPO_RATE()     (host_tempo_rate)
 #define SHIFT_HELD()     (host_shift)
 extern int host_lfo_on[2];
-#define LFO_ON(pos)      (host_lfo_on[pos])
+#define LFO_ON(pos)      ((pos) == 2 ? ml_on : host_lfo_on[pos])
 #define READ_CYCLES()    (host_cycles)
 #endif
 #ifndef READ_CYCLES
 static inline uint32_t READ_CYCLES(void) { uint32_t c; __asm__ volatile ("%0 = CYCLES;" : "=d"(c)); return c; }
 #endif
 enum { QL_SYNTH = 0, QL_ENV = 1, QL_FX = 2 };
+/* master LFO (lfo/ql_master.h): LFO page 2 of this code (0 synth, 1 drum) */
+void *ql_master_scr[2];                                       /* dispatcher.c: the master LFO's quad / pond screen objects */
+#define QL_MASTER_SCR(scr) ((scr) && ((scr) == ql_master_scr[0] || (scr) == ql_master_scr[1]))
+static volatile uint8_t ml_on;
+static int16_t *ml_words(void);
 
 enum { QT_VOICE, QT_FREE, QT_GATE, QT_MONO, QT_1SHT, QT_RAND, QT_N };
 static const char *const ql_type_name[QT_N] = { "VOIC", "FREE", "GATE", "MONO", "SHOT", "RAND" };
@@ -136,17 +145,17 @@ static void ql_p2_mod(int16_t *w, int16_t mod, int engine)
 
 /* page-2 values as modulated last (0 engine, 1 synth FX, 2 drum FX; words 5..7) and when (CYCLES): plugin screens show
  * them through op1_page2_live while the LFO applies them (the stage copy is not what the screens read) */
-static volatile int16_t ql_p2_shown[3][3];
-static volatile uint32_t ql_p2_at[3][3];
-static volatile uint8_t ql_p2_ok[3][3];                        /* set when applied, cleared when stale (CYCLES wraps)*/
-static ql_st sh_st[2][4];                                     /* shared state per page (synth, drum) */
+static volatile int16_t ql_p2_shown[4][3];                    /* + 3: master FX */
+static volatile uint32_t ql_p2_at[4][3];
+static volatile uint8_t ql_p2_ok[4][3];                        /* set when applied, cleared when stale (CYCLES wraps)*/
+static ql_st sh_st[3][4];                                     /* shared state per page (synth, drum, master) */
 static ql_st v_st[6][4];                                      /* per synth voice */
-static volatile int16_t disp_all[2][4];                       /* last per-voice output (before amount), screen */
-static volatile uint32_t ph_cyc_all[2];                       /* CYCLES at the last shared update per page */
+static volatile int16_t disp_all[3][4];                       /* last per-voice output (before amount), screen */
+static volatile uint32_t ph_cyc_all[3];                       /* CYCLES at the last shared update per page */
 static volatile uint32_t cpb = 580500;                        /* cycles per audio block, 64 frames (learned; start: 400 MHz) */
 static uint32_t voice_cyc[6];
 static uint32_t ql_rng = 0x9E3779B9u;
-volatile uint8_t ql_sel[2];                                   /* selected LFO per page (synth/drum) */
+volatile uint8_t ql_sel[3];                                   /* selected LFO per page (synth / drum / master) */
 
 /* op1r <= 15 quad words: a 0x4000 / 0x6000 marker in each of words 4..7. Not decoded any more, but still a quad LFO
  * (never handed to the MIDI LFO code, whose range asserts would lock the OP-1): they read as defaults (silent) and
@@ -364,7 +373,7 @@ static void ql_dec_shared(const int16_t *w, int pos, ql_lfo *L)
 
 /* audio thread: the words decoded once per change (per page), not per voice / pass / block. has_mod: some LFO
  * targets another one (the copies then get ql_mod). Synced rates follow the tempo, so they are refreshed. */
-static struct { int16_t w[8]; uint8_t valid, has_mod, any_sync; ql_lfo L[4]; } qc[2];
+static struct { int16_t w[8]; uint8_t valid, has_mod, any_sync; ql_lfo L[4]; } qc[3];
 static const ql_lfo *ql_cached(const int16_t *w, int pos)
 {
     int i, same = qc[pos].valid;
@@ -481,8 +490,8 @@ int ql_apply_fx(void *self, const int16_t *w, int pass)
  * ~32 blocks), else the stored word. fx 0: synth engine; fx 1: FX at pos (0 synth, 1 drum; master: no quad) */
 int16_t ql_page2_live(int fx, int pos, int k, int16_t stored)
 {
-    if (k < 0 || k > 2 || (fx && pos != 0 && pos != 1)) return stored;
-    int g = fx ? 1 + pos : 0;
+    if (k < 0 || k > 2 || (fx && (pos < 0 || pos > 2))) return stored;
+    int g = fx ? 1 + pos : 0;                                     /* 3: master FX (master LFO) */
     if (ql_p2_ok[g][k] && READ_CYCLES() - ql_p2_at[g][k] < cpb * 32) return ql_p2_shown[g][k];
     ql_p2_ok[g][k] = 0;
     return stored;
@@ -513,7 +522,7 @@ void ql_trig_fx(void *self, const int16_t *w) { (void)self; (void)w; }   /* shar
 
 /* ---- controls (KeyHandler thread, via dispatcher.c key/knob hooks) ---- */
 static int32_t step_acc[4];
-void ql_press(int pos, int knob) { ql_sel[pos & 1] = (uint8_t)(knob & 3); }
+void ql_press(int pos, int knob) { ql_sel[pos > 2 ? 0 : pos] = (uint8_t)(knob & 3); }
 static int ql_steps(int knob, int delta)                          /* one step per detent (1024) */
 {
     int32_t *acc = &step_acc[knob & 3];
@@ -524,10 +533,12 @@ static int ql_steps(int knob, int delta)                          /* one step pe
     return st;
 }
 static int wrapq(int v, int n) { return ((v % n) + n) % n; }
+/* targets a page offers: the master LFO (2) only the master FX knobs (page 1 / 2) and LFO targets */
+static int ql_tgt_ok(int pos, int t) { return pos != 2 || (t >= 8 && t < QL_P2) || t >= QL_P2 + 3; }
 static void pond_turn(int16_t *w, int pos, int knob, int st, int shift);   /* lfo/ql_pond.h */
 void ql_turn(int16_t *w, int pos, int knob, int delta, int shift)
 {
-    int i = ql_sel[pos & 1] & 3, st = ql_steps(knob, delta);
+    int i = ql_sel[pos > 2 ? 0 : pos] & 3, st = ql_steps(knob, delta);
     if (!st) return;
     if (ql_is_pond(w)) { pond_turn(w, pos, knob, st, shift); return; }
     if (ql_is_old(w) || ql_is_fox(w)) {                           /* first edit of an old / fox set: all four to defaults */
@@ -549,12 +560,12 @@ void ql_turn(int16_t *w, int pos, int knob, int delta, int shift)
             for (int n = st < 0 ? -st : st; n--; ) {
                 int t;
                 do { p = wrapq(p + d, QL_NTGT); t = order[p]; }
-                while ((t >= 12 && t < QL_P2 && (t - 12) / 3 == i) || (pos && t >= QL_P2 && t < QL_P2 + 3));
+                while ((t >= 12 && t < QL_P2 && (t - 12) / 3 == i) || (pos && t >= QL_P2 && t < QL_P2 + 3) || !ql_tgt_ok(pos, t));
             }
             o.tgt = order[p];
             break;
         }
-        default: o.type = (uint8_t)wrapq(o.type + st, QT_N); break;
+        default: if (pos != 2) o.type = (uint8_t)wrapq(o.type + st, QT_N); break;   /* master: always FREE */
     } else switch (knob) {
         case 0: o.off = (uint8_t)wrapq(o.off + st, 8); break;
         case 1: o.smooth = (uint8_t)clampq(o.smooth + st, 0, 7); break;
@@ -676,9 +687,10 @@ static void ql_glyph(void *r, int pos, int g, int32_t gx, int32_t y, const uint8
     }
 }
 
+static void ml_off_overlay(void *r, int pos);                     /* lfo/ql_master.h: "LFO OFF" while the master LFO is off */
 static void ql_screen_update(void *scr, int dt)
 {
-    int pos = PAGE_POS();
+    int pos = PAGE_POS(scr);
     const int16_t *w = PAGE_WORDS(pos);
     int sel = ql_sel[pos] & 3;
     op1_screen_draw(scr, dt);
@@ -687,7 +699,7 @@ static void ql_screen_update(void *scr, int dt)
     int lfo_on = LFO_ON(pos);
     uint32_t b = blocks_q16(READ_CYCLES(), ph_cyc_all[pos]);
     if (lfo_on && b > (4u << 16)) ql_advance_pos(pos, Lm);       /* audio idle: advance here (LFO off: ticks centred) */
-    if (SHIFT_HELD()) { ql_table(r, w, sel); return; }
+    if (SHIFT_HELD()) { ql_table(r, w, sel); ml_off_overlay(r, pos); return; }
     for (int i = 0; i < 4; i++) {
         const ql_lfo *o = &L[i];
         int32_t y = OP1_Q10(ql_lane_y[i]), ty = y - OP1_Q10(6);
@@ -735,8 +747,10 @@ static void ql_screen_update(void *scr, int dt)
         }
         sf_text(r, OP1_Q10(QL_TYPE_X), ty, OP1_Q10(2), ql_type_name[o->type], 0x400, tc ? tc : ql_col[3]);
     }
+    ml_off_overlay(r, pos);
 }
 
 const op1_screen_t SCREEN_quadlfo = { ql_screen_init, ql_screen_update };
 
 #include "ql_pond.h"                                       /* the pond LFO (docs/64): words, DSP, controls, screen */
+#include "ql_master.h"                                     /* the master LFO: page 2 of this code */

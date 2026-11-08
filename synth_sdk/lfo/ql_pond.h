@@ -52,8 +52,8 @@ static const int16_t pond_mean[33][4] = { {5437,7655,2984,6586},{5419,7658,2934,
     {4975,7527,2203,5887},{4955,7537,2161,5851},{4934,7520,2140,5828},{4914,7508,2114,5803},{4895,7497,2089,5777},{4873,7494,2061,5749},
     {4851,7476,2043,5726},{4829,7470,2014,5703},{4805,7465,1990,5678},{4786,7440,1974,5660},{4762,7420,1956,5644} };   /* Q14 */
 static const int16_t pond_ext[4] = { 6972, 5838, 4794, 4219 };       /* max swing at full chaos, Q14 */
-static volatile int16_t pond_trail[2][48][2];                         /* (x1 - x3, x2 - x4) Q14 per 1/48 cycle */
-static volatile uint8_t pond_dom[2][48], pond_head[2];
+static volatile int16_t pond_trail[3][48][2];                         /* (x1 - x3, x2 - x4) Q14 per 1/48 cycle */
+static volatile uint8_t pond_dom[3][48], pond_head[3];
 static int32_t *pond_x(ql_st *s, int k) { return k == 0 ? &s->lx : k == 1 ? &s->ly : k == 2 ? &s->lz : &s->d1; }
 static int32_t pond_lv(ql_st *s, const ql_lfo *o, uint32_t adv, int i)
 {
@@ -82,7 +82,7 @@ static int32_t pond_lv(ql_st *s, const ql_lfo *o, uint32_t adv, int i)
         s->lx = x[0]; s->ly = x[1]; s->lz = x[2]; s->d1 = x[3];
         uint32_t nph = s->ph, oph = nph - adv;
         if (adv && (uint32_t)(((uint64_t)oph * 48) >> 32) != (uint32_t)(((uint64_t)nph * 48) >> 32)) {   /* every 1/48 cycle */
-            int pg = (int)((s - &sh_st[0][0]) / 4) & 1, hd = (pond_head[pg] + 1) % 48, dm = 0;
+            int pg = (int)((s - &sh_st[0][0]) / 4) % 3, hd = (pond_head[pg] + 1) % 48, dm = 0;
             for (int a = 1; a < 4; a++) if (x[a] > x[dm]) dm = a;
             pond_trail[pg][hd][0] = (int16_t)((x[0] - x[2]) >> 6); pond_trail[pg][hd][1] = (int16_t)((x[1] - x[3]) >> 6);
             pond_dom[pg][hd] = (uint8_t)dm; pond_head[pg] = (uint8_t)hd;
@@ -98,7 +98,7 @@ static uint8_t pond_tgt_step(int t, int st, int pos)                /* targets a
     int p = 0, d = st > 0 ? 1 : -1;
     while (p < 17 && order[p] != t) p++;
     for (int n = st < 0 ? -st : st; n--; )
-        do p = wrapq(p + d, 18); while (pos && order[p] >= QL_P2 && order[p] < QL_P2 + 3);   /* drums: no engine page 2 */
+        do p = wrapq(p + d, 18); while ((pos && order[p] >= QL_P2 && order[p] < QL_P2 + 3) || !ql_tgt_ok(pos, order[p]));   /* drums: no engine page 2; master: FX only */
     return order[p];
 }
 
@@ -107,7 +107,7 @@ static uint8_t pond_tgt_step(int t, int st, int pos)                /* targets a
 static void pond_turn(int16_t *w, int pos, int knob, int st, int shift)
 {
     pond_set f; pond_get(w, &f);
-    int k = ql_sel[pos & 1] & 3;
+    int k = ql_sel[pos > 2 ? 0 : pos] & 3;
     if (!shift) switch (knob) {
         case 0: f.rate = (uint8_t)clampq(f.rate + st, 0, f.sync ? QL_DIVS - 1 : 63); break;
         case 1: f.chaos = (uint8_t)clampq(f.chaos + st, 0, 31); break;
@@ -189,11 +189,15 @@ static void pd_tgt(void *r, int ti, int col, int t, int pos)
 #define PD_CX 165
 #define PD_CY 52
 static void pd_screen_init(void *scr) { (void)scr; }
+static void ml_off_overlay(void *r, int pos);
 static void pd_screen_update(void *scr, int dt)
 {
-    int pos = PAGE_POS(), pg = pos & 1, sel = ql_sel[pg] & 3;
+    int pos = PAGE_POS(scr), pg = pos > 2 ? 0 : pos, sel = ql_sel[pg] & 3;
     const int16_t *w = PAGE_WORDS(pos);
     pond_set f; pond_get(w, &f);
+    if (LFO_ON(pg) && blocks_q16(READ_CYCLES(), ph_cyc_all[pg]) > (4u << 16)) {   /* audio idle: advance here (as quad) */
+        ql_lfo Lm[4]; ql_dec_shared(w, pg, Lm); ql_advance_pos(pg, Lm);
+    }
     op1_screen_draw(scr, dt);
     void *r = op1_raster();
     int hd = pond_head[pg];
@@ -236,5 +240,6 @@ static void pd_screen_update(void *scr, int dt)
         pd_txt(r, PT_LAB + 2, ""); pd_txt(r, PT_VAL + 2, "");
         pd_txt(r, PT_LAB + 3, ""); pd_txt(r, PT_VAL + 3, "");
     }
+    ml_off_overlay(r, pos);
 }
 const op1_screen_t SCREEN_pondlfo = { pd_screen_init, pd_screen_update };

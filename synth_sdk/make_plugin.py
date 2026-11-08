@@ -163,7 +163,7 @@ def build(name, out_dir=OUT):
     page2 = (e.get('page2_defaults') or [0] * 4)[:4] + [0] * (4 - len((e.get('page2_defaults') or [0] * 4)[:4]))
     hdr = struct.pack('<4I16s4I4h4h3I', 0x5031504F, 1, OP1P_API, kind, nm, len(img0), bss,
                       syms['_' + e['symbol']], syms['_' + scr['symbol']] if scr else 0xFFFFFFFF,
-                      *defaults, *page2, (1 if e.get('uses_sample') else 0) | (2 if e.get('stereo') else 0) | (sum(1 << k for k in e.get('coarse', []) if 0 <= k < 4) << 16) | (e['order'] << 8 if 1 <= e.get('order', 0) < 32 else 0),
+                      *defaults, *page2, (1 if e.get('uses_sample') else 0) | (2 if e.get('stereo') else 0) | (4 if e.get('input_engine') else 0) | (sum(1 << k for k in e.get('coarse', []) if 0 <= k < 4) << 16) | (e['order'] << 8 if 1 <= e.get('order', 0) < 32 else 0),
                       len(rel), len(imports))
     assert len(hdr) == 76
     names = [i[len('__imp_'):] if i.startswith('__imp_') else i.lstrip('_') for i in imports]

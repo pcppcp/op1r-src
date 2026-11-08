@@ -3,6 +3,7 @@
  * Checks: frequency range, routing per pass (synth knobs pass 0, envelope pass 1, FX in apply_fx),
  * amount 0 = no call, modulation depth, quad detection vs. midi LFO defaults, encoder editing.
  * With "render": prints JSON frames (screen states) for harness/render_quadlfo.py. */
+#include "../screens/op1r_settings.c"
 #include "../lfo/quadlfo.c"
 #define BPS   689                                  /* audio blocks per second (64 frames at 44.1 kHz) */
 #define BPS_L 689L
@@ -24,7 +25,9 @@ void host_knob_range_drum(int k, int16_t *m, int e, void *p) { (void)m; (void)p;
 void host_knob_range_synth(int k, int16_t *m, int e, void *p) { (void)e; (void)p; n_synth++; last_idx = k; last_mod = *m; if (abs(*m) > max_mod) max_mod = (int16_t)abs(*m); }
 int16_t host_fx_range[8][3], host_fx_params[8];
 int16_t host_stage[8]; int host_eng_plugin = 1, host_fx_plugin = 1;
-void host_fx_knob_mod(int16_t *m, const int16_t *rg, int16_t *p) { n_fx++; last_idx = (int)(p - host_fx_params); last_mod = *m; (void)rg; }
+static int16_t *last_p; int host_master_type = 1;
+void host_fx_knob_mod(int16_t *m, const int16_t *rg, int16_t *p) { n_fx++; last_idx = (int)(p - host_fx_params); last_p = p; last_mod = *m;
+    if (rg[1] > rg[0]) { int v = *p + *m; *p = (int16_t)(v < rg[0] ? rg[0] : v > rg[1] ? rg[1] : v); } }   /* clamps as the firmware */
 void host_env_mod(int k, int16_t *m, void *p) { (void)p; n_env++; last_idx = k; last_mod = *m; if (abs(*m) > max_mod) max_mod = (int16_t)abs(*m); }
 
 /* screen mocks */
@@ -369,6 +372,58 @@ int main(int argc, char **argv)
         ql_trig_drum(0, d);
         CHECK(sh_st[1][0].ph == 0 && sh_st[1][1].ph != 0, "drum GATE restarts, VOIC (= free) keeps");
     }
+
+    {   /* master LFO (lfo/ql_master.h): defaults, keys, audio copy, targets, storage */
+        op1r_setting_host_clear(); ml_load();
+        ql_lfo o; ql_dec(ml_words(), 0, &o);
+        CHECK(!ml_on && ml_type == 0 && ql_is_quad(ml_words()) && o.tgt == 8 && o.amt == 0 && o.type == QT_FREE, "master: defaults (off, quad, FX knob, amount 0)");
+        int16_t live[8] = { 1000, 2000, 3000, 4000, 0, 0, 0, 0 }, keep[8]; memcpy(keep, live, sizeof keep);
+        for (int k = 0; k < 4; k++) { host_fx_range[k][0] = 0; host_fx_range[k][1] = 32767; host_fx_range[k][2] = 1; }
+        CHECK(ml_params(live) == live, "master off: the FX gets its own words");
+        static int mscr; ql_master_scr[0] = &mscr;
+        CHECK(ml_t4(0) == 1 && ml_view == 1 && PAGE_POS(&mscr) == 2 && PAGE_POS(0) == host_pos, "T4: the master LFO page");
+        ml_t4(0); CHECK(ml_on && ml_dirty, "T4 again: on");
+        CHECK(ml_params(live) == live, "master on, every amount 0: own words");
+        ml_press(0); for (int k = 0; k < 31; k++) ml_turn(1, 1024, 0);   /* LFO 1 amount +100 % */
+        ql_dec(ml_words(), 0, &o); CHECK(o.amt == 31, "green: amount (%d)", o.amt);
+        int nf = n_fx, moved = 0; const int16_t *pp = 0;
+        for (int b = 0; b < 400; b++) { host_cycles += cpb; pp = ml_params(live); if (pp != live && pp[0] != 1000) moved = 1; }
+        CHECK(pp == ml_copy && n_fx > nf && last_p >= ml_copy && last_p < ml_copy + 8 && moved, "master: knob 1 modulated in the copy");
+        CHECK(!memcmp(live, keep, sizeof keep), "master: the live words keep the set values");
+        int seen[QL_NTGT] = { 0 }, bad = 0;
+        for (int k = 0; k < 40; k++) { ml_turn(2, 1024, 0); ql_dec(ml_words(), 0, &o); seen[o.tgt] = 1; bad |= o.tgt < 8 || (o.tgt >= QL_P2 && o.tgt < QL_P2 + 3) || (o.tgt >= 12 && o.tgt < 15); }
+        CHECK(!bad && seen[9] && seen[QL_P2 + 3] && seen[15], "master targets: FX knobs, FX page 2, other LFOs only");
+        while (o.tgt != 8) { ml_turn(2, 1024, 0); ql_dec(ml_words(), 0, &o); }
+        ml_turn(3, 1024 * 3, 0); ql_dec(ml_words(), 0, &o); CHECK(o.type == QT_FREE, "master: red keeps FREE");
+        CHECK(ml_t4(1) == 2 && ml_cur == 0, "Shift + T4: type list at the current type");
+        ml_turn(1, 1024, 0); CHECK(ml_cur == 0, "type list: only blue moves");
+        ml_turn(0, 1024 * 5, 0); CHECK(ml_cur == ML_NTYPES - 1, "type list: blue, clamped");
+        CHECK(ml_t4(0) == 1 && ml_type == 1 && ql_is_pond(ml_words()) && ml_on, "T4 in the list: the chosen type's page");
+        pond_set pf; pond_get(ml_words(), &pf);
+        CHECK(pf.tgt[0] == 8 && pf.tgt[3] == 11 && pf.amt[0] == 0, "master pond defaults: FX knobs, amount 0");
+        ml_press(1); for (int k = 0; k < 20; k++) ml_turn(2, 1024, 0);   /* pond: species 2 amount */
+        pond_get(ml_words(), &pf);
+        nf = n_fx; for (int b = 0; b < 200; b++) { host_cycles += cpb; ml_params(live); }
+        CHECK(pf.amt[1] == 20 && n_fx > nf && !memcmp(live, keep, sizeof keep), "master pond: modulates the copy");
+        ml_flush();
+        int16_t wq[8], wp[8]; memcpy(wq, ml_w[0], 16); memcpy(wp, ml_w[1], 16);
+        memset(ml_w, 0, sizeof ml_w); ml_on = 0; ml_type = 0; ml_load();
+        CHECK(ml_on && ml_type == 1 && !memcmp(wq, ml_w[0], 16) && !memcmp(wp, ml_w[1], 16), "master: saved and loaded back (on %d type %d q %d p %d)", ml_on, ml_type, memcmp(wq, ml_w[0], 16), memcmp(wp, ml_w[1], 16));
+        ml_t4(0); CHECK(!ml_on, "T4 on the page: off");
+        CHECK(ml_params(live) == live, "master off again: own words");
+        ml_leave(); CHECK(!ml_view, "leaving: the page closes");
+        {   /* rate: a 1 Hz master LFO steps one block per master render */
+            op1r_setting_host_clear(); ml_load(); ml_t4(0); ml_t4(0);
+            ql_lfo q; ql_dec(ml_words(), 1, &q); q.rate = 31; q.amt = 31; q.tgt = 9; ql_enc(&q, ml_words(), 1);
+            uint32_t p0 = sh_st[2][1].ph, wraps = sh_st[2][1].cnt;
+            for (int b = 0; b < BPS * 10; b++) { host_cycles += cpb; ml_params(live); }
+            double cyc = (sh_st[2][1].cnt - wraps) + ((double)sh_st[2][1].ph - p0) / 4294967296.0;
+            double want = q.inc / 4294967296.0 * BPS * 10;
+            CHECK(fabs(cyc - want) < 0.05, "master rate: %.2f cycles in 10 s, want %.2f", cyc, want);
+            ml_leave();
+        }
+        ml_view = 0;
+    }
     if (!render) { printf(fails ? "%d FAILED\n" : "OK: all quad LFO checks pass\n", fails); return fails != 0; }
 
     /* screen frames */
@@ -419,6 +474,25 @@ int main(int argc, char **argv)
             frame_json(ps[k].label);
         }
         host_shift = 0; ql_sel[0] = 0;
+    }
+    {   /* master LFO frames: the type list, the quad page (master FX knobs, LFO targets), the pond page */
+        static int mq, mp; ql_master_scr[0] = &mq; ql_master_scr[1] = &mp;
+        op1r_setting_host_clear(); ml_load(); host_pos = 0; int16_t live[8] = { 8000, 8000, 8000, 8000, 0, 0, 0, 0 };
+        ml_t4(1); ml_list_update(0, 16); frame_json("MASTER LIST: Shift + T4 (quad chosen)");
+        ml_turn(0, 1024, 0); ml_list_update(0, 16); frame_json("MASTER LIST: blue turned (pond)");
+        ml_cur = 0; ml_t4(0); ml_t4(0);                        /* quad page, on */
+        int16_t *w = ml_words();
+        ql_lfo o;
+        for (int i = 0; i < 4; i++) { ql_dec(w, i, &o); o.amt = (int8_t)(i == 2 ? 0 : 31 - 7 * i); if (i == 3) o.tgt = 12; ql_enc(&o, w, i); }
+        ql_sel[2] = 1;
+        for (int b = 0; b < 300; b++) { host_cycles += cpb; ml_params(live); }
+        ql_screen_update(&mq, 16); frame_json("MASTER QUAD: on; LFO1..3 -> master FX b g w, LFO4 -> LFO1 frequency; LFO2 selected");
+        ml_t4(0); ql_screen_update(&mq, 16); frame_json("MASTER QUAD: off (T4 on the page)");
+        ml_t4(0); ml_t4(1); ml_turn(0, 1024, 0); ml_t4(0);    /* on again, type list, pond */
+        pond_set f; pond_get(ml_words(), &f); f.amt[0] = 25; f.amt[1] = -20; f.amt[2] = 10; f.amt[3] = 31; f.chaos = 23; pond_put(&f, ml_words());
+        for (int b = 0; b < BPS * 40; b++) { host_cycles += cpb; ml_params(live); }
+        pd_screen_update(&mp, 16); frame_json("MASTER POND: chaos 75 %, species 1..4 -> master FX knobs");
+        ml_leave();
     }
     return 0;
 }

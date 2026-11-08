@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include "../screens/fxroute.c"
 int16_t tr_out[4][64];
+const int16_t *ml_params(const int16_t *p) { return p; }   /* master LFO: off (harness/quadlfo_test.c) */
 
 static struct { int32_t x0, y0, x1, y1, w; uint8_t c[4]; } L[256]; static int nl;
 typedef struct { int32_t x, y; uint8_t c[4]; char s[32]; } txt_t;
