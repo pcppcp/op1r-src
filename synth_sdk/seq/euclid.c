@@ -555,6 +555,7 @@ extern volatile uint8_t eu_rec_play;                    /* seq/seq_core.c: Shift
 static int eu_nop(void *self) { (void)self; return 0; }
 static int eu_key_down(void *self, int key)
 {
+    uint32_t caller = OP1_SEQ_CALLER();                                     /* keyboard or USB MIDI */
     (void)self;
     if (key < 0 || key > 23) return 0;
     if (*(volatile uint8_t *)0x01DD7F78) {                              /* Shift + key: mute / run (any screen) */
@@ -564,7 +565,7 @@ static int eu_key_down(void *self, int key)
         if (h) return 1;                                                 /* consumed: no note, no assignment */
     }
     if (*(volatile int *)0x018B65C8 == 0x2D)                        /* euclid screen shown: assign note */
-        eu_key_ex(EU_MODE(), key + 0x35 + (EU_MODE() ? DRUM_OCT() : SYNTH_OCT()) * 12, key);   /* pitch: absolute, now */
+        eu_key_ex(EU_MODE(), op1_seq_key_note(EU_MODE(), key, EU_MODE() ? DRUM_OCT() : SYNTH_OCT(), caller), key);   /* pitch: absolute, as it sounds */
     return 0;                                           /* not consumed: the key also plays its note */
 }
 static void eu_reset(void *self) { (void)self; eu_all_off(EU_MODE()); }

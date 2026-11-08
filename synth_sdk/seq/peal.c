@@ -606,6 +606,7 @@ extern volatile uint8_t eu_rec_play;                    /* seq/euclid.c, handled
 static int pl_nop(void *self) { (void)self; return 0; }
 static int pl_pkey_down(void *self, int key)
 {
+    uint32_t caller = OP1_SEQ_CALLER();                                     /* keyboard or USB MIDI */
     (void)self;
     if (key < 0 || key > 23) return 0;
     int m = PL_MODE(), sh = *(volatile uint8_t *)0x01DD7F78;
@@ -615,7 +616,7 @@ static int pl_pkey_down(void *self, int key)
         if (h == 2 && (tape == 3 || tape == 6)) eu_rec_play = 1;
         if (h) return 1;
     }
-    return pl_key_down(m, key + 0x35 + (m ? PL_DRUM_OCT() : PL_SYNTH_OCT()) * 12, key, sh);   /* a bell (consumed) */
+    return pl_key_down(m, op1_seq_key_note(m, key, m ? PL_DRUM_OCT() : PL_SYNTH_OCT(), caller), key, sh);   /* a bell (consumed) */
 }
 static void pl_pkey_up(void *self, int key)            /* consumed keys only; both modes (a mode switch while held) */
 {

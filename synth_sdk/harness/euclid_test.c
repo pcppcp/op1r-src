@@ -49,6 +49,12 @@ int main(int argc, char **argv)
     for (int i = 0; i < 8192; i++) host_sine[i] = (int16_t)lrint(32767.0 * sin(2 * M_PI * i / 8192.0));
     int render = argc > 1 && !strcmp(argv[1], "render");
 
+    /* key_down's pitch (op1_synth.h op1_seq_key_note): the keyboard adds the octave, R246's USB MIDI note-on
+     * (0x01A858D8..0x01A85C16) not in synth mode, drums always */
+    CHECK(op1_seq_key_note(0, 7, 1, 0x019AC100) == 0x35 + 7 + 12 && op1_seq_key_note(0, 7, 1, 0x01A859DE) == 0x35 + 7, "key note: synth");
+    CHECK(op1_seq_key_note(1, 7, 1, 0x01A859DE) == 0x35 + 7 + 12 && op1_seq_key_note(0, 7, -1, 0) == 0x35 + 7 - 12, "key note: drums, octave -1");
+    CHECK(op1_seq_key_note(0, 0, 2, 0x01A85C16) == 0x35 + 24 && op1_seq_key_note(0, 0, 2, 0x01A858D7) == 0x35 + 24, "key note: range ends");
+
     /* patterns: pulse count, even spread, E(3,8) = x..x..x. */
     for (int n = 1; n <= 16; n++) for (int p = 0; p <= n; p++) {
         eu_seq_t q = { .steps = (uint8_t)n, .pulses = (uint8_t)p };

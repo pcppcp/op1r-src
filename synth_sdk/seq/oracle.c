@@ -608,6 +608,7 @@ extern volatile uint8_t eu_rec_play;                    /* seq/euclid.c, handled
 static int ora_nop(void *self) { (void)self; return 0; }
 static int ora_pkey_down(void *self, int key)
 {
+    uint32_t caller = OP1_SEQ_CALLER();                                     /* keyboard or USB MIDI */
     (void)self;
     if (key < 0 || key > 23) return 0;
     int m = ORA_MODE(), sh = ORA_SHIFT();
@@ -617,7 +618,7 @@ static int ora_pkey_down(void *self, int key)
         if (h == 2 && (tape == 3 || tape == 6)) eu_rec_play = 1;         /* dispatcher presses PLAY afterwards */
         if (h) return 1;
     }
-    int note = key + 0x35 + (m ? ORA_DRUM_OCT() : ORA_SYNTH_OCT()) * 12;
+    int note = op1_seq_key_note(m, key, m ? ORA_DRUM_OCT() : ORA_SYNTH_OCT(), caller);
     if (ora_editing(m) && *(volatile int *)0x018B65C8 == 0x2D) {        /* EDIT on the oracle screen: set lane */
         ora_assign(m, note, key);
         return 0;                                       /* not consumed: the key sounds as usual */

@@ -124,7 +124,7 @@ void gr_restart(int m) { run(m)->restart = 1; }
 #ifdef OP1_HOST
 int gr_host_on_page = 1;                                             /* host tests: the grids page is shown */
 #endif
-int gr_key_down(int m, int key)
+int gr_key_down_from(int m, int key, uint32_t caller)        /* caller: OP1_SEQ_CALLER() of the player's key_down */
 {
     gr_run *r = run(m);
     if (m || key < 0 || key > 23) return 0;
@@ -133,10 +133,11 @@ int gr_key_down(int m, int key)
 #else
     if (!gr_host_on_page) return 0;
 #endif
-    int midi = key + 0x35 + gr_oct(0) * 12;
+    int midi = op1_seq_key_note(0, key, gr_oct(0), caller);
     if (r->held_n < sizeof r->held) { r->held_key[r->held_n] = (uint8_t)key; r->held[r->held_n++] = (uint8_t)midi; }
     return 1;
 }
+int gr_key_down(int m, int key) { return gr_key_down_from(m, key, 0); }   /* host tests: the keyboard */
 void gr_key_up(int m, int key)                               /* by key, not note: the octave may have changed meanwhile */
 {
     gr_run *r = run(m);
@@ -202,7 +203,7 @@ void gr_press(int m, int knob)
 #define GR_MODE()  (*(volatile int *)0x01DE4C40 == 1)
 #define SHIFT_HELD (*(volatile uint8_t *)0x01DD7F78)
 static int gr_nop(void *self) { (void)self; return 0; }
-static int gr_pkey_down(void *self, int key) { (void)self; return gr_key_down(GR_MODE(), key); }
+static int gr_pkey_down(void *self, int key) { (void)self; return gr_key_down_from(GR_MODE(), key, OP1_SEQ_CALLER()); }
 static void gr_pkey_up(void *self, int key) { (void)self; gr_key_up(0, key); gr_key_up(1, key); }
 static void gr_reset(void *self) { (void)self; gr_all_off(GR_MODE()); }
 static void gr_ptick(void *self, int counter) { (void)self; (void)counter; gr_tick(GR_MODE()); }
