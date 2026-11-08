@@ -39,8 +39,7 @@ typedef char ac_size_check[sizeof(ac_voice_t) <= OP1_VOICE_SIZE ? 1 : -1];
  * states. Clamped to 128x full scale they railed the ladder for 30 .. 60 ms: the first note after switching to blot
  * was a click, then a stuck DC level (silence after R246's voice chain), then the note. So the render starts a voice
  * object from rest (ladder and high-pass 0, as in a voice blot has never used) when it lacks blot's tag or holds a
- * state beyond AC_STATE_MAX, and tags it; blot's own states carry on from note to note (legato) as before.
- * Copyright (C) 2026 Hundekraft. */
+ * state beyond AC_STATE_MAX, and tags it; blot's own states carry on from note to note (legato) as before. */
 #define AC_TAG 0xB107
 
 volatile int16_t ac_level[OP1_VOICES];  /* filter envelope per voice, Q15 (screen) */
