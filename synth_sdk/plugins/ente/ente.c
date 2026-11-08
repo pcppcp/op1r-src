@@ -7,7 +7,9 @@
  *         TAPE (their sum), IN (input), INST (master: the live instrument; synth / drum: its own input = SELF),
  *         BEAT 1/1 .. 1/16t (a pulse on the tempo grid, no audio)
  * Sources other than SELF / BEAT come from the core (op1_sc_source). Screen: a rubber duck squeezed by the gain
- * reduction (flat at 24 dB), the source top left. */
+ * reduction (flat at 24 dB), the source top left.
+ * Attack: the detector rises within 0.1 ms and the attack time ramps the gain reduction in (log domain, every 8
+ * samples); release is the detector's. Attack on the reduction: Copyright (C) 2026 Hundekraft. */
 #include "op1_plugin.h"
 
 enum { S_SELF, S_T1, S_T2, S_T3, S_T4, S_TAPE, S_IN, S_BEAT, S_INST };   /* T1..IN = OP1_SC_* numbers */
@@ -23,6 +25,7 @@ static const uint8_t div_k[NDIV] = { 1, 1, 1, 2, 4, 3, 3, 6 };   /* pulses per w
 typedef struct {
     int32_t env;                /* detector, |x| << 8 */
     int32_t g;                  /* gain Q14 */
+    int32_t grs;                /* gain reduction after the attack smoothing, log2 Q10 */
     int32_t lp;                 /* sidechain high-pass state (the low part) */
     int32_t hold;               /* BEAT: samples of pulse left */
     uint32_t beats;             /* BEAT: beats seen (window position); shortcut: 1/1, 1/2, 1/4T count from the FX start,
@@ -59,7 +62,7 @@ static inline int div_of(int e) { return e >= 8 ? e - 8 : 0; }
 static void ente_init(int pos)
 {
     ente_t *s = &st[pos % 3];
-    s->env = s->lp = s->hold = 0; s->g = 16384; s->gr = 0; s->beats = 0;
+    s->env = s->lp = s->hold = s->grs = 0; s->g = 16384; s->gr = 0; s->beats = 0;
 }
 
 /* BEAT: the sample of this block where a pulse of the division falls, or -1 */
@@ -91,7 +94,8 @@ static void process(int pos, int16_t *l, int16_t *r, const int16_t *p)
     int32_t slope = k1 >= 32000 ? 1024 : 1024 - (1024 * 256) / rq8;
     int32_t mk = (w6 * 2048) >> 15;                                        /* 0 .. +12 dB */
     int32_t ta = 4 + (((w5 * w5) >> 15) * 2201 >> 15), tr = 882 + (((k2 * k2) >> 15) * 43218 >> 15);
-    int32_t ca = (1 << 20) / ta, cr = (1 << 20) / tr;
+    int32_t ca = (1 << 20) / 4, cr = (1 << 20) / tr;                     /* detector: 0.1 ms rise, the release */
+    int32_t a8 = ta <= 8 ? 1024 : (8 * 1024) / ta;                         /* attack on the reduction, per 8 samples, Q10 */
     int32_t fc = (w7 * 250) >> 15, hc = src == S_BEAT || fc < 20 ? 0 : (fc * 4669) >> 10;   /* 2 pi fc / fs, Q15 */
 
     int16_t sc[64];
@@ -100,7 +104,7 @@ static void process(int pos, int16_t *l, int16_t *r, const int16_t *p)
     if (src == S_BEAT) { pulse = beat_pulse(s, div_of(ent)); if (pulse >= 0) s->trig++; }
     else if (src != S_SELF) { op1_sc_source(src == S_INST ? OP1_SC_INST : src, sc); x = sc; }
 
-    int32_t env = s->env, g = s->g, lp = s->lp, hold = s->hold, grmax = 0, gt = g, peak = 0;
+    int32_t env = s->env, g = s->g, lp = s->lp, hold = s->hold, grs = s->grs, grmax = 0, gt = g, peak = 0;
     for (int i = 0; i < OP1_FX_BLOCK; i++) {
         int32_t v;
         if (src == S_BEAT) { if (i == pulse) hold = HOLD; v = hold > 0 ? (hold--, 32767) : 0; }
@@ -113,8 +117,9 @@ static void process(int pos, int16_t *l, int16_t *r, const int16_t *p)
         env += (int32_t)(((int64_t)d * (d > 0 ? ca : cr)) >> 20);
         if (!(i & 7)) {                                                    /* gain computer every 8 samples */
             int32_t over = env > 256 ? log2_q10((uint32_t)env >> 8 | 1) - thr : -1, gr = over > 0 ? (over * slope) >> 10 : 0;
-            if (gr > grmax) grmax = gr;
-            gt = exp2_q14(mk - gr);
+            grs = gr > grs ? grs + (((gr - grs) * a8 + 1023) >> 10) : gr;     /* ramps in over the attack; falls with the detector */
+            if (grs > grmax) grmax = grs;
+            gt = exp2_q14(mk - grs);
         }
         g += (gt - g) >> 3;
         int32_t a = sat16((l[i] * g) >> 14);
@@ -123,7 +128,7 @@ static void process(int pos, int16_t *l, int16_t *r, const int16_t *p)
         if (r) { int32_t b = sat16((r[i] * g) >> 14); r[i] = (int16_t)b; if (b < 0) b = -b; if (b > a) a = b; }
         if (a > peak) peak = a;
     }
-    s->env = env; s->g = g; s->lp = lp; s->hold = hold; s->gr = grmax;
+    s->env = env; s->g = g; s->lp = lp; s->hold = hold; s->grs = grs; s->gr = grmax;
 #ifndef OP1_HOST
     volatile int16_t *m = op1_fx_meter(pos);
     int32_t mv = (*m * 0xfe00) >> 16;
