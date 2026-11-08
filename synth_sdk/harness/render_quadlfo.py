@@ -15,7 +15,6 @@ def main(out=None):
     frames = [json.loads(l) for l in subprocess.run([exe, 'render'], check=True, capture_output=True,
                                                      text=True).stdout.splitlines() if l.startswith('{')]
     svg = ET.parse(os.path.join(SDK, 'display', 'quadlfo.svg')).getroot()
-    fox = ET.parse(os.path.join(SDK, 'display', 'foxlfo.svg')).getroot()
     pond = ET.parse(os.path.join(SDK, 'display', 'pondlfo.svg')).getroot()
     cairo = R.cairo
     S, W, H, pad, lab = R.SCALE, 320 * R.SCALE, 160 * R.SCALE, 12, 22
@@ -27,7 +26,7 @@ def main(out=None):
         ctx.save(); ctx.set_source_rgb(1, 1, 1); ctx.set_font_size(14); ctx.move_to(x0, y0 + 15); ctx.show_text(fr['label']); ctx.restore()
         ctx.save(); ctx.translate(x0, y0 + lab); ctx.rectangle(0, 0, W, H); ctx.clip()
         ctx.set_source_rgb(0, 0, 0); ctx.paint(); ctx.scale(S, S)
-        R.draw_svg(ctx, fox if fr['label'].startswith('FOX') else pond if fr['label'].startswith('POND') else svg, fr['nodes'])
+        R.draw_svg(ctx, pond if fr['label'].startswith('POND') else svg, fr['nodes'])
         for x1, y1, x2, y2, w, c in fr['lines']:
             ctx.set_source_rgba(*(v / 255 for v in c)); ctx.set_line_width(w / 1024); ctx.set_line_cap(cairo.LINE_CAP_BUTT)   # as the OP-1 rasteriser
             ctx.move_to(x1 / 1024, y1 / 1024); ctx.line_to(x2 / 1024, y2 / 1024); ctx.stroke()
