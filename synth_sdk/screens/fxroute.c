@@ -105,7 +105,8 @@ static inline int32_t q15(int32_t a, int32_t b) { return (a * b) >> 15; }
 
 static void fr_route_aux(void (*fx)(void *, int16_t *, int16_t *, const int16_t *), void *self, int16_t *l, int16_t *r, const int16_t *params)
 {
-    if (!fr_aux_live) { fx(self, l, r, params); return; }   /* no send up: FX2 on the master as stock */
+    /* every send at 0: nothing is sent. The FX still runs, on silence (all gains 0, so stale track outs don't
+     * matter), and a tail fades out. Running it on the whole master here made send 0 sound like a full send. */
     uint32_t sel = fr_out ? (uint32_t)TRACK : 4;            /* mono tape: the recording track's send muted */
     int32_t g[4];
     for (int t = 0; t < 4; t++)                             /* post-fader send gain, Q15 */
