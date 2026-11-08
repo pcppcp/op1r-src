@@ -131,7 +131,8 @@ int spu_knob(int knob, int delta)
 int spu_key(int code, int pressed)
 {
     int pg = page();
-    if (pg < 0 || (pg != T1 && br_open)) { if (br_open) sb_close(); if (pg < 0) return 0; }
+    if (br_open && pg != T1) sb_close();                             /* the browser lives on T1 only */
+    if (pg < 0) return 0;
     if (code == 0x06 && pressed && br_open) { sb_close(); return 1; }   /* T1 closes the browser */
     if (code >= 0x07 && code <= 0x09 && pressed && br_open) sb_close();  /* T2..T4 leave it (the key acts as usual) */
     if (code < 0x3B || code > 0x3E) return 0;
