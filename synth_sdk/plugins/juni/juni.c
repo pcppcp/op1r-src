@@ -21,8 +21,12 @@
  * starts at its own phase, so a chord drifts like an ensemble. Rates and depths are approximations of the classic
  * BBD chorus, tuned by ear, not measured from a unit.
  *
- * Synthesis runs at 22.05 kHz (the output bus rate, as Oxbow), control steps every 8 internal samples, and a
- * four-point interpolation makes the 128 native samples. Instrument state (the LFOs, the macros) advances once per
+ * Synthesis runs 64 internal samples a call at 44.1 kHz (R246's voice call is 128 samples at 88.2 kHz, 689 calls/s;
+ * as Oxbow), control steps every 8 internal samples, and a four-point interpolation makes the 128 voice samples.
+ * Rates (2026-11-03): the constants were made for a 22.05 kHz internal rate until then, so on the unit the filter,
+ * HPF, PWM and chorus LFOs ran at twice their design and key tracking read the note 12 semitones low (which the
+ * octave-high cutoff table hid); FS_INC and gen_tables.py now use 44,100 and NOTE_OFF_Q8 88.2 kHz steps, and the
+ * chorus delays are counted at 44.1 kHz (chorus_pass). Instrument state (the LFOs, the macros) advances once per
  * block, from the first voice rendered in it (voices render in ascending order, as EVA and Oxbow do).
  *
  * Copyright (C) 2026 Hundekraft. GPL-3.0-or-later with the OP-1 firmware permission (see LICENSE and NOTICE).
@@ -30,10 +34,13 @@
 #include "op1_plugin.h"
 #include "juni_tables.h"
 
-#define NS (OP1_BLOCK / 2)                      /* internal samples per block, 22.05 kHz */
+#define NS (OP1_BLOCK / 2)                      /* internal samples per block, 44.1 kHz */
 #define CTL 8                                   /* internal samples per control step */
 #define NC (NS / CTL)                           /* control steps per block */
-#define FS_INC(hz) ((uint32_t)((hz) * 4294967296.0 / 22050.0))   /* LFO phase step per internal sample */
+#define FS_INC(hz) ((uint32_t)((hz) * 4294967296.0 / 44100.0))   /* LFO phase step per internal sample (44.1 kHz) */
+/* PWM RATE's LFO step per internal sample: 0.9 Hz + rate^2 * 6.1 Hz (rate Q15; FS_INC(6.1) in steps of 2^12, so the
+ * top stays within 0.1 % of 7 Hz) */
+#define PWM_INC(rate) (FS_INC(0.9) + (((uint32_t)(((rate) * (rate)) >> 15) * (uint32_t)(FS_INC(6.1) >> 12)) >> 3))
 
 typedef struct {
     uint32_t p;                                 /* DCO phase at half the note's rate (bit 31 = the sub) */
@@ -133,7 +140,7 @@ static void chorus_map(int32_t ch, chorus_t *o)
 {
     int32_t u;
     o->c = ch < 3277 ? 0 : clampi((ch - 3277) * 4, 0, 32767);
-    o->dep_s = 40 * 256; o->dep_f = 0;
+    o->dep_s = 80 * 256; o->dep_f = 0;                              /* depths, Q8 internal samples: 1.8 ms */
     if (ch < 16384) {                                               /* I, then towards II */
         u = ch < 8192 ? 0 : (ch - 8192) << 2;
         o->inc_s = (uint32_t)lerp(FS_INC(0.5) >> 4, FS_INC(0.83) >> 4, u) << 4;
@@ -142,8 +149,8 @@ static void chorus_map(int32_t ch, chorus_t *o)
     } else {                                                        /* II -> I+II */
         u = (ch - 24576) << 2;
         o->inc_s = FS_INC(0.83);
-        o->dep_s = lerp(40 * 256, 0, u);
-        o->dep_f = lerp(0, 5 * 256, u);
+        o->dep_s = lerp(80 * 256, 0, u);
+        o->dep_f = lerp(0, 10 * 256, u);                            /* 0.23 ms */
     }
 }
 
@@ -161,7 +168,7 @@ static void block_shared(const int16_t *k)
     shape_mix(shape, &m);
     as = m.s; ap = m.q; ab = m.b; pwm_depth = m.pwd;
     /* PWM: one LFO for the instrument; width 50 % .. 90 % (never thin enough to vanish) */
-    pwm_ph += (FS_INC(0.9) + (uint32_t)((rate * rate) >> 15) * (uint32_t)(FS_INC(6.1) >> 15)) * NS;
+    pwm_ph += PWM_INC(rate) * NS;
     i = (((tri(pwm_ph) + 32768) >> 1) * pwm_depth) >> 15;
     pw_blk = 0x80000000u + ((uint32_t)(i < 26214 ? i : 26214) << 16);   /* up to +40 % */
 
@@ -172,8 +179,8 @@ static void block_shared(const int16_t *k)
     /* resonance: page 2, plus up to 35 % with SWEEP; at most 92 % of self-oscillation */
     reso_q15 = clampi(res + ((sweep * 11469) >> 15), 0, 32767);
     reso_q15 = (reso_q15 * 30147) >> 15;
-    /* HPF: flat at 0, then a one-pole up to ~800 Hz; squared so the low end has room */
-    ghp = (((hpf * hpf) >> 15) * 6800) >> 15;
+    /* HPF: flat at 0, then a one-pole up to ~800 Hz (3597: 816 Hz at 44.1 kHz); squared so the low end has room */
+    ghp = (((hpf * hpf) >> 15) * 3597) >> 15;
     /* resonance thins the bass of a ladder: give some of it back, so turning RESONANCE doesn't drop the level.
      * The ladder's full swing (+-65536 here) landed within about 0.7 dB of full scale at the old 14000 + 4000; the +4.5 dB
      * of the level pass keeps the presets' voice peaks under -1 dBFS, an extreme knob set can reach op1_sat16 */
@@ -232,11 +239,16 @@ static void dco_pass(voice_t *v, int32_t *x, const uint32_t *incs, uint32_t pw, 
     v->prev = prev;
 }
 
-/* the chorus, at half rate (11.025 kHz: a BBD's wet signal is dark anyway). Per voice the last 64 half-rate samples
- * (5.8 ms) and this block's 32, in one line (no wrap to mask); each half-rate sample is the mean of two (a gentle
- * anti-alias). Two taps with opposite LFOs, linearly interpolated, then the wet sum interpolated back to 22.05 kHz.
- * da, db: each tap's delay at the steps' starts (and the block's end), Q8 samples at 22.05 kHz. */
-#define HIST 64
+/* the chorus, at half rate (22.05 kHz: a BBD's wet signal is dark anyway). Per voice the last HIST half-rate samples
+ * and this block's 32, in one line (no wrap to mask); each half-rate sample is the mean of two (a gentle
+ * anti-alias). Two taps with opposite LFOs, linearly interpolated, then the wet sum interpolated back to 44.1 kHz.
+ * da, db: each tap's delay at the steps' starts (and the block's end), Q8 internal samples (44.1 kHz).
+ * Rate (2026-11-03): the delays were designed as 22.05 kHz samples; now 154 +- 80 internal samples (3.5 ms +- 1.8 ms
+ * at 44.1 kHz), up to 117 half-rate samples back: a 120-sample history (5.4 ms; dline32 1,824 bytes over six voices,
+ * was 1,152 with 64; the owner approved the memory and the longer copy, 2026-11-03). */
+#define JN_CHO_C (154 * 256)                    /* the taps' centre delay, Q8 internal samples: 3.5 ms */
+#define HIST 120
+_Static_assert(HIST >= ((JN_CHO_C + 80 * 256) >> 9) + 1, "the history holds the longest tap (117) and the sample before it");
 #define NH (NS / 2)
 static int32_t dline32[OP1_VOICES][(HIST + NH) / 2];        /* int16 samples, word-aligned for the copy */
 static int32_t wlast[OP1_VOICES];                           /* the last block's last wet sample */
@@ -254,11 +266,11 @@ static void chorus_pass(int vi, int32_t *x, const int32_t *da, const int32_t *db
         const int32_t sa = (da[c + 1] - da[c]) >> 3, sb = (db[c + 1] - db[c]) >> 3;
         const int16_t *base = dl + HIST + c * (CTL / 2);
         for (int i = 0; i < CTL / 2; i++) {
-            const int16_t *ta = base + i - (a >> 8), *tb = base + i - (b >> 8);   /* >= dl + 4: delays < 60 */
+            const int16_t *ta = base + i - (a >> 8), *tb = base + i - (b >> 8);   /* >= dl + 3: delays <= 117 */
             const int32_t a0 = ta[0], b0 = tb[0];
             const int32_t y = a0 + (fmul((ta[-1] - a0) >> 1, (a & 255) << 7) >> 15)
                             + b0 + (fmul((tb[-1] - b0) >> 1, (b & 255) << 7) >> 15);
-            hl += ((y - hl) * 4352) >> 15;                        /* ~250 Hz: the bass stays dry (no comb on it) */
+            hl += ((y - hl) * 2253) >> 15;                        /* ~250 Hz at 22.05 kHz: the bass stays dry (no comb on it) */
             w[c * (CTL / 2) + i] = fmul((y - hl) >> 1, wet);       /* the taps, scaled by the wet level, << 14 */
             a += sa; b += sb;
         }
@@ -274,7 +286,7 @@ static void chorus_pass(int vi, int32_t *x, const int32_t *da, const int32_t *db
     }
     wlast[vi] = wp;
     int32_t *h = dline32[vi];
-    for (int i = 0; i < HIST / 2; i++) h[i] = h[i + NH / 2];   /* keep the last 64 */
+    for (int i = 0; i < HIST / 2; i++) h[i] = h[i + NH / 2];   /* keep the last HIST */
 }
 
 /* the ladder: the soft input stage, the 4th pole fed back one sample late (KSELF accounts for that); then the HPF.
@@ -307,7 +319,7 @@ static void juni_render(void *self, int16_t *out, const int16_t *knobs)
     if (vi <= last_voice) block_shared(knobs);
     last_voice = vi;
 
-    uint32_t inc = (uint32_t)OP1_PITCH_INC[0];   /* half-rate phase at 22.05 kHz = the native step */
+    uint32_t inc = (uint32_t)OP1_PITCH_INC[0];   /* the 88.2 kHz step: per 44.1 kHz sample it turns p at half the note's rate */
     if (inc > 0x3FFFFFFFu) inc = 0x3FFFFFFFu;
     if (v->fresh) {                             /* the firmware writes pitch and velocity around note_on */
         int32_t L = bitlen(inc) - 1, m, n8;
@@ -339,8 +351,8 @@ static void juni_render(void *self, int16_t *out, const int16_t *knobs)
             const uint32_t t = lfo_s + vph + inc_s * (uint32_t)(CTL * c);
             const uint32_t tf = lfo_f + vph + FS_INC(8.0) * (uint32_t)(CTL * c);
             const int32_t m = (dep_s * tri(t) + dep_f * tri(tf)) >> 15;
-            da[c] = 77 * 256 + m;               /* 3.5 ms +- up to 1.8 ms */
-            db[c] = 77 * 256 - m;
+            da[c] = JN_CHO_C + m;               /* 3.5 ms +- up to 1.8 ms */
+            db[c] = JN_CHO_C - m;
         }
         if (c == NC) break;
         const uint32_t ci = (uint32_t)OP1_PITCH_INC[c * 2 * CTL];
@@ -553,8 +565,8 @@ static void draw_fire(void *r, int32_t sweep, int32_t env)
  * the rows travel as a wave, neighbours in opposite phase */
 static void draw_water(void *r, const chorus_t *co, int32_t env)
 {
-    const int32_t ks = co->c * (co->dep_s >> 8) / 40;              /* the slow LFO's share, Q15 */
-    const int32_t kf = co->c * (co->dep_f >> 8) / 5;               /* the fast one's (I+II) */
+    const int32_t ks = co->c * (co->dep_s >> 8) / 80;              /* the slow LFO's share, Q15 */
+    const int32_t kf = co->c * (co->dep_f >> 8) / 10;              /* the fast one's (I+II) */
     const int32_t ke = env;                                         /* the voices: always some, with or without chorus */
     int32_t amt = ks + kf + ke;
     if (amt > 32767) amt = 32767;
@@ -595,13 +607,13 @@ static void juni_screen_update(void *scr, int dt)
     shape_mix(k[1], &m);
     chorus_map(k[3], &co);
     s_frame++;
-    /* the screen's LFOs, per frame (~60 a second): one frame = 368 samples at 22.05 kHz */
+    /* the screen's LFOs, per frame (~60 a second): one frame = 735 internal samples at 44.1 kHz (the audio's steps) */
     const int16_t *p2 = op1_synth_knobs(OP1_SCREEN_SLOT & 7);         /* page 2: RESONANCE, HPF, PWM RATE */
     const int32_t res = knob(p2, 5), hpf = knob(p2, 6), rate = knob(p2, 7);
-    s_pwm += (FS_INC(0.9) + (uint32_t)((rate * rate) >> 15) * (uint32_t)(FS_INC(6.1) >> 15)) * 368u;   /* as render */
-    s_lfo_s += co.inc_s * 368u;
-    s_lfo_f += FS_INC(8.0) * 368u;
-    s_lfo_e += FS_INC(1.1) * 368u;
+    s_pwm += PWM_INC(rate) * 735u;                                     /* as render */
+    s_lfo_s += co.inc_s * 735u;
+    s_lfo_f += FS_INC(8.0) * 735u;
+    s_lfo_e += FS_INC(1.1) * 735u;
     const int32_t pwi = (((tri(s_pwm) + 32768) >> 1) * m.pwd) >> 15;
     const uint32_t pw = 0x80000000u + ((uint32_t)(pwi < 26214 ? pwi : 26214) << 16);
     /* the loudest sounding voice's envelope (a voice that rendered in the last few blocks sounds) */

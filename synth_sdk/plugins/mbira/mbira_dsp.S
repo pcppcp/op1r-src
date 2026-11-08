@@ -306,8 +306,9 @@ _mb_pass1:
  * void mb_box(const int32_t *acc, int32_t *bd, int32_t *st, int32_t bx, int32_t dbx8): the box's band-pass over the 16
  *   groups of 8 (mbira.c's C loop, bit for bit), st = { blo, bbd, bo, bp } in / out (the voice's four words), bx the
  *   box level at the block's start, dbx8 its step per group; per group i: in = acc[8 i] + .. + acc[8 i + 7],
- *   bd[2 i] = bp, bd[2 i + 1] = (bo - bp) >> 3, bp = bo, blo = clamp(blo + (bbd >> 2)), bbd = clamp(bbd + (((in >> 3)
- *   - blo - (bbd >> 2)) >> 2)) (clamp: -131071 .. 131071), bo = ((((bbd (bx >> 2)) >> 13) 3) >> 2, bx += dbx8
+ *   bd[2 i] = bp, bd[2 i + 1] = (bo - bp) >> 3, bp = bo, blo = clamp(blo + (bbd >> 3)), bbd = clamp(bbd + (((in >> 3)
+ *   - blo - (bbd >> 2)) >> 3)) (clamp: -131071 .. 131071), bo = ((((bbd (bx >> 2)) >> 13) 3) >> 2, bx += dbx8
+ *   (f = 1/8 at the groups' 11.025 kHz: 220 Hz; 2026-11-03, was 1/4 for 5.5 kHz)
  * void mb_out(const int32_t *acc, int16_t *out, const int32_t *bd, int32_t g): out[j] = sat16(((acc[j] + o_j) * g) >> 15)
  *   with the box's output o_j stepping through each group of 8: o = bd[2 i], then o += bd[2 i + 1] before each sample
  *   (bd = 0: no box). sat16(x >> 15) is the high half of x << 1 with saturation. */
@@ -344,15 +345,16 @@ _mb_box:
 	R1 >>>= 3;
 	[I1++] = R1;                         /* bd[2 i + 1] */
 	R5 = R4;                             /* bp = bo */
-	R1 = R3 >>> 2;                       /* bbd >> 2 */
+	R1 = R3 >>> 3;                       /* bbd >> 3 */
 	R4 = -R7;
 	R2 = R2 + R1 (NS);
 	R2 = MIN (R2, R7);
 	R2 = MAX (R2, R4);                   /* blo */
+	R1 = R3 >>> 2;                       /* bbd >> 2 */
 	R0 >>>= 3;
 	R0 = R0 - R2 (NS);
 	R0 = R0 - R1 (NS);
-	R0 >>>= 2;
+	R0 >>>= 3;
 	R3 = R3 + R0 (NS);
 	R3 = MIN (R3, R7);
 	R3 = MAX (R3, R4);                   /* bbd */
@@ -599,9 +601,10 @@ _mb_wah2:
 
 /* ---- the buzz ----
  * void mb_buzz(int32_t *acc, const int32_t *gz, uint32_t *st): st = { noise, nprev, zlp } in / out; for each group i
- *   of 8 samples with contact gz[i] != 0: n = lcg(noise) >> 16 (arithmetic), zlp += (((n - nprev) >> 1) - zlp) >> 1,
- *   acc[j] += (zlp * gz[i]) >> 15, nprev = n; groups with gz[i] = 0 are left as they are */
-.macro BUZZ_A                                /* n into R6, nprev in R1; the block's word through R1 */
+ *   of 8 samples with contact gz[i] != 0, per sample pair (j, j + 1) (the noise at 44.1 kHz, 2026-11-03): n = lcg(noise)
+ *   >> 16 (arithmetic), zlp += (((n - nprev) >> 1) - zlp) >> 1, z = (zlp * gz[i]) >> 15, acc[j] += z, acc[j + 1] += z,
+ *   nprev = n; groups with gz[i] = 0 are left as they are */
+.macro BUZZ_A                                /* a pair: n into R6, nprev in R1; the block's words through R1 */
 	R0 *= R4;
 	R0 = R0 + R5 (NS);
 	R6 = R0 >>> 16;
@@ -613,10 +616,14 @@ _mb_wah2:
 	R7 = R2.L * R3.L (IS);
 	R7 = R7 >>> 15;
 	R1 = R1 + R7 (NS);
+	[I1++] = R1;
+	R1 = [I0++];
+	R1 = R1 + R7 (NS);
+	[I1++] = R1;
 .endm
-.macro BUZZ_B                                /* n into R1, nprev in R6; the block's word through R6 */
+.macro BUZZ_B                                /* a pair: n into R1, nprev in R6; the block's words through R6 */
 	R0 *= R4;
-	R0 = R0 + R5 (NS) || [I1++] = R1 || NOP;
+	R0 = R0 + R5 (NS);
 	R1 = R0 >>> 16;
 	R7 = R1 - R6 (NS);
 	R7 = R7 >>> 1 || R6 = [I0++] || NOP;
@@ -625,6 +632,9 @@ _mb_wah2:
 	R2 = R2 + R7 (NS);
 	R7 = R2.L * R3.L (IS);
 	R7 = R7 >>> 15;
+	R6 = R6 + R7 (NS);
+	[I1++] = R6;
+	R6 = [I0++];
 	R6 = R6 + R7 (NS);
 	[I1++] = R6;
 .endm
@@ -658,11 +668,7 @@ _mb_buzz:
 	BUZZ_A
 	BUZZ_B
 	BUZZ_A
-	BUZZ_B
-	BUZZ_A
-	BUZZ_B
-	BUZZ_A
-	BUZZ_B                               /* nprev is in R1 again */
+	BUZZ_B                               /* four pairs; nprev is in R1 again */
 	JUMP .Lbz_e;
 .Lbz_skip:
 	I0 += M0;

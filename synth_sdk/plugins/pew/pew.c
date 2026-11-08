@@ -27,13 +27,14 @@
 
 typedef struct {
     uint32_t ph, hph;   /* drum side, horn side (the horn's pitch wobbles) */
-    int32_t clk;        /* blocks since the note-on: the key click sounds in blocks 0 and 1 */
+    int32_t clk;        /* blocks since the note-on: the key click sounds in blocks 0 to 3 */
     int32_t gate;       /* the key is held (for the percussion's single trigger) */
 } voice_t;
 
 static voice_t voices[ENGINE_VOICES];
 static uint32_t horn_ph, drum_ph, vib_ph;             /* rotor angles and the scanner's, 2^32 per turn */
-static int32_t horn_speed, drum_speed;                /* phase per block */
+static int32_t horn_speed, drum_speed;                /* phase per call (689 a second) */
+static uint32_t ticks;                                /* calls, for what moves every other call */
 static int last_voice = ENGINE_VOICES;
 volatile uint32_t pew_blocks;                         /* rendered blocks, for the screen */
 volatile uint32_t pew_horn, pew_drum;                 /* rotor angles, for the screen */
@@ -148,8 +149,8 @@ static int32_t loudness(const uint8_t *bar)
     return lo;
 }
 
-/* once a block: start, continue or finish a table build, BUILD_STEP points a block (33 blocks, about 95 ms, from a
-   drawbar step to its sound); a build runs to its end, the next one then starts from wherever the knobs are by then */
+/* once a block: start, continue or finish a table build, BUILD_STEP points a block (33 blocks, about 48 ms at 689
+   blocks a second, from a drawbar step to its sound); a build runs to its end, the next one then starts from wherever the knobs are by then */
 static int fresh;                                     /* a note started this block with no key held */
 static int fresh_build;                               /* the build under way started with such a note */
 
@@ -167,7 +168,7 @@ static void tables(void)
     }
     /* faster when it matters: the first tables are built whole (by pew_prepare() at the screen's load; here, in
        one block, only if that did not run), so the first note sounds at once; while a phrase starts (a note with no key held: a preset just
-       loaded, a knob moved between phrases) 64 points a block, so the new sound is there within 8 blocks (23 ms) */
+       loaded, a knob moved between phrases) 64 points a block, so the new sound is there within 8 blocks (12 ms) */
     if (fresh) fresh_build = 1;
     const int until = !built ? PT : build_at + (fresh_build ? 4 : 1) * BUILD_STEP;
     do {
@@ -184,8 +185,10 @@ static void tables(void)
     }
 }
 
-/* ---- the key click: one noise burst for every key, rebuilt when its level steps, 64 samples a block ---- */
-static int32_t clk_buf[2 * ENGINE_BLOCK];
+/* ---- the key click: one noise burst for every key, rebuilt when its level steps, 64 samples a block ----
+ * 512 samples at 88.2 kHz (5.8 ms, four blocks), decaying with a time constant of 64 samples (0.73 ms, c -= c >> 6):
+ * e^-8 at the end, as designed */
+static int32_t clk_buf[4 * ENGINE_BLOCK];
 static int32_t clk_have = -1, clk_lvl, clk_c;
 static int clk_at = -1;
 static uint32_t clk_noise;
@@ -203,10 +206,10 @@ static void click(int32_t lvl)
     for (int i = 0; i < 64; i++) {
         noise = noise * 1664525u + 1013904223u;
         o[i] = (((int32_t)(noise >> 17) - 16384) * ((c * clk_lvl) >> 15)) >> 15;
-        c -= c >> 5;
+        c -= c >> 6;
     }
     clk_noise = noise, clk_c = c, clk_at += 64;
-    if (clk_at == 2 * ENGINE_BLOCK) clk_have = clk_lvl, clk_at = -1;
+    if (clk_at == 4 * ENGINE_BLOCK) clk_have = clk_lvl, clk_at = -1;
 }
 
 /* ---- the percussion: one envelope for all keys (Q15), struck when no key was held ---- */
@@ -329,17 +332,18 @@ void engine_render(void *self, int16_t *out, const int16_t *knobs)
         tables();
         fresh = 0;
         click(m_click);
-        perc_env = (perc_env * m_dec) >> 15;
+        if (ticks++ & 1) perc_env = (perc_env * m_dec) >> 15;     /* m_dec is per 344 calls/s: every other call */
         const int32_t k3 = knobs[3] < 0 ? 0 : knobs[3];
         const int32_t target = pew_leslie_target(k3);
         const int braking = target == 0;
-        /* speeding up: horn ~0.2 s, drum ~0.75 s. Braking: horn ~1 s to a stop (an arithmetic shift of a negative
-           step is at least -1, so the speed reaches 0 exactly), drum >> 7 (~2 s) */
-        horn_speed += (target - horn_speed) >> 6;
-        drum_speed += (((target >> 3) * 7) - drum_speed) >> (braking ? 7 : 8);
+        /* speeding up: horn ~0.2 s, drum ~0.75 s (time constants 128 and 512 calls of 1.451 ms). Braking: horn ~1 s to a
+           stop (an arithmetic shift of a negative step is at least -1, so the speed reaches 0 exactly), drum >> 8
+           (~2 s) */
+        horn_speed += (target - horn_speed) >> 7;
+        drum_speed += (((target >> 3) * 7) - drum_speed) >> (braking ? 8 : 9);
         horn_ph += (uint32_t)horn_speed;
         drum_ph += (uint32_t)drum_speed;
-        vib_ph += 85500000u;                                       /* the scanner: 6.86 Hz */
+        vib_ph += 42750000u;                                       /* the scanner: 6.86 Hz */
         pew_horn = horn_ph;
         pew_speed = horn_speed;
         pew_drum = drum_ph;
@@ -348,14 +352,14 @@ void engine_render(void *self, int16_t *out, const int16_t *knobs)
 
         /* horn: tremolo 0.7..1, Doppler a few cents, plus the scanner vibrato; drum: tremolo 0.55..1 */
         int32_t hs = rsin(horn_ph), hc = rsin(horn_ph + 0x40000000u), ds = rsin(drum_ph);
-        /* the modulation depth eases to 0 as a rotor slows below ~0.34 Hz (2^22 phase per block), so a stopped rotor
+        /* the modulation depth eases to 0 as a rotor slows below ~0.34 Hz (2^21 phase per call), so a stopped rotor
            sits at the middle of the tremolo with no detune whatever angle it stopped at; full depth above */
-        if (horn_speed < 0x400000) {
-            const int32_t f = horn_speed >> 7;                          /* Q15, 0 .. 32767 */
+        if (horn_speed < 0x200000) {
+            const int32_t f = horn_speed >> 6;                          /* Q15, 0 .. 32768 */
             hs = (hs * f) >> 15;
             hc = (hc * f) >> 15;
         }
-        if (drum_speed < 0x400000) ds = (ds * (drum_speed >> 7)) >> 15;
+        if (drum_speed < 0x200000) ds = (ds * (drum_speed >> 6)) >> 15;
         /* the horn's pitch: inc + (inc >> 16) * hv >> 5, |hv| <= 16048 (Doppler hc >> 4 = 1.7 cents at most, the vibrato
            up to about 11.5 cents) */
         b_hv = (hc >> 4) + ((rsin(vib_ph) * m_vib) >> 15);
@@ -373,9 +377,9 @@ void engine_render(void *self, int16_t *out, const int16_t *knobs)
 
     int32_t gain2 = ((((30000 * vel) >> 7) * b_gf) >> 15) * 2;
     if (gain2 > 65535) gain2 = 65535;
-    const int32_t *cb = v->clk < 2 ? clk_buf + v->clk * ENGINE_BLOCK : 0;
+    const int32_t *cb = v->clk < 4 ? clk_buf + v->clk * ENGINE_BLOCK : 0;
     v->clk++;
-    if (v->clk > 2) v->clk = 2;
+    if (v->clk > 4) v->clk = 4;
 
     uint32_t ph = v->ph, hph = v->hph;
     const int16_t *lo_t = t_lo[cur];

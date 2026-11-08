@@ -1,16 +1,17 @@
-/* MONOLIT's sample loop, hand-scheduled for the Blackfin: the same arithmetic as monolit.c's C loop (kept there for
+/* MONOLIT's oscillators, hand-scheduled for the Blackfin: the same arithmetic as monolit.c's C loop (kept there for
  * host builds and as kern_check.py's reference), bit for bit, in passes over the block so each keeps its values in
- * registers: an oscillator pass per saw (osc 1 stores the mix, osc 2 and 3 add to it), the sub square's pass, then
- * the ladder. A pass of an oscillator whose level is 0 only moves its phase (mo_adv). The C loop needs a 32 x 32
+ * registers: an oscillator pass per saw (osc 1 stores the mix, osc 2 and 3 add to it) and the sub square's pass.
+ * The ladder is monolit_fc.S (Moai's zero-delay ladder, gen_fc.py): render runs it on the mix, halved, into out[]
+ * (2026-11-04: it was mo_ladder here, a unit-delay ladder). A pass of an oscillator whose level is 0 only moves its
+ * phase (mo_adv). The C loop needs a 32 x 32
  * multiply for most of its products; here every product in the common path is a 16 x 16 MAC.
  *
  * In mo_osc's registers a phase is kept XOR 0x80000000 (p'), so a saw's base (t >> 16) - 32768 is p'.H, and t < inc (unsigned) is
  * p' < inc ^ 0x80000000 (signed); 0 - t is (0 - p') ^ 0x80000000.
  *
- * void mo_run(br_voice *v, int16_t *out, const int32_t *b): the block, called by render. v starts with ph[4] (raw
+ * void mo_run(br_voice *v, int16_t *out, const int32_t *b): the oscillators, called by render. v starts with ph[4] (raw
  *   phases) and s[4] (the ladder); b (words) = { m0 | o1 << 16, rdt, m1 | o2 << 16, rdt, m2 | o3 << 16, rdt3,
- *   m0 | osub << 16, rsub, tm, tp, g << 16, gd << 9, a << 16, ad << 9, drive | k << 16, -49152, 49152, 9710, comp,
- *   bsel, pre, mix pad }. It saves and zeroes L0..L3 and calls the passes below, which take their arguments in
+ *   m0 | osub << 16, rsub, tm, tp, (10 .. 18 unused), bsel, pre, mix pad }. It saves and zeroes L0..L3 and calls the passes below, which take their arguments in
  *   registers (R0, R1, R2, R3, P1) and are called only from mo_run:
  * mo_osc (R0 &ph, R1 inc, R2 mix pad, R3 step, P1 { m | o << 16, rdt }): per sample i = inc + (int32_t)(inc >> 16)
  *   * m (|m| < 2^15: a signed x unsigned 16-bit product), p += i, mix[i] = read[i] + (o * saw(p, i, rdt) >> 15);
@@ -25,16 +26,10 @@
  *   the square is -16384 (p < 2^31) or 16384: tm = osub * -16384 >> 15, tp = osub * 16384 >> 15. A saw needs a
  *   correction only when y = p + isub (mod 2^32) or y ^ 2^31 is below 2 isub (no wrap: isub < 2^31); then the
  *   sample is done out of line exactly as C, both saws with both tests.
- * mo_ladder (R0 out, R1 &s, R2 mix, P1 { g << 16, gd << 9, a << 16, ad << 9, drive | k << 16, -49152, 49152,
- *   9710, comp }): the drive, soft clip and four one-poles. The ramps as gc << 9 (the high half is C's gc >> 7).
- *   Every a * b >> n with a 32-bit a and 0 <= b < 2^16 is (a.L * b >> 16) + a.H * b (MAC1: unsigned x unsigned,
- *   then signed x unsigned), with a shifted left 4 first for >> 12 and b doubled for >> 15. The output's
- *   y * gain >> 15 (gain < 2^15, the level pass's 29612 included) is (y.L gain >> 15) + 2 y.H gain in A0, extracted
- *   to 16 bits with saturation, as op1_sat16.
  *
  * Mixed-mode (IS,M) products are MAC1 only: first operand signed, second unsigned. mo_osc, mo_sub and mo_adv load the next
  * increment into R0 in the same packet that adds the current one (a parallel packet reads its operands before its
- * loads write, the usual Blackfin idiom); mo_ladder's parallel loads only target registers the packet doesn't read. M1 is not touched (R246's PmSynth keeps its frame there).
+ * loads write, the usual Blackfin idiom); M1 is not touched (R246's PmSynth keeps its frame there).
  * Host builds assemble it empty.
  * Copyright (C) 2026 Hundekraft. GPL-3.0-or-later with the OP-1 firmware permission (see LICENSE and NOTICE).
  */
@@ -286,90 +281,6 @@ _mo_sub:
 	RTS;
 	.size _mo_sub, .-_mo_sub
 
-/* ---- mo_ladder ---- */
-/* R4..R7 s1..s4; R0 the mix, then u; R1 constants, then 2 g / 2 gain; R2 / R3 products; P1 the constants;
- * I2 / M2 the cutoff ramp, I3 / M3 the gain ramp */
-.macro POLE x, s, ld
-	R2 = \x - \s (NS);
-	.if \ld
-	A1 = R2.L * R1.H (FU) || R0 = [I0++] || NOP;     /* the next sample's mix (R0 is free after pole 1) */
-	.else
-	A1 = R2.L * R1.H (FU);
-	.endif
-	A1 = A1 >> 16;
-	R3 = (A1 += R2.H * R1.H) (IS,M);
-	\s = \s + R3 (NS);
-.endm
-	.align 4
-	.global _mo_ladder
-	.type _mo_ladder, STT_FUNC
-_mo_ladder:
-	[--SP] = (R7:4);
-	I1 = R0;
-	P0 = R1;
-	I0 = R2;
-	R4 = [P0];
-	R5 = [P0 + 4];
-	R6 = [P0 + 8];
-	R7 = [P0 + 12];
-	R0 = [P1];
-	I2 = R0;
-	R0 = [P1 + 4];
-	M2 = R0;
-	R0 = [P1 + 8];
-	I3 = R0;
-	R0 = [P1 + 12];
-	M3 = R0;
-	P1 += 16;
-	R0 = [I0++];
-	P2 = 128;
-	LSETUP (.Ll_b, .Ll_e) LC0 = P2;
-.Ll_b:
-	R0 = R0 << 4 || R1 = [P1] || NOP;
-	A1 = R0.L * R1.L (FU);
-	A1 = A1 >> 16;
-	R3 = (A1 += R0.H * R1.L) (IS,M);                 /* mix * drive >> 12 */
-	R2 = R7 << 4;
-	A1 = R2.L * R1.H (FU);
-	A1 = A1 >> 16 || R0 = [P1 + 4] || NOP;           /* -49152 */
-	R1 = (A1 += R2.H * R1.H) (IS,M);                 /* k * s4 >> 12 */
-	R3 = R3 - R1 (NS) || R2 = [P1 + 8] || NOP;       /* 49152 */
-	R3 = MAX (R3, R0);
-	R0 = MIN (R3, R2);                               /* u */
-	R1 = R0 >>> 1;                                   /* uh */
-	R2 = R1.L * R1.L (IS);
-	R2 >>= 14;                                       /* u2 >> 1 */
-	R3 = (A1 = R1.L * R2.L) (IS,M);
-	R3 = R3 >>> 13 || R1 = [P1 + 12] || NOP;         /* u3; 9710 */
-	A1 = R3.L * R1.L (FU);
-	A1 = A1 >> 16;
-	R3 = (A1 += R3.H * R1.L) (IS,M);                 /* u3 * 4855 >> 15 */
-	R0 = R0 - R3;
-	R1 = I2;
-	R1 = R1 +|+ R1 || I2 += M2 || NOP;               /* .H = 2 g */
-	POLE R0, R4, 0
-	POLE R4, R5, 1
-	POLE R5, R6, 0
-	POLE R6, R7, 0
-	R2 = R7 << 4 || R3 = [P1 + 16] || NOP;           /* comp */
-	A1 = R2.L * R3.L (FU);
-	A1 = A1 >> 16;
-	R3 = (A1 += R2.H * R3.L) (IS,M);                 /* y = s4 * comp >> 12 */
-	R1 = I3;                                         /* .H = gain (0 .. 32767) */
-	A0 = R3.L * R1.H (FU) || I3 += M3 || NOP;
-	A0 = A0 >> 15;
-	A0 += R3.H * R1.H (IS);
-	R2.L = (A0 += R3.H * R1.H) (IS);                 /* sat16(y * gain >> 15) = 2 y.H gain + (y.L gain >> 15) */
-.Ll_e:
-	W[I1++] = R2.L;
-	[P0] = R4;
-	[P0 + 4] = R5;
-	[P0 + 8] = R6;
-	[P0 + 12] = R7;
-	(R7:4) = [SP++];
-	RTS;
-	.size _mo_ladder, .-_mo_ladder
-
 /* ---- mo_run: the block ---- */
 /* P3 the voice, P4 out, P5 b; R? pitch = OP1_PITCH_INC */
 .macro PITCH r
@@ -447,14 +358,6 @@ _mo_run:
 	P1 = P5;
 	P1 += 24;
 	CALL _mo_sub;
-	R0 = P4;                                         /* the ladder */
-	R1 = P3;
-	R1 += 16;
-	R2 = [P5 + 84];
-	R2 += 4;
-	P1 = P5;
-	P1 += 40;
-	CALL _mo_ladder;
 	R3 = [SP++];
 	L3 = R3;
 	R3 = [SP++];

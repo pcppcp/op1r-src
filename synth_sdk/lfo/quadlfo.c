@@ -11,7 +11,7 @@
  *                 rate 0..63: free 0.05 .. 20 Hz (exponential), sync: tempo division index (QL_DIVS)
  *                 wave 0 sine, 1 triangle, 2 ramp up, 3 ramp down, 4 square, 5 sample & hold, 6 lorenz x, 7 lorenz z
  *                 (Lorenz attractor, docs/62: one wing loop per cycle, the offset field is the chaos rho 28 .. 14)
- *                 smooth 0..7: one-pole slew, 2^smooth blocks; offset 0..7: start phase in 1/8 cycles
+ *                 smooth 0..7: one-pole slew, 2^smooth x 2.9 ms; offset 0..7: start phase in 1/8 cycles
  *                 amount -31..31 (full = +-32767); type see QT_*
  *                 target 0..11: synth (drum) knob blue..red, envelope A D S R, FX knob blue..red;
  *                 12..23: LFO j (0..3) x (frequency, amount, phase offset) = 12 + 3 j + k (not its own: skipped
@@ -66,7 +66,7 @@
 #define PAGE_POS()       (*(volatile int *)0x01DE4C40 == 1)
 #define PAGE_WORDS(pos)  ((const int16_t *)(((pos) ? 0xFF801644 : 0xFF8014C4) + \
                           (*(volatile int *)((pos) ? 0xFF8016D8 : 0xFF8016D4) & 7) * 16))
-#define TEMPO_RATE()     (*(volatile uint32_t *)0x01AADAD4)   /* metronome: phase inc per block for 8 cycles per beat */
+#define TEMPO_RATE()     (*(volatile uint32_t *)0x01AADAD4)   /* metronome: bpm x 1662149 = 8 cycles per beat per 128 samples at 44.1 kHz (2 audio blocks) */
 #define SHIFT_HELD()     (*(volatile uint8_t *)0x01DD7F78)
 /* LFO switched on (Shift + T4) in the current slot: synth 0x01AAAC28[synth slot], drum 0x01AAAC38[drum slot 0x01AAAC10]
  * (getters 0x0196726C / 0x0196724C; the stock note-on 0x019673DC / 0x0196735E checks the same bytes) */
@@ -143,7 +143,7 @@ static ql_st sh_st[2][4];                                     /* shared state pe
 static ql_st v_st[6][4];                                      /* per synth voice */
 static volatile int16_t disp_all[2][4];                       /* last per-voice output (before amount), screen */
 static volatile uint32_t ph_cyc_all[2];                       /* CYCLES at the last shared update per page */
-static volatile uint32_t cpb = 1161000;                       /* cycles per 128-sample block (learned; start: 400 MHz) */
+static volatile uint32_t cpb = 580500;                        /* cycles per audio block, 64 frames (learned; start: 400 MHz) */
 static uint32_t voice_cyc[6];
 static uint32_t ql_rng = 0x9E3779B9u;
 volatile uint8_t ql_sel[2];                                   /* selected LFO per page (synth/drum) */
@@ -181,7 +181,7 @@ static int clampq(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v
 static const char *const ql_div_name[QL_DIVS] = { "4/1", "2/1", "1/1", "1/2", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32" };
 static const uint8_t ql_div_shift[QL_DIVS] = { 7, 6, 5, 4, 3, 3, 2, 2, 1, 1, 0 };
 
-/* phase increment per 128-sample block: 0.05 Hz * 400^(x/32768) */
+/* phase increment per audio block (64 frames, 128 voice samples): 0.05 Hz * 400^(x/32768) */
 static uint32_t ql_inc(int32_t x)
 {
     if (x < 0) x = 0;
@@ -189,13 +189,13 @@ static uint32_t ql_inc(int32_t x)
     int32_t oct = (x * 17702) >> 10;                              /* x * log2(400) / 32768, Q16 */
     int32_t f = oct & 0xFFFF;                                     /* 2^f ~ 1 + f (0.6565 + 0.3435 f) */
     uint32_t frac = 65536 + (((uint32_t)f * (uint32_t)(43025 + ((f * 22511) >> 16))) >> 16);   /* < 2^32 */
-    uint32_t base = 623203;                                       /* 0.05 Hz * 2^32 * 128 / 44100 */
+    uint32_t base = 311601;                                       /* 0.05 Hz * 2^32 * 64 / 44100 */
     return (uint32_t)(((uint64_t)base * frac) >> 16) << (oct >> 16);
 }
 static uint32_t ql_div_inc(int r)                                /* tempo division r (cycle length) */
 {
     if (r >= QL_DIVS) r = QL_DIVS - 1;
-    uint32_t inc = TEMPO_RATE() >> ql_div_shift[r];
+    uint32_t inc = TEMPO_RATE() >> (ql_div_shift[r] + 1);           /* TEMPO_RATE: 8 cycles per beat per 2.9 ms; blocks are 1.45 ms */
     return (r == 5 || r == 7 || r == 9) ? inc + (inc >> 1) : inc;   /* triplets: 3 per 2 */
 }
 /* waveform value, Q15 */
@@ -235,15 +235,16 @@ static int32_t ql_lorenz(ql_st *s, uint32_t adv, int rho_k, int out_z, int rnd_s
     int32_t v = out_z ? (((z - 24 * QL_L1) >> 4) * 1638) >> 12 : ((x >> 4) * 1638) >> 12;   /* x / 20, (z - 24) / 20 */
     return v > 32767 ? 32767 : v < -32767 ? -32767 : v;
 }
-/* one-pole slew towards x; k = elapsed blocks Q16 */
+/* one-pole slew towards x over 2^sm x 2.9 ms (2^(sm + 1) blocks); k = elapsed blocks Q16. Rounded away from y (ceil
+ * upwards, floor downwards): no dead band, y reaches x */
 static int16_t ql_slew(int16_t y, int32_t x, int sm, uint32_t k)
 {
     if (!sm) return (int16_t)x;
-    k >>= sm;
+    k >>= sm + 1;
     if (k >= 65536) return (int16_t)x;
-    int32_t d = x - y;                                            /* |d| < 2^16 */
-    if (k <= 32768) return (int16_t)(y + ((d * (int32_t)k) >> 16));   /* fits 32 bit */
-    return (int16_t)(y + (int32_t)(((int64_t)d * (int32_t)k) >> 16));
+    int32_t d = x - y, r = d > 0 ? 65535 : 0;                     /* |d| < 2^16 */
+    if (k <= 32768) return (int16_t)(y + ((d * (int32_t)k + r) >> 16));   /* fits 32 bit */
+    return (int16_t)(y + (int32_t)(((int64_t)d * (int32_t)k + r) >> 16));
 }
 /* (a * k) >> 16 mod 2^32, exact, without a 64-bit multiply (libgcc on the Blackfin) */
 static inline uint32_t ql_mulq16(uint32_t a, uint32_t k)
@@ -852,7 +853,7 @@ static char *ql_num(char *p, int v) { if (v >= 10) p = ql_num(p, v / 10); *p++ =
 /* Hz of a free frequency word as text: "0.05" .. "9.99", "10.0" .. "20.0" */
 static void ql_hz_text(char *t, uint32_t inc)
 {
-    uint32_t c = (uint32_t)(((uint64_t)inc * 4410000u) >> 39);   /* Hz * 100 = inc * 44100 * 100 / (128 * 2^32) */
+    uint32_t c = (uint32_t)(((uint64_t)inc * 4410000u) >> 38);   /* Hz * 100 = inc * 44100 * 100 / (64 * 2^32) */
     if (c >= 1000) { c /= 10; t = ql_num(t, c / 10); *t++ = '.'; ql_num(t, c % 10); }
     else { t = ql_num(t, c / 100); *t++ = '.'; *t++ = (char)('0' + c / 10 % 10); *t++ = (char)('0' + c % 10); *t = 0; }
 }

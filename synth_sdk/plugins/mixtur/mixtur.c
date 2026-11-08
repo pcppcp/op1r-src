@@ -42,14 +42,14 @@ typedef struct {
 typedef char mx_size_check[sizeof(mx_voice_t) <= OP1_VOICE_SIZE ? 1 : -1];
 
 #define GATE     0x80
-#define FADE     64                                 /* gain step per block: 0 -> 255 in 4 blocks (11.6 ms) */
+#define FADE     32                                 /* gain step per block: 0 -> 255 in 8 blocks (11.6 ms at 689 / s) */
 #define SMAX     131071                             /* SVF state range: bp >> 2 fits 16 bits */
 #ifndef TUNE_LEVEL
 #define TUNE_LEVEL 5793                              /* +3 dB: peaks just reach the knee */
 #endif
 #define LEVEL    TUNE_LEVEL                         /* output level, Q12 (matched to op1r's engines) */
-#define INC_25HZ 2434896u                           /* phase increment of 25 Hz / 40 Hz (2^32 f / 44100) */
-#define INC_40HZ 3895834u
+#define INC_25HZ 1217448u                           /* phase increment of 25 Hz / 40 Hz (2^32 f / 88200, OP1_VOICE_RATE) */
+#define INC_40HZ 1947917u
 static const uint8_t NORM[5] = { 0, 196, 132, 108, 94 };  /* per-divider gain for 0..4 distinct undertones (equal RMS) */
 
 /* voice memory is shared with the other engines: a signature of our state, written after every render, tells a

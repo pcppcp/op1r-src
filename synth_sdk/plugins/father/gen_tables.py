@@ -2,13 +2,14 @@
 # Copyright (C) 2026 Hundekraft. GPL-3.0-or-later with OP-1 firmware permission.
 """Generate Father's ring geometry (father_lines.h) and per-line feedback gains (father_tables.h); no firmware inputs.
 
-The tank runs at 11,025 Hz (half the FX rate). Each line is a ring of exactly its longest modulated delay, so a
+The design runs inside at 22,050 Hz (MW_IN = 32 samples per 64-sample FX call at 44,100 Hz: the input is decimated 2:1
+and the wet output interpolated back) and the tank at 11,025 Hz (MW_N = 16 per call). Each line is a ring of exactly its longest modulated delay, so a
 callback reads the samples it then overwrites (docs/father-redesign.md). Gains: g = 10^(-3 * delay / (11025 * RT60)),
 RT60 = .35 + 7.65 * (index / 128)^2 seconds: the same decay per second as the 22,050 Hz design (lengths halved)."""
 from pathlib import Path
 import math
 P = Path(__file__).resolve().parent
-N = 32                                                    # tank samples per callback
+N = 16                                                    # tank samples per callback (11,025 Hz on the unit)
 DELAYS = (317, 443, 577, 719, 929, 1063, 1327, 1583)     # ~ the 22,050 Hz design's 641..3163, halved, primes
 DEPTH = [(1024 + i * 73) // 2 for i in range(8)]          # modulation depth, 1/256 sample
 SPEED = [(17000 + i * 2473) * 2 for i in range(8)]        # triangle phase step per tank sample

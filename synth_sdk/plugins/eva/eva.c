@@ -14,8 +14,14 @@
  *                  (1262 / 1238 Hz, 2525 / 2475 Hz, 5050 / 4950 Hz), they do not follow the key.
  * The engine never sees the voice sum, so the "shared" radio is shared state (the swell, dropouts, the beep), one owner
  * voice for each beep, advanced once per block by the first voice rendered (voices render in ascending order).
- * Everything runs at 22.05 kHz (half the output rate, which halves the cost; the oscillators are polyBLEP, the pad's
- * lowpass ends below 6 kHz), the output is interpolated 2x. Every knob-driven value moves from the previous block's
+ * Everything runs at 44.1 kHz, 64 samples a call (half R246's 88.2 kHz voice rate, which halves the cost; the
+ * oscillators are polyBLEP, the pad's lowpass ends below 6 kHz), the output is interpolated 2x to the 128.
+ * Rates (2026-11-03): EVA was designed as 22.05 kHz internal and 344.5 calls/s; R246 calls a voice 689 times a second
+ * with 128 samples at 88.2 kHz, so every rate-bound constant ran 2x on the unit (vibrato 10 Hz, formants and lowpasses
+ * an octave up, the Quindar tones an octave up for half as long). They are re-derived at 44.1 kHz and 689 calls/s;
+ * the pitch (two PITCH_INC steps per internal sample) was right. The ensemble's delay line runs at half rate (22.05
+ * kHz, pairs averaged in, the wet interpolated back), so its 384 samples hold the designed 10 / 14 ms taps. Every
+ * knob-driven value moves from the previous block's
  * value to the new one in steps (the first at the old value): 8 for the level and the carrier, 4 for the filters
  * and the noises, so a knob step never jumps at the first sample; the
  * crush's hold and step change at block boundaries behind the stepped mix. Phases and LFOs are uint32 that wrap by
@@ -23,7 +29,7 @@
  * Cost: the block is built in passes over a buffer (source, pad, ensemble, radio), each with only its own state; the
  * pitch reciprocal updates only when pitch changes; vowel ratios use exact reciprocal seeds; the polyBLEP runs only near an edge; the delay line is a circle
  * (the taps read through circular DAG registers). On the Blackfin the passes are eva_dsp.S's hand-scheduled kernels, bit for
- * bit the C loops here (which stay the host's path and the 5.5 kHz-and-up source); no library division in the audio path.
+ * bit the C loops here (which stay the host's path and the 11 kHz-and-up source); no library division in the audio path.
  * Copyright (C) 2026 Hundekraft. GPL-3.0-or-later with the OP-1 firmware permission (see LICENSE and NOTICE).
  */
 #include "op1_plugin.h"
@@ -39,12 +45,15 @@
 #else
 #define EV_HOT
 #endif
-#define HALF (OP1_BLOCK / 2)           /* the voice runs at 22.05 kHz, HALF samples per block */
-#define QLEN 5512                         /* Quindar beep, 250 ms (22.05 kHz samples) */
-#define QFADE 32                          /* 1.5 ms fade in and out (a power of two: no division per sample) */
-#define SQLEN 2048                        /* squelch tail after the end beep, 93 ms (a power of two) */
-#define SUB 8                             /* 22.05 kHz samples per parameter step (16 output samples) */
-#define DLY 384                           /* chorus delay line per voice, 17 ms (a circle: the taps reach 375 back) */
+#define HALF (OP1_BLOCK / 2)           /* the voice runs at 44.1 kHz, HALF samples per block */
+#define QLEN 11025                        /* Quindar beep, 250 ms (44.1 kHz samples) */
+#define QFADE 64                          /* 1.5 ms fade in and out (a power of two: no division per sample) */
+#define QFADE_SH 6                        /* log2(QFADE) */
+#define SQLEN 4096                        /* squelch tail after the end beep, 93 ms (a power of two) */
+#define SQLEN_SH 12                       /* log2(SQLEN) */
+#define SUB 8                             /* 44.1 kHz samples per parameter step (16 voice samples) */
+#define DLY 384                           /* chorus delay line per voice, 17 ms at half rate (22.05 kHz; a circle: the
+                                             taps reach 375 back) */
 
 enum { P_LPA, P_F1, P_F2, P_D1, P_D2, P_G1, P_G2, P_NOISE, P_AMP, P_CHO, P_HP, P_RLP, P_SAT, P_HISS, P_CRUSH,
        P_GATE, NP };
@@ -54,9 +63,10 @@ typedef struct {
     int32_t vib, drift, dtarget, env;     /* vibrato depth, pitch drift and its target (Q15), attack envelope (Q15) */
     int32_t a1, a2;                       /* the pad's lowpass, two one-poles */
     int32_t lo1, bd1, lo2, bd2;           /* the vowel's formant bands */
-    uint32_t dw;                          /* the chorus line's write index, 0 .. DLY - 1 (a multiple of HALF) */
+    uint32_t dw;                          /* the chorus line's write index, 0 .. DLY - 1 (a multiple of HALF / 2) */
+    int32_t wl;                           /* the chorus's last wet sample (22.05 kHz), for the interpolation */
     int32_t hs1, hs2, l1, l2;             /* radio band-limit */
-    int32_t last;                         /* last 22.05 kHz output sample, for the interpolation */
+    int32_t last;                         /* last 44.1 kHz output sample, for the interpolation */
     int32_t held_s, cnt;                  /* crush: held sample, counter (its hold and step: crush_hold / crush_step) */
     int32_t p[NP];                        /* previous block's targets */
     int32_t kf, vc[6];                    /* the vowel's coefficients (F1, F2, dampings, gains) for FREQ = kf */
@@ -75,14 +85,14 @@ typedef struct {
     uint32_t rng;
     uint32_t br_ph, br_inc;               /* the slow swell, 2^32 per cycle */
     int32_t drop_left;                    /* blocks left in a dropout */
-    int32_t gate_s;                       /* the carrier, smoothed per block (~10 ms) */
+    int32_t gate_s;                       /* the carrier, smoothed per block (~12 ms) */
     int32_t kc, kdrop, com_t[5];          /* COM's radio values (com_coefs) for COM = kc and the dropout kdrop */
 } hot_t;
 /* kf = -1: no vowel coefficients yet (vc is a function of kf alone, as inv is of kinc: note_on keeps both) */
 _Static_assert(OP1_VOICES == 6, "ev_home's initialiser names six voices");
 static hot_t ev_home __attribute__((aligned(32))) = {
     .v = { [0].kf = -1, [1].kf = -1, [2].kf = -1, [3].kf = -1, [4].kf = -1, [5].kf = -1 },
-    .last_voice = OP1_VOICES, .rng = 0x2545F491u, .br_inc = 1495000u, .gate_s = FS - 1, .kc = -1 };
+    .last_voice = OP1_VOICES, .rng = 0x2545F491u, .br_inc = 747500u, .gate_s = FS - 1, .kc = -1 };
 static hot_t *ev_h = &ev_home;            /* this call's state: set by ev_claim at the start of render and note_on */
 #define voices (ev_h->v)
 #define last_voice (ev_h->last_voice)
@@ -135,12 +145,13 @@ static inline int32_t squelch_gain(int32_t b) { return ((b * 2) * 43691) >> 17; 
 
 static inline int32_t clamp(int32_t x, int32_t lo, int32_t hi) { return x < lo ? lo : x > hi ? hi : x; }
 /* the crush's hold length and quantiser step for a block: from the previous block's P_CRUSH target (p0[P_CRUSH]) */
-static inline int32_t crush_hold(const int32_t *p0) { return 1 + ((p0[P_CRUSH] * 3) >> 15); }
+static inline int32_t crush_hold(const int32_t *p0) { return 2 + 2 * ((p0[P_CRUSH] * 3) >> 15); }   /* 22.05 .. 7.35 kHz */
 static inline int32_t crush_step(const int32_t *p0) { return 1 << (3 + ((p0[P_CRUSH] * 6) >> 15)); }
 /* Orange page 2: the beep's octave from word 7 in three steps (OP1_PRESS_PAGE_STEPS(3): one detent per step, the
  * word at each step's centre): 0 down, 1 the original, 2 up. An unset word (0, older sounds) is the original. */
 static unsigned beep_octave(const int16_t *k) { unsigned s = k[7] <= 0 ? 1u : ((unsigned)k[7] * 3u) >> 15; return s > 2u ? 2u : s; }
-/* the Quindar increments at 22.05 kHz (2525 Hz start, 2475 Hz end) an octave down, as is, or up */
+/* the Quindar increments at 44.1 kHz (2525 Hz start, 2475 Hz end) an octave down (1262 / 1238 Hz), as is, or up
+ * (5050 / 4950 Hz) */
 static uint32_t beep_increment(uint32_t inc, unsigned oct) { return oct == 0 ? inc >> 1 : oct == 1 ? inc : inc << 1; }
 static inline int32_t knob(const int16_t *k, int i) { return k[i] < 0 ? 0 : k[i]; }
 /* ev_sin's first quarter (257 entries): ev_sin itself, or its copy in the L1 pool (ev_claim). The table is a sine
@@ -187,8 +198,17 @@ static inline int32_t blep_saw(uint32_t ph, int32_t dt, int32_t inv8)
     return s;
 }
 
-/* a one-pole coefficient (Q15) from a brightness 0..32767: about 300 Hz .. 5.6 kHz at 22.05 kHz */
-static inline int32_t lp_coef(int32_t b) { return 2600 + ((((((b * b) >> 15) + b) >> 1) * 23600) >> 15); }
+/* a one-pole coefficient k (Q15) made for 22.05 kHz -> the same pole at 44.1 kHz, 1 - sqrt(1 - k) (ev_lp2x, within
+ * 0.7 % below k = 0.97, ~12 kHz; k = 1, open, stays open). Per block, not per sample */
+static inline int32_t lp2x(int32_t k)
+{
+    if (k >= 32767) return 32767;
+    const int32_t i = k >> 9, a = ev_lp2x[i];
+    return a + (((ev_lp2x[i + 1] - a) * (k & 511)) >> 9);
+}
+/* a one-pole coefficient (Q15) from a brightness 0..32767: about 300 Hz .. 5.6 kHz (the curve made at 22.05 kHz, then
+ * taken to 44.1 kHz) */
+static inline int32_t lp_coef(int32_t b) { return lp2x(2600 + ((((((b * b) >> 15) + b) >> 1) * 23600) >> 15)); }
 
 /* With numerator n<2^24, floor(2^24/hz) underestimates the quotient
  * by at most one. Split the product into bounded 32-bit pieces, then correct
@@ -202,7 +222,7 @@ static int32_t vowel_ratio(int32_t bw,int32_t hz) {
 }
 /* Cost (the unit's worst block is the one whose code and data are cold, about a line fill per distinct 32-byte line a
  * voice call touches): the paths that run rarely (a FREQ or COM change, a pitch change, the once-per-block shared
- * state, the source above 5.5 kHz, a beeping voice) are out of line (EV_RARE) and the per-call glue is kept small. */
+ * state, the source above 11 kHz, a beeping voice) are out of line (EV_RARE) and the per-call glue is kept small. */
 #define EV_RARE __attribute__((noinline))
 /* FREQ: oo .. ah .. ee; exact coefficients refreshed when FREQ moves. */
 static EV_RARE void vowel_coefs(voice_t *v, int32_t f)
@@ -217,10 +237,10 @@ static EV_RARE void vowel_coefs(voice_t *v, int32_t f)
             const int a = vi * 2 + k, b = a + 2;
             const int32_t hz = ev_hz[a] + (((ev_hz[b] - ev_hz[a]) * fr) >> 15);
             const int32_t bw = ev_bw[a] + (((ev_bw[b] - ev_bw[a]) * fr) >> 15);
-            const int32_t x = (hz * 4781) >> 10;                        /* pi hz / 22050, Q15 */
+            const int32_t x = (hz * 4781) >> 11;                        /* pi hz / 44100, Q15 */
             const int32_t x3 = (((x * x) >> 15) * x) >> 15;
-            /* x3 is 0..648 for the vowel table: exact floor(x3/6). */
-            v->vc[k] = x - ((x3 * 10923) >> 16);                                      /* 2 sin(pi hz / 22050), Q14 */
+            /* x3 is 0..81 for the vowel table: exact floor(x3/6). */
+            v->vc[k] = x - ((x3 * 10923) >> 16);                                      /* 2 sin(pi hz / 44100), Q14 */
             v->vc[2 + k] = vowel_ratio(bw,hz);                             /* damping 1/Q, Q14 */
             v->vc[4 + k] = ((ev_level[a] + (((ev_level[b] - ev_level[a]) * fr) >> 15)) * v->vc[2 + k]) >> 14;  /* unity peak */
         }
@@ -232,8 +252,8 @@ static EV_RARE void com_coefs(int32_t c)
     kc = c;
     kdrop = drop_left != 0;
     const int32_t w = com_warm(c), r = com_radio(c);
-    com_t[0] = ((30 + ((w * 130) >> 15) + ((r * 170) >> 15)) * 4781) >> 10;               /* 30 .. 160 .. 330 Hz */
-    com_t[1] = 32767 - ((w * 7800) >> 15) - ((r * 11000) >> 15);                         /* open .. ~5 kHz .. ~2.6 kHz */
+    com_t[0] = ((30 + ((w * 130) >> 15) + ((r * 170) >> 15)) * 4781) >> 11;               /* 30 .. 160 .. 330 Hz (Q14 2 pi f / 44100) */
+    com_t[1] = lp2x(32767 - ((w * 7800) >> 15) - ((r * 11000) >> 15));                   /* open .. ~5 kHz .. ~2.6 kHz */
     com_t[2] = 4096 + ((w * 3000) >> 15) + ((r * 3500) >> 15);                           /* Q12: 1 .. 1.7 .. 2.6 */
     com_t[3] = r ? 200 + ((r * 1600) >> 15) + (drop_left ? (r * 2500) >> 15 : 0) : 0;
     com_t[4] = c > CRUSH_FROM ? (c - CRUSH_FROM) * 4 : 0;                                 /* 0..1 above 75 % */
@@ -337,6 +357,7 @@ static EV_HOT void eva_note_on(void *self, const int16_t *knobs)
     for (int i = 0; i < DLY; i++) ev_dl[vi][i] = 0;
 #endif
     v->dw = 0;
+    v->wl = 0;
     v->hs1 = v->hs2 = v->l1 = v->l2 = v->last = 0;
     v->held_s = v->cnt = 0;
     targets(v, vi, knobs, v->p);
@@ -344,7 +365,7 @@ static EV_HOT void eva_note_on(void *self, const int16_t *knobs)
     if (alone && beep_level(c)) {                                 /* key up: start beep */
         q_owner = vi;
         q_ph = 0;
-        q_inc = beep_increment(491837084u, ev_co[vi] >> 16);      /* 2525 Hz at 22.05 kHz */
+        q_inc = beep_increment(245918542u, ev_co[vi] >> 16);      /* 2525 Hz at 44.1 kHz */
         q_left = QLEN;
         q_level = beep_level(c);
         sq_left = 0;
@@ -361,7 +382,7 @@ static void eva_note_off(void *self)
     if (!beep_level(c)) return;
     q_owner = vi;                                                 /* key down: end beep, then squelch */
     q_ph = 0;
-    q_inc = beep_increment(482097957u, co >> 16);           /* 2475 Hz at 22.05 kHz */
+    q_inc = beep_increment(241048979u, co >> 16);           /* 2475 Hz at 44.1 kHz */
     q_left = QLEN;
     q_level = beep_level(c);
     sq_left = SQLEN;
@@ -490,13 +511,13 @@ static EV_RARE void ev_shared(const int16_t *knobs)
 {
     br_ph += br_inc;
     const int32_t o = knob(knobs, 2);
-    br_inc = 1495000u + (uint32_t)((o * 1500) >> 15) * 1024u;    /* the swell: 0.12 .. 0.24 Hz */
+    br_inc = 747500u + (uint32_t)((o * 1500) >> 15) * 512u;      /* the swell: 0.12 .. 0.24 Hz at 689 calls/s */
     const int32_t c = knob(knobs, 3);
     const int32_t r = com_radio(c);
     if (drop_left) drop_left--;
-    else if (r && (int32_t)((lcg(&ev_h->rng) >> 17) & 0x7FFF) < ((((r * r) >> 15) * 120) >> 15))
-        drop_left = 6 + (int32_t)((lcg(&ev_h->rng) >> 27) + (lcg(&ev_h->rng) >> 28));          /* 17 .. 140 ms */
-    gate_s += ((drop_left ? FS - 1 - ((r * 29000) >> 15) : FS - 1) - gate_s) >> 2;
+    else if (r && (int32_t)(lcg(&ev_h->rng) >> 16) < ((((r * r) >> 15) * 120) >> 15))      /* (out of 2^16: half the odds per call) */
+        drop_left = 12 + (int32_t)((lcg(&ev_h->rng) >> 26) + (lcg(&ev_h->rng) >> 27));         /* 17 .. 154 ms */
+    gate_s += ((drop_left ? FS - 1 - ((r * 29000) >> 15) : FS - 1) - gate_s) >> 3;            /* ~12 ms */
 }
 
 /* the polyBLEP's 1 / dt: one division when the pitch changes (the vibrato's +-0.4 % doesn't matter at the edge) */
@@ -511,7 +532,7 @@ static EV_RARE void ev_pitch(voice_t *v, uint32_t inc0)
 #endif
 }
 
-/* the source at 5.5 kHz and up (i2 >= 2^30): the polyBLEP on every sample */
+/* the source at 11 kHz and up (i2 >= 2^30): the polyBLEP on every sample */
 static EV_RARE void ev_source_high(int32_t *x, uint32_t *p1, uint32_t *p2, uint32_t i1, uint32_t i2, int32_t dt1,
                                    int32_t dt2, int32_t inv1, int32_t inv2)
 {
@@ -553,11 +574,11 @@ static EV_RARE void ev_beep(voice_t *v, int32_t *pb, const int32_t *p0, const in
     for (int i = 0; i < HALF; i++) {
         if (q_left > 0) {
             const int32_t env = q_left < QFADE ? q_left : QLEN - q_left < QFADE ? QLEN - q_left : QFADE;
-            pb[i] += (((sinq(q_ph) * q_level) >> 15) * env) >> 5;
+            pb[i] += (((sinq(q_ph) * q_level) >> 15) * env) >> QFADE_SH;
             q_ph += q_inc;
             q_left--;
         } else if (sq_left > 0) {
-            pb[i] += ((((int32_t)lcg(&noise) >> 16) * sq_level >> 15) * sq_left) >> 11;
+            pb[i] += ((((int32_t)lcg(&noise) >> 16) * sq_level >> 15) * sq_left) >> SQLEN_SH;
             sq_left--;
         }
     }
@@ -585,9 +606,12 @@ static EV_HOT void eva_render_body(void *self, int16_t *out, const int16_t *knob
     if (vi <= last_voice) ev_shared(knobs);                          /* shared state: once per block */
     last_voice = vi;
 
-    /* the attack: PRESSURE sets how fast the note swells in (~0.6 s soft .. ~15 ms close) */
-    const int32_t pr = knob(knobs, 0), ka = 158 + ((((pr * pr) >> 15) * 6200) >> 15);
-    v->env += ((FS - 1 - v->env) * ka) >> 15;
+    /* the attack: PRESSURE sets how fast the note swells in (~0.6 s soft .. ~15 ms close). ka was made per 2.9 ms
+     * call; per 1.45 ms call the same curve is 1 - sqrt(1 - ka) = ka / 2 + ka^2 / 8 (within 0.4 %), rounded up, so
+     * the swell reaches full level */
+    const int32_t pr = knob(knobs, 0), ka0 = 158 + ((((pr * pr) >> 15) * 6200) >> 15);
+    const int32_t ka = (ka0 >> 1) + ((ka0 * ka0) >> 18);
+    v->env += ((FS - 1 - v->env) * ka + 32767) >> 15;
 
     int32_t t[NP], d[NP];
     targets(v, vi, knobs, t);
@@ -599,16 +623,16 @@ static EV_HOT void eva_render_body(void *self, int16_t *out, const int16_t *knob
     eva_gate = t[P_GATE];
     eva_beep = q_left > 0 && q_owner >= 0;
 
-    /* pitch: slow vibrato (fades in over ~0.5 s) and a little random drift per voice */
-    if (v->vib < 20480) v->vib += 120;
-    if ((lcg(&v->noise) >> 24) < 2) v->dtarget = (int32_t)(lcg(&v->noise) >> 17) - 16384;   /* new target ~ every 0.4 s */
-    v->drift += (v->dtarget - v->drift) >> 6;
+    /* pitch: slow vibrato (fades in over ~0.5 s) and a little random drift per voice (per 1.45 ms call) */
+    if (v->vib < 20480) v->vib += 60;
+    if ((lcg(&v->noise) >> 24) < 1) v->dtarget = (int32_t)(lcg(&v->noise) >> 17) - 16384;   /* new target ~ every 0.4 s */
+    v->drift += (v->dtarget - v->drift) >> 7;
     const int32_t m = ((sinq(v->vph) * v->vib) >> 15) + ((v->drift * 9830) >> 15);   /* Q15 of +-0.4 % */
-    v->vph += 62300000u;                                          /* 5 Hz per block */
-    v->c1ph += 4600000u;                                          /* chorus LFOs: 0.37 Hz, 0.53 Hz */
-    v->c2ph += 6600000u;
+    v->vph += 31165250u;                                          /* 5 Hz at 689.0625 calls/s */
+    v->c1ph += 2300000u;                                          /* chorus LFOs: 0.37 Hz, 0.53 Hz */
+    v->c2ph += 3300000u;
     const int32_t cm1 = sinq(v->c1ph), cm2 = sinq(v->c2ph);
-    /* chorus taps (Q8 samples): 10 ms +- 2.5 ms and 14 ms +- 3 ms, set per block */
+    /* chorus taps (Q8 half-rate samples, 22.05 kHz): 10 ms +- 2.5 ms and 14 ms +- 3 ms, set per block */
     const int32_t dd1 = (221 << 8) + ((cm1 * (55 << 8)) >> 15), dd2 = (309 << 8) + ((cm2 * (66 << 8)) >> 15);
 
     const uint32_t inc0 = (uint32_t)OP1_PITCH_INC[0] + (uint32_t)OP1_PITCH_INC[1];
@@ -619,7 +643,7 @@ static EV_HOT void eva_render_body(void *self, int16_t *out, const int16_t *knob
     if (inc0 != v->kinc) ev_pitch(v, inc0);
     const int32_t inv1 = v->inv, inv2 = inv1 - (inv1 >> 9) - (inv1 >> 11);
 
-    /* the voice is built in passes over the block (22.05 kHz), each with only its own state in registers */
+    /* the voice is built in passes over the block (44.1 kHz), each with only its own state in registers */
 #ifdef __bfin__
     int32_t *const x = es->x + 1;                               /* eva_dsp.S: a spare word on either side */
 #else
@@ -636,7 +660,7 @@ static EV_HOT void eva_render_body(void *self, int16_t *out, const int16_t *knob
         eva_pul(x, &v->ph2, k + 4);
     }
 #else
-    if (i2 < 0x40000000u) {                                       /* below 5.5 kHz: one test per oscillator for an edge */
+    if (i2 < 0x40000000u) {                                       /* below 11 kHz: one test per oscillator for an edge */
         uint32_t ph1 = v->ph1, ph2 = v->ph2;
         for (int i = 0; i < HALF; i++) {
             ph1 += i1;
@@ -721,10 +745,12 @@ static EV_HOT void eva_render_body(void *self, int16_t *out, const int16_t *knob
         }
 #endif
     }
-    /* the ensemble: two modulated taps of a 17 ms delay line; then the level (attack, swell) and the carrier */
+    /* the ensemble at half rate (22.05 kHz): each pair of samples goes into a 17 ms delay line as their mean; two
+     * modulated taps of it; the wet sample is interpolated back to 44.1 kHz (the pair's first output gets the mean of
+     * the last pair's wet and this one's, the second this one's); then the level (attack, swell) and the carrier */
     {
-        /* the line is a circle of DLY samples: each sample is written, then the taps read 166 .. 375 samples back (the
-         * slots from before this note are zero: note_on clears the line) */
+        /* the line is a circle of DLY half-rate samples: each one is written, then the taps read 166 .. 375 samples back
+         * (the slots from before this note are zero: note_on clears the line) */
         uint32_t dw = v->dw;
         int16_t *dl = ev_dl[vi];
         const int32_t fa = dd1 & 255, fb = dd2 & 255;
@@ -741,29 +767,34 @@ static EV_HOT void eva_render_body(void *self, int16_t *out, const int16_t *knob
                 k[6 + 2 * sb] = RAMP(P_CHO, sb) >> 1;
                 k[7 + 2 * sb] = (RAMP(P_AMP, sb) * RAMP(P_GATE, sb)) >> 15;
             }
+            k[22] = v->wl;                                            /* the last wet sample, in and out */
             eva_ens(pb, k);
+            v->wl = k[22];
         }
 #else
         uint32_t ia = dw + DLY - (uint32_t)(dd1 >> 8), ib = dw + DLY - (uint32_t)(dd2 >> 8);   /* a, b: slots of ra[0] */
         if (ia >= DLY) ia -= DLY;
         if (ib >= DLY) ib -= DLY;
-        for (int sb = 0; sb < 8; sb++) {
+        int32_t wp = v->wl;
+        for (int sb = 0; sb < 8; sb++) {                          /* SUB / 2 = 4 pairs per sub-block */
             const int32_t cho = RAMP(P_CHO, sb) >> 1, ag = (RAMP(P_AMP, sb) * RAMP(P_GATE, sb)) >> 15;
-            for (int i = sb * SUB; i < sb * SUB + SUB; i++) {
-                int32_t y = pb[i];
-                const int16_t w = (int16_t)clamp(y, -32768, 32767);
-                dl[dw + i] = w;
+            for (int j = sb * (SUB / 2); j < (sb + 1) * (SUB / 2); j++) {
+                const int32_t y0 = pb[2 * j], y1 = pb[2 * j + 1];
+                dl[dw + j] = (int16_t)clamp((y0 + y1) >> 1, -32768, 32767);
                 const int32_t a = dl[ia], b = dl[ib];
                 const int32_t ta = a + (((dl[ia ? ia - 1 : DLY - 1] - a) * fa) >> 8);
                 const int32_t tb = b + (((dl[ib ? ib - 1 : DLY - 1] - b) * fb) >> 8);
                 if (++ia == DLY) ia = 0;
                 if (++ib == DLY) ib = 0;
-                y += ((((ta + tb) >> 1) - y) * cho) >> 15;
-                pb[i] = (y * ag) >> 15;
+                const int32_t wet = (ta + tb) >> 1, e0 = (wp + wet) >> 1;
+                pb[2 * j] = ((y0 + (((e0 - y0) * cho) >> 15)) * ag) >> 15;
+                pb[2 * j + 1] = ((y1 + (((wet - y1) * cho) >> 15)) * ag) >> 15;
+                wp = wet;
             }
         }
+        v->wl = wp;
 #endif
-        dw += HALF;
+        dw += HALF / 2;
         v->dw = dw < DLY ? dw : 0;
     }
     /* radio: hiss, a 2+2 pole band-limit, saturation */

@@ -7,6 +7,7 @@
 #include <math.h>
 #include <stddef.h>
 static mw_state s,t;
+#include "classic_run.h"
 void mw_ref_init(mw_state *);
 void mw_ref_process(mw_state *,int16_t *,int16_t *,const int32_t *);
 static void impulse(const int32_t q[4],int stereo,int16_t *out,unsigned blocks){
@@ -22,8 +23,10 @@ int main(int argc,char **argv){
  mw_init(&s);q[3]=0;int16_t l[64],r[64],a[64],b[64];
  for(unsigned i=0;i<64;i++){a[i]=l[i]=(int16_t)(i*991);b[i]=r[i]=(int16_t)(31000-i*777);}
  mw_process(&s,l,r,q);assert(!memcmp(l,a,sizeof l)&&!memcmp(r,b,sizeof r));
- /* Exact differential check against the plain C reference (father_reference.c): output and the whole state. */
- mw_init(&s);mw_ref_init(&t);unsigned rng=12345;
+ /* Exact differential check against the plain C reference (father_reference.c): output and the whole state,
+    in both modes (CLASSIC: 3.1.x's counts) */
+ for(int classic=0;classic<2;classic++){
+ mw_init(&s);mw_ref_init(&t);s.classic=t.classic=(uint8_t)classic;unsigned rng=12345;
  double error2=0,signal2=0;int max_error=0;
  for(unsigned k=0;k<6000;k++){
   for(unsigned j=0;j<4;j++)q[j]=(int32_t)((k*(j+17)*193u)&32767);
@@ -39,27 +42,31 @@ int main(int argc,char **argv){
   assert(MW_SAME_STATE(&s,&t));
  }
  assert(max_error==0&&error2==0);
- printf("Father fullscale automated reference: max_error=%d normalized_rms_error=%.9f relative_rms_error=%.9f\n",max_error,sqrt(error2/(6000.0*128))/32768,sqrt(error2/signal2));
+ printf("Father%s fullscale automated reference: max_error=%d normalized_rms_error=%.9f relative_rms_error=%.9f\n",classic?" CLASSIC":"",max_error,sqrt(error2/(6000.0*128))/32768,sqrt(error2/signal2));
+ }
+ /* CLASSIC is hundekraft 3.1.4's Father (kennel bd899531) sample for sample: the hash of every output sample of
+    classic_run(), the same run through bd899531's father_dsp.c (classic_check.py prints it) */
+ assert(classic_run()==CLASSIC_HASH);
  /* No input cannot create signal, even with changing parameters and modulation. */
- mw_init(&s);for(unsigned k=0;k<4000;k++){
+ for(int classic=0;classic<2;classic++){mw_init(&s);s.classic=(uint8_t)classic;for(unsigned k=0;k<4000;k++){
   for(unsigned j=0;j<4;j++)q[j]=(int32_t)((k*(j+17)*193u)&32767);
   memset(l,0,sizeof l);memset(r,0,sizeof r);mw_process(&s,l,r,q);
   for(unsigned i=0;i<64;i++)assert(!l[i]&&!r[i]);
- }
+ }}
  /* Per-instance state: processing another state cannot change this one. */
  mw_init(&s);t=s;q[0]=20000;q[1]=32767;q[2]=32767;q[3]=32767;
  memset(l,0,sizeof l);memset(r,0,sizeof r);l[0]=32767;mw_process(&s,l,r,q);
  assert(t.hd[0]==0&&t.tank[0]==0);
  /* Every endpoint: full-scale alternating excitation then a long tail; UBSan
     catches arithmetic errors and ASan checks every interpolated/diffusion tap. */
- for(unsigned e=0;e<16;e++){
+ for(unsigned e=0;e<32;e++){
   for(unsigned j=0;j<4;j++)q[j]=(e&(1u<<j))?32767:0;
-  mw_init(&s);for(unsigned k=0;k<5000;k++){
+  mw_init(&s);s.classic=(uint8_t)(e>>4);for(unsigned k=0;k<5000;k++){
    for(unsigned i=0;i<64;i++){l[i]=k<64?(i&1?32767:-32768):0;r[i]=k<64?(i&2?32767:-32768):0;}
    mw_process(&s,l,r,q);
   }
  }
- if(argc>1){unsigned blocks=4135;int16_t *o=malloc(blocks*64*4);assert(o);
+ if(argc>1){unsigned blocks=8269;   /* 12 s of 64-sample calls at 44,100 Hz */int16_t *o=malloc(blocks*64*4);assert(o);
   const char *names[6]={"default","near","far","gated","dark","bright"};
   for(unsigned j=0;j<6;j++){
    q[0]=j==1?0:j==2?32767:16384;q[1]=j==3?8192:0;q[2]=j==4?0:j==5?32767:18022;q[3]=32767;
@@ -71,7 +78,7 @@ int main(int argc,char **argv){
    q[0]=16384;q[1]=8192;q[2]=18022;q[3]=take==0?0:take==1?9830:32767;
    for(unsigned k=0;k<blocks;k++){
     int16_t l[64],r[64];for(unsigned i=0;i<64;i++){
-     unsigned n=k*64+i;double time=n/22050.0,local=fmod(time,3.0);
+     unsigned n=k*64+i;double time=n/44100.0,local=fmod(time,3.0);
      double amp=local<1.0?exp(-local*5.0):0;
      double a=sin(time*6.283185307179586*130.8128)+.5*sin(time*6.283185307179586*164.8138)+.3*sin(time*6.283185307179586*195.9977);
      double b=sin(time*6.283185307179586*130.8128)+.5*sin(time*6.283185307179586*164.8138+.2)+.3*sin(time*6.283185307179586*195.9977+.4);

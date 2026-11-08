@@ -5,7 +5,7 @@ The ladder is the TB-303 filter of Open303 (Robin Schmidt, MIT, rosic_TeeBeeFilt
 fits of the cutoff, see blot.c."""
 import math
 
-SR = 44100
+SR = 88200                      # voice rate (OP1_VOICE_RATE: R246 renders voices 2x oversampled)
 F0 = 30.0                       # cutoff at octave 0
 N = 73                          # 0 .. 9 octaves in 1/8 steps (15.4 kHz), the cutoff holds there
 

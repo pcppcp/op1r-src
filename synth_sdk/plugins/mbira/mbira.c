@@ -13,10 +13,14 @@
  *                           5 Hz, depth = word
  * The partial decays and pitches are set once per block; amplitudes ramp across the block, so knob changes never
  * jump at the first sample. Notes above the tine's range lose the partials that would pass 19 kHz.
+ * Rate (2026-11-03): a voice call is 128 samples at 88.2 kHz (689 calls/s) on R246, and every rate-bound constant
+ * here is derived for that (it was written for 44.1 kHz / 344 calls/s, which halved every decay, put the box at 440 Hz
+ * and the wah an octave high at 10 Hz). The click's low-pass is the design's too; its length still uses the 44.1 kHz
+ * constants, 0.5 .. 2.5 ms (keeping the design would double the burst's samples per note; README "Rate (2026-11-03)").
  * Cost (the unit adds SDRAM stalls to bcore's count, so the budget is tight): the block is built in passes over a
  * buffer, two partials per pass; a partial 60 dB under the fundamental (or under -80 dBFS) is dropped for the rest of
- * the note; the divisions run only when TINE, RING, DOUBLE or the pitch change; the box runs at 5.5 kHz, the wah at
- * 22 kHz, the buzz contact every 8 samples (the noise skipped while the caps are off the tine). A restrike resets
+ * the note; the divisions run only when TINE, RING, DOUBLE or the pitch change; the box runs at 11 kHz, the wah and the
+ * buzz noise at 44.1 kHz (sample pairs), the buzz contact every 8 samples (the noise skipped while the caps are off the tine). A restrike resets
  * the voice's partials (no second set rings on). Coefficient and increment caches survive restrikes when their
  * control/pitch keys match, so the first render does not repeat unchanged divisions. On the Blackfin the hot loops are
  * in mbira_dsp.S (the partial passes, box sums and output, wah, buzz), bit-identical to the C loops here (the host
@@ -44,7 +48,7 @@ typedef struct {
     uint32_t wph;                             /* wah LFO */
     int32_t box, buzz, wah, dmix;             /* previous block's mix levels, Q15 */
     int32_t level;                            /* screen: fundamental amplitude, Q15 */
-    int32_t rat[NP], dk[NP];                  /* partial ratios (Q16) and decay factors (Q15) ... */
+    int32_t rat[NP], dk[NP];                  /* partial ratios (Q16) and decays per block (Q18) ... */
     int32_t kt, kring, kdbl, khz, knew;       /* ... for these TINE, RING, DOUBLE and pitch (knew: changed) */
     uint32_t inc[NP], kinc0;                  /* partial phase increments for this pitch */
 } __attribute__((aligned(32))) voice_t;      /* whole cache lines: a voice's state is 8 lines, the six adjacent */
@@ -255,24 +259,26 @@ static inline int32_t udiv15(uint32_t n, uint32_t d)
     return (int32_t)q;
 }
 
-/* a partial's phase increment: ((uint64_t)x * r) >> 16 for a ratio r < 2^21 (Q16), 0 past 0x70000000 (~19 kHz),
+/* a partial's phase increment: ((uint64_t)x * r) >> 16 for a ratio r < 2^21 (Q16), 0 past 0x38000000 (19.3 kHz),
  * from 16-bit halves without libgcc's 64-bit multiply: x r >> 16 = a rh 2^16 + a rl + b rh + (b rl >> 16) */
 static inline uint32_t incmul(uint32_t x, uint32_t r)
 {
     const uint32_t a = x >> 16, b = x & 0xFFFF, rh = r >> 16, rl = r & 0xFFFF;
     const uint32_t ah = a * rh;                                             /* < 2^21 */
-    if (ah > 0x7000) return 0;
+    if (ah > 0x3800) return 0;
     const uint32_t t = a * rl;                                              /* < 2^32 */
-    if (t > 0x70000000u) return 0;
-    const uint32_t s = (ah << 16) + t + b * rh + ((b * rl) >> 16);           /* <= 0xE0000000 + 2^22: no wrap */
-    return s > 0x70000000u ? 0 : s;
+    if (t > 0x38000000u) return 0;
+    const uint32_t s = (ah << 16) + t + b * rh + ((b * rl) >> 16);           /* <= 0x70000000 + 2^22: no wrap */
+    return s > 0x38000000u ? 0 : s;
 }
 
-/* per-block decay factor (Q15) for a decay time tau in ms (amplitude falls by e over tau); tau stays under 10,100 */
+/* per-block decay for a decay time tau in ms (amplitude falls by e over tau): the fraction a block takes off, Q18,
+ * 128 / (tau * 88.2) rounded (a block is 1.451 ms; tau within 1.3 % at its 10,000 ms, 0.1 % at 1,600); tau stays under
+ * 10,100 */
 static inline int32_t decay(int32_t tau_ms)
 {
     if (tau_ms < 20) tau_ms = 20;
-    return 32768 - div16(95108, tau_ms);                                   /* 1 - 128 / (tau * 44.1) */
+    return div16(380432 + (tau_ms >> 1), tau_ms);                          /* 2^18 x 128 / 88.2 = 380,432 */
 }
 
 static MB_HOT void mb_note_on(void *self, const int16_t *p)
@@ -494,10 +500,15 @@ static MB_HOT __attribute__((noinline)) void click_run(voice_t *v, scratch_t *s,
 {
     int32_t *const acc = s->acc;
     int32_t click = v->click, clp = v->clp;
-    const int32_t cf = 32034 + (((32767 - strike) * 586) >> 15);           /* click per sample: 1 ms (hard) .. 5 ms */
+    /* per sample: 1 ms (hard) .. 5 ms at 44.1 kHz, 0.5 .. 2.5 ms at the voice's 88.2 kHz (left so: README "Rate") */
+    const int32_t cf = 32034 + (((32767 - strike) * 586) >> 15);
     /* cf >= 32034 is what mb_burst's untested runs rely on (click >= 24 stays > 8 for 16 samples, checked for every
      * cf from 32034 up: OP1-Emulator run/mbira-spike-2026-10-28/clickk.c): a faster click decay needs a new bound */
-    const int32_t clp_a = 3000 + ((strike * 24000) >> 15);                  /* click low-pass, Q15 */
+    /* click low-pass, Q15: the design's 1 - exp(-2 pi fc / 44100) = 3000 + 24000 STRIKE (674 Hz .. 12.2 kHz) as the same
+     * fc at 88.2 kHz, 1 - sqrt(1 - a), at STRIKE = 4096 i, interpolated (within 0.7 %) */
+    static const int16_t CLP_A[9] = { 1536, 3152, 4860, 6681, 8639, 10770, 13131, 15818, 19019 };
+    const int32_t ci = strike >> 12;
+    const int32_t clp_a = CLP_A[ci] + (((CLP_A[ci + 1] - CLP_A[ci]) * (strike & 4095)) >> 12);
     int i = 0;
     if (click > 8) {                                                        /* the burst, ending in the block */
 #ifdef __bfin__
@@ -523,7 +534,9 @@ static MB_HOT __attribute__((noinline)) void click_run(voice_t *v, scratch_t *s,
     v->clp = clp;
 }
 
-/* buzz: band-passed noise (high-pass difference, low-pass ~7 kHz) while the fundamental swings past 70 %; the caps'
+/* buzz: band-passed noise (high-pass difference, one-pole low-pass at 4.9 kHz), one noise sample per sample pair
+ * (44.1 kHz, as designed: the same filter per sample at 88.2 kHz would be 9..10 dB quieter in band), while the
+ * fundamental swings past 70 %; the caps'
  * contact rises smoothly from 0 at 70 % to full at the peak, so the sizzle has no hard on / off edges; the contact
  * (with the tine's level and BUZZ) is set every 8 samples, and the noise skipped while it is 0 (half of each swing;
  * the filter's state then waits, which the contact's slow rise hides). ph, c: the fundamental's phase and increment
@@ -559,10 +572,12 @@ static MB_RARE void buzz_run(voice_t *v, scratch_t *s, uint32_t ph, uint32_t c, 
         a += step0 * 8;
         bz += dbuzz * 8;
         if (!gz) continue;                                                  /* caps off the tine: silent */
-        for (int j = i; j < i + 8; j++) {
+        for (int j = i; j < i + 8; j += 2) {
             const int32_t n = (int32_t)lcg(&noise) >> 16;
             zlp += (((n - nprev) >> 1) - zlp) >> 1;
-            acc[j] += (zlp * gz) >> 15;
+            const int32_t z = (zlp * gz) >> 15;
+            acc[j] += z;
+            acc[j + 1] += z;
             nprev = n;
         }
     }
@@ -572,13 +587,13 @@ static MB_RARE void buzz_run(voice_t *v, scratch_t *s, uint32_t ph, uint32_t c, 
 #endif
 }
 
-/* wah: band-pass sweep, mixed in by depth; centre this block 400 Hz .. 1.5 kHz (Chamberlin 2 sin(pi f / 22050), Q13),
- * run on sample pairs at half scale (the sum in the update then stays under 2^31 without a clamp), its output
+/* wah: band-pass sweep, mixed in by depth; centre this block 400 Hz .. 1.5 kHz (Chamberlin 2 sin(pi f / 44100), Q13:
+ * the pairs come at 44.1 kHz), run on sample pairs at half scale (the sum in the update then stays under 2^31 without a clamp), its output
  * interpolated between the last two (one pair late); then the voice's gain g into out. The box is in acc already */
 static MB_RARE void wah_run(voice_t *v, scratch_t *s, int16_t *out, int32_t wah0, int32_t dwah, int32_t g, int sdram)
 {
     const int32_t *const acc = s->acc;
-    const int32_t wf = 933 + (((sine(v->wph) + 32768) * 2562) >> 16);     /* Q13 */
+    const int32_t wf = 467 + (((sine(v->wph) + 32768) * 1290) >> 16);     /* Q13: 400 .. 1,509 Hz within 0.3 % */
 #ifdef __bfin__
     int32_t *const ww = s->ww, *const st2 = s->st;
     if (sdram) touch(ww, sizeof s->ww);
@@ -634,7 +649,7 @@ static MB_HOT __attribute__((noinline)) void mb_render_body(void *self, int16_t 
     const int32_t strike = knob(p, 0), t = knob(p, 1), box = knob(p, 2), buzz = knob(p, 3);
     const int32_t ring = p[5] < 0 ? 0 : p[5], dbl = p[6] < 0 ? 0 : p[6], wah = p[7] < 0 ? 0 : p[7];
     const uint32_t inc0 = (uint32_t)OP1_PITCH_INC[0];
-    coeffs(v, t, ring, dbl, (int32_t)(((inc0 >> 16) * 44100u) >> 16));
+    coeffs(v, t, ring, dbl, (int32_t)(((inc0 >> 16) * 44100u) >> 15));                       /* Hz: inc0 = 2^32 f / 88200 */
     if (__builtin_expect((inc0 ^ v->kinc0) | v->knew, 0)) pitches(v, inc0);                    /* the partials' pitches, when they change */
     /* partial amplitude steps and pitch glides for this block */
     int32_t *const end = s->end, *const step = s->step, *const dinc = s->dinc;
@@ -643,7 +658,7 @@ static MB_HOT __attribute__((noinline)) void mb_render_body(void *self, int16_t 
         const uint32_t ik = v->inc[k];
         if (!ik) v->amp[k] = 0;
         const int32_t a = v->amp[k];
-        const int32_t e = (int32_t)((((uint32_t)a >> 8) * (uint32_t)v->dk[k]) >> 7);
+        const int32_t e = a - (int32_t)((((uint32_t)a >> 8) * (uint32_t)v->dk[k]) >> 10);
         step[k] = (e - a) >> 7;
         end[k] = a + step[k] * OP1_BLOCK;
         if (fresh) v->pinc[k] = ik;                                         /* pitches glide across the block */
@@ -651,7 +666,7 @@ static MB_HOT __attribute__((noinline)) void mb_render_body(void *self, int16_t 
     }
     /* mix levels ramp from the previous block's values. The strike's block (the note's first, the one that also runs
      * the click and the coefficients) leaves out the double tine and the buzz: both come in over the next block from 0
-     * (a 2.9 ms fade starting 2.9 ms after the pluck), so six notes struck together cost less in that block */
+     * (a 1.45 ms fade starting 1.45 ms after the pluck), so six notes struck together cost less in that block */
     v->fresh = 0;
     const int32_t dmix1 = fresh ? 0 : dbl > 0 ? 11469 + ((dbl * 4000) >> 15) : 0;   /* double tine level, Q15 */
     const int32_t dmix0 = fresh ? 0 : v->dmix;
@@ -680,8 +695,8 @@ static MB_HOT __attribute__((noinline)) void mb_render_body(void *self, int16_t 
     partials(s, live, n, glide != 0, sdram);
 
     if (__builtin_expect(v->click > 8 || v->clp, 0)) click_run(v, s, strike, mb_noise(h, sdram));
-    /* box: band-pass about 220 Hz (f = 0.25 at 5.5 kHz, damping 0.25), run on the average of 8 samples (its nulls at
-     * 5.5 kHz keep the decimation clean) and interpolated back between its last two outputs, 8 samples late */
+    /* box: band-pass about 220 Hz (f = 0.125 at 11 kHz, damping 0.25), run on the average of 8 samples (its nulls at
+     * 11 kHz keep the decimation clean) and interpolated back between its last two outputs, 8 samples late */
 #ifdef __bfin__
     /* the box's filter in mbira_dsp.S (mb_box, the C loop below): bd[] = the interpolation's start and step per group;
      * its output is added by mb_out without the wah (after the buzz: the sum is the same), else by mb_boxadd */
@@ -701,8 +716,8 @@ static MB_HOT __attribute__((noinline)) void mb_render_body(void *self, int16_t 
             int32_t o = bp;
             for (int j = 0; j < 8; j++) { o += d; q[j] += o; }
             bp = bo;
-            blo = clampi(blo + (bbd >> 2), -131071, 131071);
-            bbd = clampi(bbd + (((in >> 3) - blo - (bbd >> 2)) >> 2), -131071, 131071);
+            blo = clampi(blo + (bbd >> 3), -131071, 131071);
+            bbd = clampi(bbd + (((in >> 3) - blo - (bbd >> 2)) >> 3), -131071, 131071);
             bo = (((bbd * (bx >> 2)) >> 13) * 3) >> 2;
             bx += dbox * 8;
         }
@@ -721,7 +736,7 @@ static MB_HOT __attribute__((noinline)) void mb_render_body(void *self, int16_t 
         for (int i = 0; i < OP1_BLOCK; i++) out[i] = sat16((acc[i] * g) >> 15);
 #endif
     }
-    v->wph += 62144000u;                                                    /* 5 Hz per block */
+    v->wph += 31072000u;                                                    /* 4.99 Hz at 689 blocks/s */
 
     for (int k = 0; k < NP; k++) {
         v->pinc[k] = v->inc[k];

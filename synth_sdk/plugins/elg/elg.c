@@ -15,7 +15,7 @@ typedef struct {
     uint32_t ph[3], lfo;
     int32_t low, band;
     int32_t drift, drift_v;   /* pitch drift, Q15 of +-6 cents */
-    uint32_t rnd;
+    uint32_t rnd, tick;       /* tick: call parity, the drift moves every other call (designed for 344 calls/s) */
     int32_t control[5]; /* previous detune/drift/filter/drive/gain targets */
     int control_ready;
 } voice_t;
@@ -116,20 +116,23 @@ void engine_render(void *self, int16_t *out, const int16_t *knobs)
     const int32_t k0 = knobs[0] < 0 ? 0 : knobs[0], k1 = knobs[1] < 0 ? 0 : knobs[1];
     const int32_t k2 = knobs[2] < 0 ? 0 : knobs[2], k3 = knobs[3] < 0 ? 0 : knobs[3];
 
-    /* movement: LFO 0.03 .. 2 Hz (per block: 2^32 f 128 / 44100), and a slow random walk on the pitch */
+    /* movement: LFO 0.03 .. 2 Hz (per call: 2^32 f / 689.06, R246's 128 samples at 88.2 kHz), and a slow random walk on
+     * the pitch (it was written for 344 calls/s, so it steps every other call: rate fix 2026-11-03) */
     /* the products below fit 32 bits (knobs 0..32767, |lfo|, |drift| <= 32768, vel <= 127), so they are the 64-bit
-     * expressions they replaced, without libgcc's __muldi3; 373000 * e >> 12 is split at e's 12 low bits */
+     * expressions they replaced, without libgcc's __muldi3; 187000 * e >> 12 is split at e's 12 low bits */
     {
         const int32_t e = exp2q((k3 * 24800) >> 15);                       /* 4096 .. < 2^19 */
-        v->lfo += (uint32_t)(373000 * (e >> 12) + ((373000 * (e & 4095)) >> 12));
+        v->lfo += (uint32_t)(187000 * (e >> 12) + ((187000 * (e & 4095)) >> 12));
     }
     const int32_t lfo = sine_lfo(v->lfo);
-    v->rnd = v->rnd * 1664525u + 1013904223u;
-    v->drift_v += ((int32_t)(v->rnd >> 20) - 2048) - (v->drift >> 6);
-    v->drift_v -= v->drift_v >> 4;
-    v->drift += v->drift_v >> 4;
-    if (v->drift > 32767) v->drift = 32767;
-    if (v->drift < -32767) v->drift = -32767;
+    if (v->tick++ & 1) {
+        v->rnd = v->rnd * 1664525u + 1013904223u;
+        v->drift_v += ((int32_t)(v->rnd >> 20) - 2048) - (v->drift >> 6);
+        v->drift_v -= v->drift_v >> 4;
+        v->drift += v->drift_v >> 4;
+        if (v->drift > 32767) v->drift = 32767;
+        if (v->drift < -32767) v->drift = -32767;
+    }
 
     /* pitches: detune up to +-1.2 % (~20 cents), drift up to +-0.35 % (~6 cents) times movement */
     const int32_t det = (k1 * 393) >> 15;                                   /* Q15 fraction */
@@ -137,12 +140,12 @@ void engine_render(void *self, int16_t *out, const int16_t *knobs)
     int step = elg_interval(k0);
     if (step > 4) step = 4;
 
-    /* cutoff: 40 Hz .. 6 kHz plus +-1.5 octaves of LFO; f = 2 sin(pi fc / fs), Q15, 187 .. ~27000 */
+    /* cutoff: 40 Hz .. 6 kHz plus +-1.5 octaves of LFO; f = 2 sin(pi fc / fs), Q15, fs = 88.2 kHz: 93.5 .. ~13500 */
     int32_t cx = (k2 * 29500) >> 15;
     cx += ((lfo * k3) >> 15) * 6144 >> 15;
-    int32_t f = (187 * exp2q(cx)) >> 12;
-    if (f > 27000) f = 27000;
-    if (f < 120) f = 120;
+    int32_t f = (187 * exp2q(cx)) >> 13;                                    /* 2 sin(pi 40 / 88200) in Q15 is 93.5 */
+    if (f > 13500) f = 13500;
+    if (f < 60) f = 60;
     const int32_t q = 20000;                                                /* damping, mild resonance (elg_dsp.S: 40000 = 2 q) */
     (void)q;
     const int32_t drive = 4096 + ((k2 * 12288) >> 15);                      /* Q12, 1 .. 4 */

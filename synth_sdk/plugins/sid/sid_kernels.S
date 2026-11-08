@@ -479,15 +479,15 @@ _sid_udiv:
 
 /* ---- the filter: 8580 lowpass, DC coupling, output clamp ----
  * high = acc + SDIV(band * res, 12) + low; band = clamp(band - cmul(high)); low = clamp(low + cmul(band));
- * dc += SDIV(low * 256 - dc, 10); out = sat16(low - SDIV(dc, 8)); cmul(x) = (x * chi + (x * clo >> 12)) >> 12
+ * dc += SDIV(low * 512 - dc, 11); out = sat16(low - SDIV(dc, 9)); cmul(x) = (x * chi + (x * clo >> 12)) >> 14
  * with chi = cutoff >> 12, clo = cutoff & 4095. R0 band, R1 low, R3 cutoff, R4 clo, R5 chi, R2 / R6 / R7 temps,
- * dc in f (P5 + 8). I3 cycles (glide: 128, 4095,) 0, -65536, 65536, -65536, 65536, (glide: target,) resonance.
+ * dc in f (P5 + 8). I3 cycles (glide: 256, 4095,) 0, -65536, 65536, -65536, 65536, (glide: target,) resonance.
  * 41 packets a sample settled, 47 gliding. */
 .macro FILT_SAMPLE glide, end
 	.if \glide
-	R7 = R6 - R3 (NS) || R5 = [I3++] || NOP;          /* target - cutoff; R5 = 128 */
+	R7 = R6 - R3 (NS) || R5 = [I3++] || NOP;          /* target - cutoff; R5 = 256 */
 	R7 = R7 + R5 (NS) || R4 = [I3++] || NOP;          /* R4 = 4095 */
-	R7 >>>= 8;
+	R7 >>>= 9;
 	R3 = R3 + R7;                                /* cutoff */
 	R4 = R3 & R4;                                /* clo */
 	R5 = R3 >>> 12;                              /* chi */
@@ -505,7 +505,7 @@ _sid_udiv:
 	R6 *= R5;
 	R7 = R7 >>> 12 || R2 = [I3++] || NOP;        /* R2 = -65536 */
 	R6 = R6 + R7;
-	R6 = R6 >>> 12 || R7 = [I3++] || NOP;        /* R7 = 65536 */
+	R6 = R6 >>> 14 || R7 = [I3++] || NOP;        /* R7 = 65536 */
 	R0 = R0 - R6;
 	R0 = MAX (R0, R2);
 	R0 = MIN (R0, R7);                           /* band */
@@ -515,21 +515,21 @@ _sid_udiv:
 	R7 *= R4;
 	R7 = R7 >>> 12 || R2 = [I3++] || NOP;        /* R2 = -65536 */
 	R6 = R6 + R7;
-	R6 = R6 >>> 12 || R7 = [I3++] || NOP;        /* R7 = 65536 */
+	R6 = R6 >>> 14 || R7 = [I3++] || NOP;        /* R7 = 65536 */
 	R1 = R1 + R6;
 	R1 = MAX (R1, R2);
 	R1 = MIN (R1, R7);                           /* low */
-	R6 = R1 << 8 || R2 = [P5 + 8] || NOP;        /* R2 = dc */
+	R6 = R1 << 9 || R2 = [P5 + 8] || NOP;        /* R2 = dc */
 	R6 = R6 - R2;
 	R7 = R6 >>> 31;
-	R7 >>= 22;
+	R7 >>= 21;
 	R6 = R6 + R7;
-	R6 >>>= 10;
+	R6 >>>= 11;
 	R2 = R2 + R6;                                /* dc */
 	R7 = R2 >>> 31;
-	R7 >>= 24;
+	R7 >>= 23;
 	R7 = R7 + R2 (NS) || [P5 + 8] = R2 || NOP;   /* (no shift beside a P store: anomaly 05000074) */
-	R7 >>>= 8;                                   /* SDIV(dc, 8) */
+	R7 >>>= 9;                                   /* SDIV(dc, 9) */
 	R7 = R1 - R7;
 	.if \glide
 	R7 = R7 << 16 (S) || R6 = [I3++] || NOP;     /* R6 = target */
@@ -565,7 +565,7 @@ _sid_filter:
 	R6 = [P5 + 24];
 	CC = R6 == 0;
 	IF CC JUMP .Lflt_set;
-	R6 = 128;
+	R6 = 256;
 	[P5 + 32] = R6;
 	R6 = 4095;
 	[P5 + 36] = R6;

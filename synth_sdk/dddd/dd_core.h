@@ -4,9 +4,9 @@
 #define DD_CORE_H
 #include <stdint.h>
 
-#define DD_SR    44100
+#define DD_SR    88200                   /* the voice rate (OP1_VOICE_RATE): R246 renders voices 2x oversampled */
 #define DD_TAPS  4
-#define DD_BUF   4096                    /* loop buffer, samples (power of two) */
+#define DD_BUF   8192                    /* loop buffer, samples (power of two): 93 ms */
 
 typedef struct {
     int32_t source, feedback, destroy, hands;   /* knobs 0..3, Q15 0..32767 */

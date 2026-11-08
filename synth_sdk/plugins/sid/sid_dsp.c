@@ -18,17 +18,17 @@ uint32_t sid_udiv(uint32_t n,uint32_t d,unsigned b);   /* sid_kernels.S: n / d w
 #else
 #define UDIV(n,d,b) ((n)/(d))
 #endif
-/* Smooth in extended precision. At 44.1 kHz the 1/256 pole has a ~5.8 ms
- * time constant. Split products keep both filter multiplies in signed 32 bits:
+/* Smooth in extended precision (Q26). R246 renders a voice at 88.2 kHz, so the 1/512 pole has the ~5.8 ms
+ * time constant the 1/256 pole of 44.1 kHz had. Split products keep both filter multiplies in signed 32 bits:
  * |high| <= 170496 and |band| <= 65536 under the existing state bounds. */
 static inline int cutoff_target(int q) {
  unsigned u=(unsigned)clamp(q,0,32767),i=u>>9,f=u&511;
  if(u==32767)return sid_cutoff_log[64];
  return sid_cutoff_log[i]+((sid_cutoff_log[i+1]-sid_cutoff_log[i])*(int)f>>9);
 }
-static inline int cutoff_smooth(int live,int target) { return live+((target-live+128)>>8); }
+static inline int cutoff_smooth(int live,int target) { return live+((target-live+256)>>9); }
 static inline int cutoff_mul(int x,int c) {
- return (x*(c>>12)+((x*(c&4095))>>12))>>12;
+ return (x*(c>>12)+((x*(c&4095))>>12))>>14;
 }
 
 void sid_reset(sid_state *s) {
@@ -49,11 +49,13 @@ void sid_configure(sid_state *s,uint32_t inc,const int16_t *q) {
  if(first)s->cutoff_live=s->cutoff; /* a fresh note starts at the chosen tone */
  s->resonance=cRSID_Resonances8580[(unsigned)q[3]>>11];
  /* Pure modes use root, octave and fifth: a SID mini-chip, not unison padding.
-  * Sync/ring modes sweep source interval 1..4 while retaining a root carrier. */
+  * Sync/ring modes set the source interval in semitones, 0..24 (1x..4x), keeping a root carrier
+  * (2026-11-07, owner: the free 1.00..4.00 sweep was too fine to set; every stop is now in tune). */
  uint32_t root=inc>>4;if(root>0x06000000u)root=0x06000000u;
  s->step[0]=root;
  if(s->mode>=4) {
-   unsigned ratio=256u+((unsigned)q[1]*768u>>15);
+   static const uint16_t semi[25]={256,271,287,304,323,342,362,384,406,431,456,483,512,542,575,609,645,683,724,767,813,861,912,967,1024}; /* 256 * 2^(n/12) */
+   unsigned ratio=semi[sid_interval_semi(q[1])];
    s->step[1]=(root>>8)*ratio;s->step[2]=root;
  } else {s->step[1]=root*2;s->step[2]=root+(root>>1);}
  for(int j=0;j<3;j++) {
@@ -110,8 +112,8 @@ int16_t sid_sample(sid_state *s) {
  s->band=clamp(s->band-cutoff_mul(high,s->cutoff_live),-65536,65536);
  s->low=clamp(s->low+cutoff_mul(s->band,s->cutoff_live),-65536,65536);
  /* Board output coupling: remove pulse/sync DC before native ADSR. */
- int output=s->low;s->dc+=(output*256-s->dc)/1024;
- return (int16_t)clamp(output-s->dc/256,-32768,32767);
+ int output=s->low;s->dc+=(output*512-s->dc)/2048;
+ return (int16_t)clamp(output-s->dc/512,-32768,32767);
 }
 
 /* Full-rate block path: constant waveform per loop, scalar local oscillator state.
@@ -162,7 +164,7 @@ static void render_##M##_##C(sid_state *s,int16_t *out,unsigned count){ \
   if(M==0||M==1||M==3){y=SDIV(y*gain,8);z=SDIV(z*gain,8);} \
   if(!C)cutoff=cutoff_smooth(cutoff,target); \
   int high=x+y+z+SDIV(band*res,12)+low;band=clamp(band-cutoff_mul(high,cutoff),-65536,65536);low=clamp(low+cutoff_mul(band,cutoff),-65536,65536); \
-  dc+=SDIV(low*256-dc,10);out[i]=(int16_t)clamp(low-SDIV(dc,8),-32768,32767); \
+  dc+=SDIV(low*512-dc,11);out[i]=(int16_t)clamp(low-SDIV(dc,9),-32768,32767); \
  } \
  SAVE(a,0);SAVE(b,1);SAVE(c,2);s->sync_rise=rise;s->ring_msb=ring;s->band=band;s->low=low;s->dc=dc;s->cutoff_live=cutoff; \
 }
@@ -243,7 +245,7 @@ static void render_blocks(sid_state *s,int16_t *out,unsigned n){
  uint32_t c=s->phase[2];s->ring_msb=c&MSB;
  if(mode!=4)s->sync_rise=(c&MSB)>(((c-s->step[2])&MASK)&MSB);
  sid_f.band=s->band;sid_f.low=s->low;sid_f.dc=s->dc;sid_f.cutoff=s->cutoff_live;sid_f.target=s->cutoff;
- sid_f.res=s->resonance;sid_f.glide=((s->cutoff-s->cutoff_live+128)>>8)!=0;
+ sid_f.res=s->resonance;sid_f.glide=((s->cutoff-s->cutoff_live+256)>>9)!=0;
  sid_filter(out,acc,&sid_f,n);
  s->band=sid_f.band;s->low=sid_f.low;s->dc=sid_f.dc;s->cutoff_live=sid_f.cutoff;
 }

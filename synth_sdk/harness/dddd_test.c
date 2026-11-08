@@ -42,13 +42,13 @@ static void t_pitch(void)                                      /* the loop howls
     dd_par p = { 0, 26000, 0, 0, 0, 0, 0, 32767, 32767 };      /* noise, feedback 0.99, clean, still */
     run(&p, o, DD_SR);
     double best = 0; int lag = 0;
-    for (int l = 40; l < 600; l++) {
+    for (int l = 80; l < 1200; l++) {
         double c = 0, e0 = 0, e1 = 0;
-        for (int i = DD_SR / 2; i < DD_SR - 600; i++) { c += (double)o[i] * o[i + l]; e0 += (double)o[i] * o[i]; e1 += (double)o[i + l] * o[i + l]; }
+        for (int i = DD_SR / 2; i < DD_SR - 1200; i++) { c += (double)o[i] * o[i + l]; e0 += (double)o[i] * o[i]; e1 += (double)o[i + l] * o[i + l]; }
         c /= sqrt(e0 * e1 + 1);
         if (c > best) { best = c; lag = l; }
     }
-    CHECK(abs(lag - 168) <= 2, "loop period %d (want 168 for C4), corr %.2f", lag, best);
+    CHECK(abs(lag - 337) <= 3, "loop period %d (want 337 for C4 at DD_SR), corr %.2f", lag, best);
     printf("ok pitch (period %d, corr %.2f)\n", lag, best);
 }
 

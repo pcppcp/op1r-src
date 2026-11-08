@@ -7,8 +7,8 @@
  * void hs_relic(int32_t *h, int32_t *k)
  *   relic_run's loop in place on h (hb, or the shared bus buffer). k: 0 1664525, 1 0xDA29F01B (the LCG's addend
  *   times 1664525^-1: (r + c) * 1664525 = r * 1664525 + 1013904223), 2 rinc, 3 sh - 32, 4 hold - half (in/out),
- *   5 mask, 6 a, 7 lp2 (in/out), 8 -16384, 9 hiss, 10 make, 11 pthr, 12 drive, 13 32767, 14 half, 15 popsz,
- *   16..23 mix per sub-block, 24 rng, 25 lp, 26 pop, 27 rph (in/out). 43 packets per sample, plus 17 on a sample-
+ *   5 mask, 6 a | RELIC_POP << 16 (a pop's decay per sample), 7 lp2 (in/out), 8 -16384, 9 hiss, 10 make, 11 pthr, 12 drive, 13 32767, 14 half, 15 popsz,
+ *   16..23 mix per sub-block, 24 rng, 25 lp, 26 pop, 27 rph (in/out). 44 packets per sample, plus 17 on a sample-
  *   rate wrap (the saturator, as the C: only a held sample needs it) and 5 on a pop.
  * void hs_drone(int32_t *b, const uint32_t *ri, int32_t *k)
  *   drone_run's loop, added to b. Phases p0 / p1 are held XOR 0x80000000 (the saw's ramp is the high half; the
@@ -18,9 +18,10 @@
  *   20 p0 ^ 2^31, 21 p1 ^ 2^31, 22 dlp, 23 dbp (in/out), 24..32 gd per sub-block (one spare). 41 packets per
  *   sample, plus ~22 per polyBLEP correction.
  * void hs_buzz(int32_t *b, const uint32_t *ri, int32_t *k)
- *   buzz_run's loop, added to b. k: 0 tsh, 1 0xDA29F01B, 2 1664525, 3 -16384, 4 32768, 5 13693 (tlc), 6 fr, 7 rq,
- *   8 tg, 9 gz (this sub-block), 10 tlp, 11 rlp, 12 rattle (in/out), 13 65535, 14 -65535, 15 amp (this sub-block),
- *   16 jit, 17 bnz, 18 32767, 19 tph, 20 rng, 21 slap, 22 rbp (in/out), 23 spare, 24..50 { tg, gz, amp } per
+ *   buzz_run's loop, added to b. k: 0 tsh, 1 0xDA29F01B, 2 1664525, 3 -16384, 4 32768, 5 tlc, 6 fr, 7 rq,
+ *   8 tg, 9 gz (this sub-block), 10 tlp, 11 rlp, 12 rattle (in/out), 13 65535, 14 -65535, 15 the slap's and the
+ *   rattle's decays per sample (28378 << 16 | 31727),
+ *   16 jit, 17 bnz, 18 32767, 19 tph, 20 rng, 21 slap, 22 rbp (in/out), 23 amp (this sub-block), 24..50 { tg, gz, amp } per
  *   sub-block (one spare triple). 45 packets per sample, plus 17 on a slap (a new trompette cycle).
  *
  * m16 products are 16 x 16 (.L * .L (IS): the C's int16 casts); every other product is a 32-bit multiply (it wraps
@@ -101,12 +102,13 @@ _hs_relic:
 	CC = R7 < R2 (IU);
 	IF CC JUMP .Lr_pop;
 .Lr_p1:
-	R2 = R4 >>> 1 || R0 = [P1 + 12];                 /* pop >> 1; sh - 32 */
+	R0 = [P1 + 12];                                  /* sh - 32 */
 	R0 = LSHIFT R7 BY R0.L || R1 = [P1 + 16];        /* r >> (32 - sh); hold - half */
 	R0 = R0 + R1 (NS) || R5 = [P1 + 20];
 	R0 = R0 & R5;
-	R0 = R0 + R4 (NS) || R1 = [P1 + 24];             /* + pop; a */
-	R4 = R4 - R2 (NS) || R5 = [P1 + 28];             /* pop -= pop >> 1; lp2 */
+	R0 = R0 + R4 (NS) || R1 = [P1 + 24];             /* + pop; a, RELIC_POP in the high half */
+	R4 = R4.L * R1.H (IS) || R5 = [P1 + 28];         /* pop = m16(pop, RELIC_POP) >> 15; lp2 */
+	R4 = R4 >>> 15;
 	R0 = R0 << 16 (S);
 	R0 = R0 >>> 16;                                  /* q */
 	R0 = R0 - R6 (NS);                               /* lp += m16((q - lp) >> 1, a) >> 14, clamped */
@@ -188,7 +190,7 @@ _hs_relic:
 #ifdef HS_RELIC_LITE
 /* ---- hs_relic_lite (HS_RELIC_LITE): the Lo-Fi Relic with one tape-head pole and no dither: q = (hold & mask) + pop.
  * The LCG still steps per sample (it drives the hiss and the pops). k as hs_relic's, except k[4] = hold & mask
- * (in/out) and k[28] = hold (in/out); k[3], k[7] (lp2) and k[14] are not used. 33 packets per sample. */
+ * (in/out) and k[28] = hold (in/out); k[3], k[7] (lp2) and k[14] are not used. 34 packets per sample. */
 	.align 4
 	.global _hs_relic_lite
 	.type _hs_relic_lite, STT_FUNC
@@ -235,9 +237,10 @@ _hs_relic_lite:
 	CC = R7 < R2 (IU);
 	IF CC JUMP .Lrl_pop;
 .Lrl_p1:
-	R2 = R4 >>> 1 || R0 = [P1 + 16];                 /* pop >> 1; hold & mask */
-	R0 = R0 + R4 (NS) || R1 = [P1 + 24];             /* + pop; a */
-	R4 = R4 - R2 (NS) || R5 = [P1 + 32];             /* pop -= pop >> 1; -16384 */
+	R0 = [P1 + 16];                                  /* hold & mask */
+	R0 = R0 + R4 (NS) || R1 = [P1 + 24];             /* + pop; a, RELIC_POP in the high half */
+	R4 = R4.L * R1.H (IS) || R5 = [P1 + 32];         /* pop = m16(pop, RELIC_POP) >> 15; -16384 */
+	R4 = R4 >>> 15;
 	R0 = R0 << 16 (S);
 	R0 = R0 >>> 16;                                  /* q */
 	R0 = R0 - R6 (NS);                               /* lp += m16((q - lp) >> 1, a) >> 14, clamped */
@@ -500,7 +503,7 @@ _hs_buzz:
 	R0 = [P3++];
 	[P1 + 36] = R0;
 	R0 = [P3++];
-	[P1 + 60] = R0;
+	[P1 + 92] = R0;
 	R4 = [I1];
 	R1 = [I0++];
 	R2 = [P1];
@@ -528,15 +531,15 @@ _hs_buzz:
 	R1 = R6 >> 17 || R4 = [P1 + 48];                 /* rattle */
 	R1 = R1 + R0 (NS);                               /* nz */
 	R1 = R1.L * R4.L (IS);
-	R1 = R1 >>> 14;
+	R1 = R1 >>> 14 || R0 = [P1 + 60];                /* the decays (k[15]) */
 	R1 = R1 + R5 (NS);                               /* exc */
-	R0 = R4 >>> 4;
-	R4 = R4 - R0 (NS);
-	R0 = R5 >>> 2;
-	R5 = R5 - R0 (NS) || [P1 + 48] = R4;
-	R0 = R1 >>> 1 || R4 = [P1 + 24];                 /* fr */
-	R2 = R2 + R0 (NS);
-	R1 = R1 >>> 2;
+	R4 = R4.L * R0.L (IS);                           /* rattle = m16(rattle, 31727) >> 15 */
+	R4 = R4 >>> 15;
+	R5 = R5.L * R0.H (IS);                           /* slap = m16(slap, 28378) >> 15 */
+	R5 = R5 >>> 15;
+	R0 = R1 >>> 1;
+	R2 = R2 + R0 (NS) || [P1 + 48] = R4;
+	R1 = R1 >>> 2 || R4 = [P1 + 24];                 /* fr */
 	R4 *= R3;
 	R4 = R4 >>> 15 || R0 = [I2];                     /* rlp */
 	R0 = R0 + R4 (NS);
@@ -562,7 +565,7 @@ _hs_buzz:
 	[P1 + 36] = R0;
 	R0 = [P3++];
 .Lz_oe:
-	[P1 + 60] = R0;                                  /* the next sub-block's (the last reads the spare) */
+	[P1 + 92] = R0;                                  /* the next sub-block's (the last reads the spare) */
 	[I1++] = R4;
 	[P1 + 76] = R7;
 	[P1 + 80] = R6;
@@ -585,7 +588,7 @@ _hs_buzz:
 	R0 = R0 >>> 15;
 	R1 = [P1 + 72];                                  /* 32767 */
 	R1 = R1 - R0 (NS);
-	R0 = [P1 + 60];                                  /* amp */
+	R0 = [P1 + 92];                                  /* amp */
 	R0 = R0.L * R1.L (IS);
 	R4 = [P1 + 68];                                  /* bnz */
 	R5 = R0 >>> 15;

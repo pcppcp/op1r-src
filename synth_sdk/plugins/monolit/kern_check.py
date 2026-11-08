@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 Hundekraft. GPL-3.0-or-later with the OP-1 firmware permission (see LICENSE and NOTICE).
-"""MONOLIT's Blackfin kernels (monolit_dsp.S) against its own C loop on bcore: builds kern_guest.c with monolit.c twice
+"""MONOLIT's Blackfin kernels (monolit_dsp.S, monolit_fc.S) against its own C loop on bcore: builds kern_guest.c with monolit.c twice
 (with monolit_dsp.S, and with MONOLIT_C_LOOP and the symbols renamed ref_*), runs it, exit 1 on any difference. Covers
 pitch words (the whole 32-bit range), velocities, knob words and render orders that exact_check.py's regimes do
 not reach. Prints SKIP without the toolchain or bcore.
@@ -30,7 +30,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='monolit-kern-') as tmp:
         tmp = Path(tmp)
         objs = []
-        for src, name, extra in (('kern_guest.c', 'guest', []), ('monolit.c', 'monolit', []), ('monolit_dsp.S', 'dsp', []),
+        for src, name, extra in (('kern_guest.c', 'guest', []), ('monolit.c', 'monolit', []), ('monolit_dsp.S', 'dsp', []), ('monolit_fc.S', 'fc', []),
                                  ('monolit.c', 'ref', REF)):
             o = tmp / (name + '.o')
             T.sh([t['gcc'], '-O2', '-mcpu=bf524', '-ffreestanding', '-fno-builtin', '-nostdlib', '-fno-common', '-Wall',

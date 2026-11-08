@@ -13,8 +13,9 @@ position for the real stereo version. It also runs at the synth and drum positio
 | white | TONE | Darkness of the wet path: two one-poles in series, from about 8.6 kHz (left) down to about 1.3 kHz (right), as an old, tired BBD. |
 | red | MIX | The wet rises 0 to 0.7 on top of the whole dry signal, as on the original (dry and wet together). 0 is the dry signal bit for bit. |
 
-Defaults: MODE I (14 %, the middle of its band), DEPTH 85 %, TONE 18 %, MIX 75 % (2026-10-28, after tester feedback
-that the old default, MODE II, DEPTH 73 %, MIX 64 %, was barely audible on a synth). MIX is linear: the wet's gain is
+Defaults: MODE I (14 %, the middle of its band), DEPTH 85 %, TONE 18 %, MIX 40 % (2026-11-04: every FX starts with
+little effect, for scrolling through while playing live; before that MIX 75 %, set 2026-10-28 after tester feedback
+that MODE II, DEPTH 73 %, MIX 64 % was barely audible on a synth). MIX is linear: the wet's gain is
 0.7 x MIX on top of the whole dry, so 75 % is a wet of 0.525 (about -5.6 dB against the dry before the wet path's
 filters; measured -7 to -10 dB, see "Depth" below).
 
@@ -26,7 +27,15 @@ filters; measured -7 to -10 dB, see "Depth" below).
     original's mono output used one chorus side. Until 2026-10-28 the mono path summed both opposite taps; their
     pitch movements cancel (for a sine the sum is the centre tap times cos(w x sweep): level, no pitch), which left a
     faint comb sweep and, in I+II, almost nothing.
-- Centre delay 3.5 ms (77 samples at 22.05 kHz). Linear-interpolated reads.
+- Centre delay 3.5 ms (154 samples at 44.1 kHz). Linear-interpolated reads.
+- Rate note (2026-11-03): R246 calls an FX with 64 samples at 44.1 kHz; the chorus was written for 22.05 kHz, so on
+  the unit until now the LFOs ran at twice their rates (I 1 Hz, II 1.6 Hz, I+II 18 Hz), the delays at half (centre
+  1.75 ms), the high-pass at 500 Hz and TONE at 2.6-17 kHz. Every constant is now at 44.1 kHz: increments halved,
+  delays and sweeps doubled (the read pass now runs before the write pass, so the 256-sample rings still hold the
+  longest delay, 234 samples), `HP_A` for 250 Hz, and TONE's coefficient `1 - sqrt(1 - a)` of the design's (an
+  integer square root per block) so both poles keep their corners at every knob position. The screen's model follows
+  (44.1 samples a ms, `SHOW_INC_MAX` and `SWEEP_FULL` at the new rate); its golden moved only in the trees' sway
+  phase. `harness/rate_juni_chorus_test.c` checks I 0.5 Hz, I+II 9 Hz and the centre delay. Not yet heard on the unit.
 - Wet path: a one-pole high-pass at about 250 Hz first, then the two one-poles, then a very soft cubic saturation
   (`x - 0.12 x^3` at full scale). The high-pass keeps the bass dry: a 3.5 ms delay puts the first comb notch at
   about 143 Hz, where it cancelled the low notes' fundamentals (a C3 pad lost 6 dB in the first native take,
@@ -38,7 +47,7 @@ filters; measured -7 to -10 dB, see "Depth" below).
 - Not included: a hiss knob (there are only four knobs, the hiss would be inaudible at honest levels), BBD clock
   aliasing and companding.
 - Integers only, Q15. 16 x 16 products use one Blackfin fractional multiply (`fmul`, with a host fallback). Each
-  block of 64 samples runs in five small passes (LFO, write, read, filter, saturate and mix). No division, no 64-bit
+  block of 64 samples runs in five small passes (LFO, read, write, filter, saturate and mix). No division, no 64-bit
   math, no libc in the audio path. The state is two 256-sample rings and a few words per position (about 1.1 KB
   in `.bss`, three positions); the scratch buffer is not used. `init` clears it.
 
@@ -122,7 +131,7 @@ between green cliffs and navy ranges, with red reflections on the water.
 
 `juni_chorus_test.c` (host, address and undefined-behaviour sanitizers):
 `cc -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -DOP1_HOST -I.. juni_chorus_test.c juni_chorus.c -lm`
-then `./a.out check`, `./a.out render <dir>` (22.05 kHz stereo WAVs) or `./a.out measure [dir]` (the depth figures as
+then `./a.out check`, `./a.out render <dir>` (44.1 kHz stereo WAVs) or `./a.out measure [dir]` (the depth figures as
 JSON, and short WAVs when a folder is given). It checks all 3^4 knob corners at full-scale
 input for UB, silence in/out at all three positions, a tail that ends, mix 0 equal to the dry signal, and a MODE
 sweep for clicks, and that mono equals the stereo left side bit for bit through a knob sweep.
@@ -154,6 +163,6 @@ reflections ripple), `compare.png` (the mockup at the fit beside the native fram
 Wavetable note the free reflection dashes move about twice as much as in silence (pixels changing frame to frame
 62 against 34, `ripple-diff.json`).
 
-Not verified: listening on the OP-1, the real R246 decimator chain at 22.05 kHz, loading the file through the
-firmware and sysmon load, and the character against a real unit. Renders in `run/juni-chorus/` are host-only
-(the plugin's own rate, 22.05 kHz, with no 2:1 chain).
+Not verified: listening on the OP-1, loading the file through the firmware and sysmon load, and the character
+against a real unit. Renders in `run/juni-chorus/` are host-only and from before the rate note (made at 22.05 kHz,
+the rate the plugin was then written for).

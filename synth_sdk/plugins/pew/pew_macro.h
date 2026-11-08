@@ -40,9 +40,9 @@ static inline void pew_registration(int32_t blue, const int16_t *push, int32_t o
 }
 
 /* red (LESLIE), three zones of the knob: brake (rotors spin down and stop), slow (chorale), fast (tremolo); the rotor
- * speeds as phase per 128-sample block, 2^32 * f * 128 / 44100 */
-#define PEW_SLOW 9972000                                       /* 0.8 Hz */
-#define PEW_FAST 83526000                                      /* 6.7 Hz */
+ * speeds as phase per render call (128 samples at 88.2 kHz, 689.06 calls/s), 2^32 * f / 689.06 */
+#define PEW_SLOW 4986000                                       /* 0.8 Hz */
+#define PEW_FAST 41763000                                      /* 6.7 Hz */
 static inline int pew_leslie_zone(int32_t red) { return red < 10923 ? 0 : red < 21845 ? 1 : 2; }
 static inline int32_t pew_leslie_target(int32_t red)
 {

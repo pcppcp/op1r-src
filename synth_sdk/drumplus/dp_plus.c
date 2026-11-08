@@ -41,7 +41,7 @@ int dp_extra_get(const dp_extra *x, int i)
     return dp_fields[i].sgn ? (int8_t)b : b;
 }
 
-/* 0..127 -> samples: 0, then 3 ms * 2^(t / 12) (127: ~4.6 s) */
+/* 0..127 -> 44.1 kHz samples: 0, then 3 ms * 2^(t / 12) (127: ~4.6 s); the voice counts DP_VOICE_X per sample */
 uint32_t dp_time_samples(uint8_t t)
 {
     static const uint16_t pow12[12] = { 256, 271, 287, 304, 323, 342, 362, 384, 406, 431, 456, 483 };
@@ -84,18 +84,16 @@ void dp_plus_prepare(const dp_extra *x, dp_pre *c)
     for (volatile uint8_t *b = (volatile uint8_t *)c; b < (volatile uint8_t *)(c + 1); b++) *b = 0;
     if (!dp_extra_active(x)) return;
     dp_p2_init();
-    c->t_att = dp_time_samples(x->attack); c->t_hold = dp_time_samples(x->hold);
-    c->t_dec = dp_time_samples(x->decay); c->t_rel = dp_time_samples(x->release);
+    c->t_att = DP_VOICE_X * dp_time_samples(x->attack); c->t_hold = DP_VOICE_X * dp_time_samples(x->hold);
+    c->t_dec = DP_VOICE_X * dp_time_samples(x->decay); c->t_rel = DP_VOICE_X * dp_time_samples(x->release);
     c->a_step = c->t_att ? Q30 / (int32_t)c->t_att : Q30;
     c->d_step = c->t_dec ? Q30 / (int32_t)c->t_dec : Q30;
     c->r_step = c->t_rel ? Q30 / (int32_t)c->t_rel : Q30;
-    /* exponential: per-sample factor 1 - 6.9 / T (Q15): ~-60 dB after T samples */
-    c->kd = c->t_dec ? 32768 - (int32_t)(226100 / (c->t_dec + 1)) : 0;
-    c->kr = c->t_rel ? 32768 - (int32_t)(226100 / (c->t_rel + 1)) : 0;
-    c->kd = c->kd > 32767 ? 32767 : c->kd < 0 ? 0 : c->kd;
-    c->kr = c->kr > 32767 ? 32767 : c->kr < 0 ? 0 : c->kr;
-    uint32_t t_pitch = dp_time_samples(x->pitch_time);
-    c->p_start = (int32_t)x->pitch_env * 524288;           /* semitones -> 1/96 octave << 16 */
+    /* exponential: per-sample decrement 6.9 / T (Q22; ~-60 dB after T voice samples, within 1 % up to ~4.6 s) */
+    c->kd = c->t_dec ? 28940698u / (c->t_dec + 1) : 0;
+    c->kr = c->t_rel ? 28940698u / (c->t_rel + 1) : 0;
+    uint32_t t_pitch = DP_VOICE_X * dp_time_samples(x->pitch_time);
+    c->p_start = (int32_t)x->pitch_env * 8388608;          /* semitones -> 1/96 octave << 20 */
     c->p_step = t_pitch ? c->p_start / (int32_t)t_pitch : c->p_start;
     c->fine_u = (int32_t)x->fine * 512 / 25;               /* cents -> 1/96 octave << 8 */
     if (x->filter) {                                        /* k = 1 / Q: 2 .. 0.06 */
@@ -126,7 +124,7 @@ static uint32_t dp_rand(void)
 static const uint8_t dp_per_beat[6] = { 2, 3, 4, 6, 8, 16 }; /* 1/8, 1/8T, 1/16, 1/16T, 1/32, 1/64 */
 static uint32_t dp_retrig_interval(const dp_extra *x, uint32_t samples_per_beat)
 {
-    uint32_t t = samples_per_beat / dp_per_beat[x->retrig_div < 6 ? x->retrig_div : 5];   /* per hit, not per sample */
+    uint32_t t = DP_VOICE_X * samples_per_beat / dp_per_beat[x->retrig_div < 6 ? x->retrig_div : 5];   /* per hit, not per sample; voice samples */
     return t ? t : 1;
 }
 
@@ -173,7 +171,7 @@ void dp_plus_note_off(dp_voice *v, dp_xvoice *s, const dp_pad *pad, const dp_ext
     if ((pad->playmode >> 13) != 1) { s->stage = 3; s->stage_n = 0; }   /* gate / loop: release; one-shot runs on */
 }
 
-#define DP_FADE_STEP 372                                   /* 32767 / 88: ~2 ms to silence */
+#define DP_FADE_STEP 186                                   /* 32767 / 176: ~2 ms to silence at 88.2 kHz */
 
 int dp_plus_choke(dp_voice *const *v, dp_xvoice *s, const uint8_t *voice_pad, int nvoices, int new_pad, const dp_extra *x)
 {
@@ -200,11 +198,11 @@ static inline int32_t dp_env_tick(dp_xvoice *s, const dp_extra *x, const dp_pre 
         break;
     case 2:                                                             /* decay (0: sustain at full) */
         if (!c->t_dec) break;
-        if (x->curve_exp) s->env = (s->env >> 15) * c->kd; else s->env -= c->d_step;
+        if (x->curve_exp) s->env -= (int32_t)(((uint32_t)s->env >> 15) * c->kd >> 7); else s->env -= c->d_step;
         if (s->env <= (x->curve_exp ? (Q30 >> 10) : 0)) { s->env = 0; s->stage = 4; }
         break;
     case 3:                                                             /* release */
-        if (x->curve_exp) s->env = (s->env >> 15) * c->kr; else s->env -= c->r_step;
+        if (x->curve_exp) s->env -= (int32_t)(((uint32_t)s->env >> 15) * c->kr >> 7); else s->env -= c->r_step;
         if (s->env <= (x->curve_exp ? (Q30 >> 10) : 0) || !c->t_rel) { s->env = 0; s->stage = 4; }
         break;
     default:
@@ -219,7 +217,7 @@ static inline int32_t dp_env_tick(dp_xvoice *s, const dp_extra *x, const dp_pre 
 static inline int32_t dp_step_tick(dp_xvoice *s, const dp_pre *c, int n, int32_t inc, int32_t *factor)
 {
     if (!(n & 15)) {
-        int32_t u = (s->pitch_u >> 8) + c->fine_u + s->vel_u;
+        int32_t u = (s->pitch_u >> 12) + c->fine_u + s->vel_u;
         *factor = u ? dp_pitch_q12(u) : 4096;
     }
     if (s->pitch_u) {                                                   /* glide back to 0 */

@@ -12,18 +12,23 @@
  *   mono (synth, drum): dry + delay(x, centre + lfo), the left side alone, as the original's mono output
  * Integers only. 16 x 16 products are one Blackfin fractional multiply (fmul). The state is tiny (two 256 sample
  * rings per position, mono uses one), so it lives in .bss and needs no scratch memory. Each 64 sample block runs in small passes.
+ * Rate: R246 calls an FX with 64 samples at 44,100 Hz; every constant below is at that rate (2026-11-03: they were
+ * written for 22,050 Hz, so the LFOs ran at twice their rates and the delays at half their times on the unit).
  */
 #include "op1_plugin.h"
 
-#define RING   256                       /* samples per ring: longest delay 118 + a block of 64 + 1 */
-#define CENTRE (77 << 8)                 /* Q8 samples: 3.5 ms at 22.05 kHz */
-#define SWEEP  (40 << 8)                 /* Q8: +-1.8 ms, so 1.7 .. 5.3 ms at full depth in modes I and II */
-#define SWEEP3 (10 << 8)                 /* the same in I+II: shallow, +-0.45 ms */
+#define RING   256                       /* samples per ring: longest delay 234 + 1, read before the block is written */
+#define CENTRE (154 << 8)                /* Q8 samples: 3.5 ms at 44.1 kHz */
+#define SWEEP  (80 << 8)                 /* Q8: +-1.8 ms, so 1.7 .. 5.3 ms at full depth in modes I and II */
+#define SWEEP3 (20 << 8)                 /* the same in I+II: shallow, +-0.45 ms */
+/* the read pass runs before the write pass: the shortest delay must lie behind the whole block, the longest within the
+ * ring (the interpolation reads one more sample) */
+_Static_assert(CENTRE - SWEEP >= (OP1_FX_BLOCK + 2) << 8 && CENTRE + SWEEP + (1 << 8) < RING << 8, "ring");
 
-/* LFO increments per sample at 22.05 kHz (2^32 f / 22050); the rates are approximations, see README.md */
-#define INC_I   97392u                   /* 0.5 Hz */
-#define INC_II  155827u                  /* 0.8 Hz */
-#define INC_III 1753056u                 /* 9 Hz */
+/* LFO increments per sample at 44.1 kHz (2^32 f / 44100); the rates are approximations, see README.md */
+#define INC_I   48696u                   /* 0.5 Hz */
+#define INC_II  77913u                   /* 0.8 Hz */
+#define INC_III 876524u                  /* 9 Hz */
 
 typedef struct {
     int16_t ring[2][RING];
@@ -75,6 +80,18 @@ static void init(int pos)
 
 typedef struct { uint32_t inc; int32_t depth_q8; int32_t a, gd, gw; } block_t;
 
+/* floor(sqrt(v)), once per block (TONE) */
+static uint32_t isqrt(uint32_t v)
+{
+    uint32_t r = 0, b = 1u << 30;
+    while (b > v) b >>= 2;
+    while (b) {
+        if (v >= r + b) { v -= r + b; r = (r >> 1) + b; } else r >>= 1;
+        b >>= 2;
+    }
+    return r;
+}
+
 /* the four knobs (Q15) -> what this block needs */
 static void block_params(block_t *b, const int16_t *p)
 {
@@ -89,8 +106,10 @@ static void block_params(block_t *b, const int16_t *p)
     const int32_t dm = SWEEP - (((SWEEP - SWEEP3) * t2) >> 15);               /* 7680 * 32767 < 2^31 */
     const int32_t dk = 6554 + ((k1 * 26214) >> 15);                           /* 0.2 .. 1.0: never fully static */
     b->depth_q8 = fmul(dm, dk) >> 16;
-    /* TONE: one-pole coefficient 0.92 (about 8.6 kHz) .. 0.31 (about 1.3 kHz), two poles in series */
-    b->a = 30000 - ((k2 * 19800) >> 15);
+    /* TONE: the design's one-pole coefficient at 22.05 kHz, 0.92 (about 8.6 kHz) .. 0.31 (about 1.3 kHz), two poles
+     * in series; at 44.1 kHz the same corner needs 1 - a' = sqrt(1 - a) (Q15: 23,245 .. 5,575) */
+    const int32_t a22 = 30000 - ((k2 * 19800) >> 15);
+    b->a = 32768 - (int32_t)isqrt((uint32_t)(32768 - a22) << 15);
     b->gd = 0;                                                                /* the dry stays whole */
     b->gw = (k3 * 22938) >> 15;                                               /* wet 0 .. 0.7: the wet is high-passed, so the
                                                                                 * level holds within 0.3 dB (native takes) */
@@ -133,7 +152,7 @@ static void read_pass(const int16_t *ring, uint32_t w, const int16_t *off, int n
 
 /* pass 4: the wet path: a one-pole high-pass at ~250 Hz (the bass stays dry: a 3.5 ms delay would otherwise cancel
  * the low notes' fundamentals against the dry), then two one-pole low-passes, y += (x - y) * a (rounded) */
-#define HP_A 2255                                /* 1 - exp(-2 pi 250 / 22050), Q15 */
+#define HP_A 1147                                /* 1 - exp(-2 pi 250 / 44100), Q15 */
 static void lp_pass(int16_t *x, int32_t *lp, int32_t a)
 {
     int32_t y1 = lp[0], y2 = lp[1], h = lp[2];
@@ -169,10 +188,10 @@ static void stereo(int pos, int16_t *l, int16_t *r, const int16_t *p)
     const uint32_t w = s->w;
     lfo_pass(s, &b, b.inc, off);
     telemetry((unsigned)pos > 2 ? 0 : pos, s, b.inc, l, r);
+    read_pass(s->ring[0], w, off, 0, wl);                   /* before the write: the static assert at RING */
+    read_pass(s->ring[1], w, off, 1, wr);
     write_pass(s->ring[0], w, l);
     write_pass(s->ring[1], w, r);
-    read_pass(s->ring[0], w, off, 0, wl);
-    read_pass(s->ring[1], w, off, 1, wr);
     lp_pass(wl, s->lp[0], b.a);
     lp_pass(wr, s->lp[1], b.a);
     mix_pass(l, wl, b.gd, b.gw);
@@ -192,8 +211,8 @@ static void mono(int pos, int16_t *io, const int16_t *p)
     const uint32_t w = s->w;
     lfo_pass(s, &b, b.inc, off);
     telemetry((unsigned)pos > 2 ? 0 : pos, s, b.inc, io, 0);
-    write_pass(s->ring[0], w, io);
     read_pass(s->ring[0], w, off, 0, wa);
+    write_pass(s->ring[0], w, io);
     lp_pass(wa, s->lp[0], b.a);
     mix_pass(io, wa, b.gd, b.gw);
     s->w = w + OP1_FX_BLOCK;

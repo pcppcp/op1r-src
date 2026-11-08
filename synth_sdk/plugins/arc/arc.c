@@ -34,7 +34,7 @@ typedef struct {
     int32_t  x1, v1;          /* +0x04 main lamp: x Q29, v Q27 (saturating: |x| < 4, |v| < 16) */
     int32_t  x2, v2;          /* +0x0c second lamp */
     uint32_t rng;             /* +0x14 xorshift32 plasma noise */
-    int32_t  dc;              /* +0x18 DC blocker state, Q20 */
+    int32_t  dc;              /* +0x18 DC blocker state: y * 1024 (the running mean of the shaped sample) */
     int32_t  lp;              /* +0x1c brightness tilt lowpass, Q20 */
     int16_t  env;             /* +0x20 strike envelope, Q15 */
     uint8_t  gate;            /* +0x22 key held (screen) */
@@ -240,7 +240,7 @@ static void arc_note_on(void *self, const int16_t *params)
     v->x1 = 0; v->v1 = 2 << 27;                     /* on the sine limit cycle, output starts at 0: no click */
     v->x2 = 1 << 30; v->v2 = 0;                     /* 2nd lamp a quarter cycle away: it pulls into phase */
     if (!v->rng) v->rng = 0x9E3779B9u ^ (uint32_t)(uintptr_t)self;
-    v->dc = (M16(-8192, clampk(params[1])) >> 16) * 256;   /* carbon's DC at x = 0: output starts at 0 */
+    v->dc = (M16(-8192, clampk(params[1])) >> 16) * 1024;   /* carbon's DC at x = 0: output starts at 0 */
     v->lp = 0;
     v->env = 32767; v->gate = 1; v->live = 1;           /* ignition (not a sputter) */
     arc_tvoice = (uint8_t)op1_voice_index(self);
@@ -268,10 +268,10 @@ static void arc_render(void *self, int16_t *out, const int16_t *params)
     int32_t dec = 1927 - ((strike * 1832) >> 15);
     int sput = v->live & 2;
     if (sput) dec <<= 2;
-    int32_t env1 = env0 - ((env0 * dec) >> 15); if (env1 < 16) env1 = 0, sput = 0;
+    int32_t env1 = env0 - ((env0 * dec + 32768) >> 16); if (env1 < 16) env1 = 0, sput = 0;   /* per block, 689 / s: half the old >> 15 step */
     if (v->gate && strike) {
         uint32_t q = v->rng; q ^= q << 13; q ^= q >> 17; q ^= q << 5; v->rng = q;
-        if ((q & 0xffff) < (uint32_t)((((strike * strike) >> 15) * 1141) >> 15)) {   /* 6 / s / 344.5 blocks, Q16 */
+        if ((q & 0xffff) < (uint32_t)((((strike * strike) >> 15) * 571) >> 15)) {    /* 6 / s / 689 blocks, Q16 */
             int32_t amp = 11469 + (int32_t)(((q >> 16) * 18022) >> 16);              /* 0.35 .. 0.9 */
             if (amp > env1) env1 = amp, sput = 2;
         }
@@ -415,7 +415,7 @@ static void arc_render(void *self, int16_t *out, const int16_t *params)
         int32_t y = out[n];
         int32_t q = (M16(y, y) >> 12) - 8192; if (q > 32767) q = 32767;
         y += M16(q, cb) >> 16;
-        dc += (y * 256 - dc) >> 10; y -= dc >> 8;
+        dc += (y * 1024 - dc) >> 11; y -= dc >> 10;        /* ~7 Hz at OP1_VOICE_RATE */
         if (y > 16383) y = 16383; else if (y < -16383) y = -16383;
         lp += M16(y - (lp >> 8), g) >> 7;
         int32_t l = lp >> 8, o = l + (M16(y - l, btq) >> 12);

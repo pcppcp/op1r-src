@@ -11,10 +11,18 @@
  *   orange (knob 3) CATHEDRAL: dry and close (0) .. hollow, resonant, old-world (middle) .. dark, expansive and
  *                  otherworldly, with a distant bell at each note (high).
  *
- * Rates: the voice is built at 22.05 kHz (64 samples per block), as Hundekraft's EVA does, which halves the cost; its
- * content ends below ~10 kHz (the instrument's nasal and buzz regions are 1 .. 5 kHz). The room and the bells run at
- * 11.025 kHz (they are dark by design). The output is interpolated 2x with a 4-tap half-band interpolator
- * (-1 9 9 -1)/16, multiply-free, two half-rate samples of latency (0.09 ms).
+ * Rates: the voice is built at half the render rate (64 samples per block), as Hundekraft's EVA does, which halves
+ * the cost; its content ends below ~10 kHz (the instrument's nasal and buzz regions are 1 .. 5 kHz). The room and the
+ * bells run at a quarter (they are dark by design). The output is interpolated 2x with a 4-tap half-band interpolator
+ * (-1 9 9 -1)/16, multiply-free, two half-rate samples of latency (0.05 ms). On R246 a voice render call is 128
+ * samples at 88.2 kHz, 689 calls a second, so the voice runs at 44.1 kHz and the room at 22.05 kHz.
+ * kennel rate fix (2026-11-03): the plugin was written for 128 samples at 44.1 kHz a call (voice 22.05 kHz, room
+ * 11.025 kHz, 344.5 calls a second), so on the unit every filter in Hz, per-sample decay, per-block fade and
+ * smoothing, the tape's transport and the free-running wheel ran 2x, and the fixed drone key, the trompette's floor,
+ * the high-string switch and the screen's keys read the pitch an octave off. Every such constant below is now
+ * derived at the real rates, toward the values these comments give. The shared room's diffusers and comb (RA1, RA2,
+ * RR) live in the bus at twice the old lengths (owner 2026-11-03); the non-shared build's per-voice lines (CA1, CA2,
+ * CR and the body combs at the voice rate) keep theirs, so there they are half as long as written.
  *
  * The string: a bowed string's waveform is close to a sawtooth (Helmholtz motion); its nasal reedy colour comes from a
  * narrow pulse and the instrument body. Per sample: a polyBLEP saw, a polyBLEP pulse (two saws, one offset by the pulse
@@ -46,7 +54,8 @@
  *
  * The cathedral (per voice; the engine never sees the voice sum, and the OP-1's own FX slot stays free for a real
  * reverb): two short body combs (4.0 and 5.1 ms, one with inverted feedback: odd resonances, hollow) for the old-world
- * body in the middle; two allpass diffusers into a 47 ms feedback comb damped by a low-pass in its loop (up to ~1.6 s)
+ * body in the middle; two allpass diffusers into a 47 ms feedback comb damped by a low-pass in its loop (up to ~1.6 s;
+ * the non-shared build's lines are half as long on R246, 23 ms and up to ~0.8 s: see Rates)
  * for the space at the top, a darkening low-pass, and a faint church-bell strike at each note (hum, minor-third tierce,
  * nominal and an inharmonic upper partial of the note, decaying 0.4 .. 3 s) fed only into the room, so it sounds
  * distant. The tail lasts as long as the voice's own release: that is the OP-1's envelope, after render. Every
@@ -71,9 +80,9 @@
 #include "hollow_saint_geom.h"
 
 #define NV  OP1_VOICES
-#define BLK OP1_BLOCK                    /* 128 output samples per render call (44.1 kHz) */
-#define HB  (BLK / 2)                    /* 64 voice samples per block (22.05 kHz) */
-#define QB  (BLK / 4)                    /* 32 room samples per block (11.025 kHz) */
+#define BLK OP1_BLOCK                    /* 128 samples per render call (88.2 kHz on R246, 689 calls a second) */
+#define HB  (BLK / 2)                    /* 64 voice samples per block (44.1 kHz) */
+#define QB  (BLK / 4)                    /* 32 room samples per block (22.05 kHz) */
 
 static inline int32_t clampi(int32_t x, int32_t lo, int32_t hi) { return x < lo ? lo : x > hi ? hi : x; }
 static inline int32_t knob(const int16_t *k, int i) { return k[i] < 0 ? 0 : k[i]; }
@@ -116,22 +125,22 @@ static inline int32_t blep_saw(uint32_t ph, int32_t dt, int32_t inv8)
 }
 static inline int32_t blep_inv(int32_t dt) { return (int32_t)((1u << 30) / (uint32_t)dt) >> 8; }
 
-/* one-pole low-pass coefficient (Q15) for a cutoff in Hz at 22.05 kHz (clamped 20 .. 9000): 1 - e^-x, x = 2 pi fc / fs,
+/* one-pole low-pass coefficient (Q15) for a cutoff in Hz at 44.1 kHz (clamped 20 .. 9000): 1 - e^-x, x = 2 pi fc / fs,
  * with e^-x = 1 / (1 + x + x^2/2 + x^3/6 + x^4/24) (within 1 % of the coefficient up to 9 kHz). Per block only:
- * one division. For the 11.025 kHz room, pass twice the frequency. */
+ * one division. For the 22.05 kHz room, pass twice the frequency. */
 static int32_t lp_coef(int32_t hz)
 {
     hz = clampi(hz, 20, 9000);
-    const int32_t x = (hz * 2390) >> 11;                                  /* 2 pi / 22050 in Q12 = 1.1672 */
-    const int32_t x2 = (x * x) >> 12, x3 = (x2 * x) >> 12, x4 = (x3 * x) >> 12;
-    const int32_t den = 4096 + x + (x2 >> 1) + ((x3 * 683) >> 12) + ((x4 * 171) >> 12);   /* Q12 */
-    return clampi(32768 - (int32_t)((1u << 27) / (uint32_t)den), 1, 32767);
+    const int32_t x = (hz * 4781 + 1024) >> 11;                           /* 2 pi / 44100 in Q14 = 2.3343 */
+    const int32_t x2 = (x * x) >> 14, x3 = (x2 * x) >> 14, x4 = (x3 * x) >> 14;   /* x <= 21010: all fit */
+    const int32_t den = 16384 + x + (x2 >> 1) + ((x3 * 683) >> 12) + ((x4 * 171) >> 12);   /* Q14 */
+    return clampi(32768 - (int32_t)((1u << 29) / (uint32_t)den), 1, 32767);
 }
-/* Chamberlin SVF frequency coefficient 2 sin(pi fc / fs) at 22.05 kHz, Q15: 2 (t - t^3 / 6), t = pi fc / fs (within
+/* Chamberlin SVF frequency coefficient 2 sin(pi fc / fs) at 44.1 kHz, Q15: 2 (t - t^3 / 6), t = pi fc / fs (within
  * 0.5 % up to 3.5 kHz) */
 static inline int32_t svf_coef(int32_t hz)
 {
-    const int32_t t = (clampi(hz, 20, 3500) * 4781) >> 10;                /* pi / 22050 in Q15 = 4.6687 */
+    const int32_t t = (clampi(hz, 20, 3500) * 4781 + 1024) >> 11;         /* pi / 44100 in Q15 = 2.3343 */
     const int32_t t3 = (((t * t) >> 15) * t) >> 15;
     return 2 * t - ((t3 * 10923) >> 15);
 }
@@ -170,10 +179,11 @@ static const int32_t T_DHZ[5]    = { 260, 420, 780, 1350, 2200 };       /* low-p
 static const int32_t T_DQ[5]     = { 30000, 24000, 17000, 19000, 22000 };   /* damping: resonant in the middle */
 static const int32_t T_DFIFTH[5] = { 16384, 18000, 20300, 22300, 23600 };   /* the fifth against the root */
 static const int32_t T_DSUB[5]   = { 0, 0, 0, 6000, 14000 };              /* sub-octave sine */
-/* fixed drone keys: phase increments of C2 .. B2 (2^32 = one cycle per sample at 44.1 kHz) */
+/* fixed drone keys: phase increments of C2 .. B2 per voice sample (2^32 = one cycle per sample at 44.1 kHz, the
+ * voice rate on R246) */
 static const uint32_t KEY_INC[12] = { 6370030u, 6748811u, 7150117u, 7575285u, 8025735u, 8502970u,
                                       9008582u, 9544261u, 10111792u, 10713070u, 11350103u, 12025015u };
-#define DRONE_FADE 2341                  /* drone gain step per block: 0 .. 1 in 14 blocks (~40 ms) */
+#define DRONE_FADE 1171                  /* drone gain step per block: 0 .. 1 in 28 blocks (~40 ms) */
 #define ROOT_DET   38                    /* +2 cents, Q15 fraction of the increment */
 #define FIFTH_DET  (-57)                 /* -3 cents */
 /* page-2 word 5 (blue pushed): 13 zones, 0 = FOLLOW, 1 .. 12 = C .. B */
@@ -192,7 +202,8 @@ static const int32_t T_GRIT[5]    = { 0, 0, 0, 4500, 9000 };             /* melo
 static const int32_t T_SWELL[5]   = { 0, 2500, 4500, 4000, 3000 };       /* the strokes swelling the string */
 #define BUZZ_THRESH 9830                 /* wheel pressure (Q15) where the dog starts to lift: 0.3 */
 #define TROMP_MIN   11686994u            /* 120 Hz (between A#2 and B2, not on a note, so rounding never decides):
-                                          * the trompette is folded up to at least this (44.1 kHz increment) */
+                                          * the trompette is folded up to at least this (increment per voice
+                                          * sample, 44.1 kHz) */
 /* page-2 word 7 (white pushed): 7 zones, steady / 1 bar / 1/2 / 1/4 / 1/8 / 1/8T / 1/16; strokes per beat x4 */
 #define NZONES 7
 static const uint8_t STROKES4[NZONES] = { 0, 1, 2, 4, 8, 12, 16 };
@@ -223,17 +234,24 @@ static const int32_t T_CROOM[5] = { 0, 6554, 16384, 29491, 39322 };      /* room
 static const int32_t T_CDAMP[5] = { 4500, 3800, 3000, 2300, 1700 };      /* room damping, Hz */
 static const int32_t T_CDARK[5] = { 8000, 8000, 7000, 4500, 2800 };      /* low-pass, Hz (blended in from 25 %) */
 static const int32_t T_CBELL[5] = { 0, 0, 0, 3500, 9000 };               /* the distant bell's strike */
-#define BOW_LIFT 634                     /* after note off, at CATHEDRAL 100 %: the bow lifts in ~150 ms */
-#define CB1 89                           /* body combs at 22.05 kHz: 4.04 ms, 5.12 ms */
+#define BOW_LIFT 1274                    /* after note off, at CATHEDRAL 100 %: the bow lifts in ~150 ms (Q17 per
+                                          * block: 1 - sqrt(1 - 634 / 32768), the 344.5-block design's step) */
+#define CB1 89                           /* body combs: 4.04 ms, 5.12 ms at 22.05 kHz (HS_CAT11K); per voice
+                                          * sample without it (2.0, 2.6 ms: memory, not changed) */
 #define CB2 113
-#define CA1 78                           /* diffusers at 11.025 kHz: 7.1 ms, 10.9 ms */
+#define CA1 78                           /* non-shared build: diffusers at 22.05 kHz, 3.5 ms, 5.4 ms (written as 7.1,
+                                          * 10.9 ms: memory, not changed) */
 #define CA2 120
-#define CR  516                          /* room comb at 11.025 kHz: 46.8 ms */
+#define CR  516                          /* non-shared build: room comb at 22.05 kHz, 23.4 ms (written as 46.8 ms) */
+#define RA1 156                          /* HS_SHARED_ROOM: diffusers at 22.05 kHz, 7.1 ms, 10.9 ms (hs_bus.S: L 312 / 480) */
+#define RA2 240
+#define RR  1032                         /* HS_SHARED_ROOM: room comb at 22.05 kHz, 46.8 ms (hs_bus.S: L 2064) */
 #define AP_G 19661                       /* diffuser gain 0.6 */
 /* bell partials against the note: hum 0.5, tierce 1.19 (a minor third), nominal 2.0, upper 2.66 (Q12); their decay
- * shifts per 11.025 kHz sample (3 s, 1.5 s, 0.74 s, 0.37 s) and weights */
+ * shifts per 22.05 kHz sample (3 s, 1.5 s, 0.74 s, 0.37 s) and weights */
 static const uint32_t BELL_RATIO[4] = { 2048, 4874, 8192, 10895 };
-static const uint8_t  BELL_DECAY[4] = { 15, 14, 13, 12 };
+static const uint8_t  BELL_DECAY[4] = { 16, 15, 14, 13 };
+#define BELL_CUT 0x0CCCCCCDu             /* partials at or above 0.05 cycles per 88.2 kHz sample (4.41 kHz) left out */
 static const int32_t  BELL_W[4]     = { 22938, 16384, 19661, 11469 };
 
 /* ---------------------------------------------------------------- LO-FI RELIC (green pushed): the knob's map over its
@@ -251,8 +269,9 @@ static const int32_t T_RHISS[5]  = { 40, 70, 110, 160, 220 };            /* hiss
 static const int32_t T_RPOPS[5]  = { 2, 3, 5, 8, 12 };                   /* dust: pops per second per voice */
 static const int32_t T_RPOP[5]   = { 1500, 2500, 3500, 4500, 6000 };     /* their size */
 static const int32_t T_RSAG[5]   = { 600, 1000, 1600, 2400, 3300 };      /* transport sag: level dip (Q15) */
-#define RELIC_FADE 2731                  /* on / off cross-fade step per block: 12 blocks, ~35 ms */
+#define RELIC_FADE 1366                  /* on / off cross-fade step per block: 24 blocks, ~35 ms */
 static inline int32_t relic_age(const int16_t *k) { return k[6] > 0 ? k[6] : 8192; }
+#define RELIC_POP 23170                  /* a pop's decay per sample: sqrt 1/2 (it halved per 22.05 kHz sample) */
 
 /* ramped gains: each steps across the block from the previous block's value */
 enum { G_FLUTE, G_REED, G_SAW, G_NOISE, G_NASAL, G_OUT, G_DRONE, G_BUZZ, G_WET, G_DRY, G_BODY, G_ROOM, NG };
@@ -262,7 +281,7 @@ enum { M_INV, M_RINV, M_FINV, M_TONE, M_DAMP, M_DARK, M_RELIC };
 typedef struct {
     uint32_t ph;                 /* melody string phase (2^32 = one cycle) */
     uint32_t rng;                /* per-voice noise */
-    int32_t drift, drift_t;      /* pitch drift and its target, Q15 fraction of the increment (+-~4 cents) */
+    int32_t drift, drift_t;      /* pitch drift and its target, Q16 (x2 of a Q15 fraction of the increment, +-~4 cents) */
     int32_t tone;                /* tone low-pass state */
     int32_t flp, fbp;            /* nasal formant SVF states */
     int32_t dc8;                 /* DC blocker (one-pole ~14 Hz), Q8 */
@@ -270,29 +289,32 @@ typedef struct {
     int32_t g[NG];               /* gains reached at the end of the previous block */
     /* drone (only the owner, and a voice fading its drone out, run it) */
     uint32_t dph[3];             /* root, fifth, sub-octave phases */
-    uint32_t dinc[3];            /* their increments per 22.05 kHz sample in the last block (to rewind a copy) */
+    uint32_t dinc[3];            /* their increments per 44.1 kHz sample in the last block (to rewind a copy) */
     int32_t dlp, dbp;            /* drone low-pass (SVF) */
     int32_t dgain;               /* ownership fade, Q15 */
     /* trompette and dog (with the drone owner) */
-    uint32_t tph, tinc;          /* trompette phase and its last increment (22.05 kHz) */
+    uint32_t tph, tinc;          /* trompette phase and its last increment (44.1 kHz) */
     int32_t slap, rattle;        /* this cycle's slap and its noise envelope */
     int32_t rlp, rbp;            /* bridge resonance (SVF) */
     int32_t tlp;                 /* trompette tone low-pass */
     int32_t amp;                 /* smoothed dog amplitude (Q15) */
     int32_t mjit;                /* melody grit: this cycle's gain */
 #ifdef HS_HIGH_HALF
-    int32_t sprev;               /* the string's last 22.05 kHz sample (the 11.025 kHz string's interpolation) */
+    int32_t sprev;               /* the string's last 44.1 kHz sample (the 22.05 kHz string's interpolation) */
 #endif
     int32_t bowg;                /* bow lift after note off, Q15 */
     /* cathedral */
-    int16_t cb1[CB1], cb2[CB2], ca1[CA1], ca2[CA2], cr[CR];
+    int16_t cb1[CB1], cb2[CB2];
+#ifndef HS_SHARED_ROOM
+    int16_t ca1[CA1], ca2[CA2], cr[CR];  /* HS_SHARED_ROOM: the bus's room_a1 / room_a2 / room_r instead */
+#endif
     uint16_t ib1, ib2, ia1, ia2, ir;
     int32_t rdl;                 /* room damping low-pass */
     int32_t bodyp, roomp;        /* the last body / room samples (rate changes) */
     int32_t dark;                /* darkening low-pass */
-    uint32_t bph[4];             /* bell partial phases (11.025 kHz) */
+    uint32_t bph[4];             /* bell partial phases (22.05 kHz) */
     int32_t benv[4];             /* their envelopes, Q23 */
-    int32_t up[3];               /* the interpolator's last three 22.05 kHz samples */
+    int32_t up[3];               /* the interpolator's last three 44.1 kHz samples */
     int32_t memo[7][2];          /* memo_blep_inv / memo_lp_coef, indexed by M_* */
     /* Lo-Fi Relic */
     int32_t rmix;                /* its cross-fade, Q15 (0: off, and the stage is skipped) */
@@ -307,8 +329,8 @@ static voice_t V[NV];
 #ifndef HS_SHARED_ROOM
 static int32_t bodyb[HB];        /* the body combs' output */
 #endif
-static int32_t roomb[QB];        /* the room at 11.025 kHz */
-static int32_t bellw[QB];        /* the bells' sum at 11.025 kHz */
+static int32_t roomb[QB];        /* the room at 22.05 kHz */
+static int32_t bellw[QB];        /* the bells' sum at 22.05 kHz */
 #ifndef HS_SHARED_ROOM
 static const int32_t bellb[QB];  /* silence, read while no bell rings */
 #endif
@@ -336,18 +358,18 @@ static volatile int32_t hs_bell_lvl;     /* the last strike's size (Q15) */
 
 /* ---------------------------------------------------------------- the string's loop (section 1 of render) */
 typedef struct { uint32_t pw, doff; int32_t ta, ff, grit, dt, inv8; const int32_t *tmod; int nsb; int32_t *out; } string_t;
-static int32_t hb[HB];           /* the voice at 22.05 kHz (scratch for the voice being rendered) */
+static int32_t hb[HB];           /* the voice at 44.1 kHz (scratch for the voice being rendered) */
 /* kennel: two optional cuts in the string, off by default.
  * HS_BOW_CHEAP: the bow noise takes one LCG step per two samples. The first sample's noise is the step's high half
  * (as before), the second's the 16-bit sum of its low and high halves (the low half alone is a weak LCG; the sum is as
  * uniform and follows the high bits); the slip / stick shift is decided once per pair, on the first sample's phase.
- * HS_HIGH_HALF: notes above HS_HIGH_MIDI (inc[0] above that note's 44.1 kHz increment) run the string at 11.025 kHz
+ * HS_HIGH_HALF: notes above HS_HIGH_MIDI (inc[0] above that note's 88.2 kHz increment) run the string at 22.05 kHz
  * (32 samples, sub-blocks of 4, dt doubled, the tone and formant coefficients for that rate, the noise gain x 1/sqrt 2
- * so its density stays), then come back to 22.05 kHz as the room does: (prev + cur) >> 1, prev kept in the voice */
+ * so its density stays), then come back to 44.1 kHz as the room does: (prev + cur) >> 1, prev kept in the voice */
 #ifndef HS_HIGH_MIDI
 #define HS_HIGH_MIDI 72                  /* C5 */
 #endif
-#define HS_MIDI_INC(m) ((uint32_t)(440.0 / 44100.0 * 4294967296.0 * __builtin_exp2(((m) - 69) / 12.0) + 0.5))
+#define HS_MIDI_INC(m) ((uint32_t)(440.0 / OP1_VOICE_RATE * 4294967296.0 * __builtin_exp2(((m) - 69) / 12.0) + 0.5))
 
 /* inlined at four call sites with constant flute / rough, so neither is tested per sample */
 static inline __attribute__((always_inline)) void string_run(voice_t *v, const string_t *st, const int32_t *inc,
@@ -361,7 +383,7 @@ static inline __attribute__((always_inline)) void string_run(voice_t *v, const s
     uint32_t ph = v->ph, rng = v->rng;
     int32_t tone = v->tone, flp = v->flp, fbp = v->fbp;
 #ifdef HS_HIGH_HALF
-    const int nsb = st->nsb;                                               /* 8, or 4 at 11.025 kHz */
+    const int nsb = st->nsb;                                               /* 8, or 4 at 22.05 kHz */
     int32_t *o = st->out;
 #else
     const int nsb = 8;
@@ -485,7 +507,7 @@ static inline __attribute__((always_inline)) void string_asm(voice_t *v, const s
     v->sprev = k[HK_SPREV];
 #endif
 }
-#define HS_STRING_ASM 1                  /* the 11.025 kHz string's increments and interpolation are hs_string.S's */
+#define HS_STRING_ASM 1                  /* the 22.05 kHz string's increments and interpolation are hs_string.S's */
 #define STRING_VARIANT(name, flute, rough) \
     static __attribute__((noinline)) void name(voice_t *v, const string_t *st, const int32_t *inc, const int32_t *g0, \
                                                const int32_t *dg) { string_asm(v, st, inc, g0, dg, hs_##name); }
@@ -580,11 +602,11 @@ static __attribute__((noinline)) void buzz_run(voice_t *v, const uint32_t *ri, c
     const int32_t base = tab5(T_BBASE, bz), depth = tab5(T_BSTROKE, bz), jit = tab5(T_BJIT, bz);
     const int32_t bnz = tab5(T_BNOISE, bz), btone = tab5(T_BTONE, bz);
     const int32_t fr = svf_coef(tab5(T_BHZ, bz)), rq = tab5(T_BQ, bz);
-    const int32_t tlc = 13693;                                         /* trompette tone low-pass, ~1.9 kHz */
+    const int32_t tlc = 7767;                                          /* trompette tone low-pass, ~1.9 kHz */
     /* an octave above the root, folded up to at least ~120 Hz: a trompette never sits lower, and below that the
      * slaps stop fusing into a buzz and come apart as ticks */
     int tsh = 1;
-    while (tsh < 6 && (ri[0] << tsh) < TROMP_MIN * 2u) tsh++;
+    while (tsh < 6 && (ri[0] << tsh) < TROMP_MIN) tsh++;
     uint32_t tph = v->tph, rng = v->rng;
     int32_t slap = v->slap, rattle = v->rattle, rlp = v->rlp, rbp = v->rbp, tlp = v->tlp, amp = v->amp;
 #ifdef HS_ASM
@@ -592,11 +614,12 @@ static __attribute__((noinline)) void buzz_run(voice_t *v, const uint32_t *ri, c
         int32_t k[51];
         k[0] = tsh; k[1] = HS_LCG_C; k[2] = 1664525; k[3] = -16384; k[4] = 32768; k[5] = tlc;
         k[6] = fr; k[7] = rq; k[8] = k[9] = 0; k[10] = tlp; k[11] = rlp; k[12] = rattle;
-        k[13] = 65535; k[14] = -65535; k[15] = 0; k[16] = jit; k[17] = bnz; k[18] = 32767;
+        k[13] = 65535; k[14] = -65535; k[15] = (28378 << 16) | 31727; k[16] = jit; k[17] = bnz; k[18] = 32767;
+        /* k[15]: the slap's and the rattle's decays per sample, sqrt 3/4 and sqrt 15/16 (hs_voice.S) */
         k[19] = (int32_t)tph; k[20] = (int32_t)rng; k[21] = slap; k[22] = rbp; k[23] = 0;
         for (int sb = 0; sb < 8; sb++) {
             const int32_t drive = base + ((depth * senv[sb]) >> 15);
-            amp += (clampi(((drive - BUZZ_THRESH) * 5) >> 1, 0, 32767) - amp) >> 1;
+            amp += ((clampi(((drive - BUZZ_THRESH) * 5) >> 1, 0, 32767) - amp) * 9598 + 16384) >> 15;   /* 1 - sqrt 1/2 */
             k[24 + 3 * sb] = (btone * (19661 + ((amp * 13107) >> 15))) >> 15;
             k[25 + 3 * sb] = GAIN(G_BUZZ, sb + 1);
             k[26 + 3 * sb] = amp;
@@ -610,7 +633,7 @@ static __attribute__((noinline)) void buzz_run(voice_t *v, const uint32_t *ri, c
     for (int sb = 0; sb < 8; sb++) {
         /* wheel pressure through the dog's threshold: 0 below it, full 0.4 above it */
         const int32_t drive = base + ((depth * senv[sb]) >> 15);
-        amp += (clampi(((drive - BUZZ_THRESH) * 5) >> 1, 0, 32767) - amp) >> 1;
+        amp += ((clampi(((drive - BUZZ_THRESH) * 5) >> 1, 0, 32767) - amp) * 9598 + 16384) >> 15;   /* 1 - sqrt 1/2 */
         const int32_t gz = GAIN(G_BUZZ, sb + 1);
         const int32_t tg = (btone * (19661 + ((amp * 13107) >> 15))) >> 15;   /* string tone 0.6 .. 1 with pressure */
         for (int n = 0; n < 8; n++, b++) {
@@ -623,8 +646,8 @@ static __attribute__((noinline)) void buzz_run(voice_t *v, const uint32_t *ri, c
             }
             const int32_t nz = (int32_t)(lcg(&rng) >> 17) - 16384;
             const int32_t exc = slap + (m16(nz, rattle) >> 14);
-            slap -= slap >> 2;                                         /* ~0.2 ms */
-            rattle -= rattle >> 4;                                     /* ~0.7 ms */
+            slap = m16(slap, 28378) >> 15;                             /* ~0.2 ms: sqrt 3/4 per sample */
+            rattle = m16(rattle, 31727) >> 15;                         /* ~0.7 ms: sqrt 15/16 */
             /* bridge resonance: SVF band-pass on a quarter of the excitation, normalised (x rq) and x4 */
             rlp += (fr * rbp) >> 15;
             const int32_t hp = (exc >> 2) - rlp - ((rq * rbp) >> 15);
@@ -641,7 +664,7 @@ static __attribute__((noinline)) void buzz_run(voice_t *v, const uint32_t *ri, c
     v->slap = slap; v->rattle = rattle; v->rlp = rlp; v->rbp = rbp; v->tlp = tlp; v->amp = amp;
 }
 
-/* ---------------------------------------------------------------- the Lo-Fi Relic stage, on hb (+-65535) at 22.05 kHz:
+/* ---------------------------------------------------------------- the Lo-Fi Relic stage, on hb (+-65535) at 44.1 kHz:
  * saturation, a lower sample rate, fewer bits with dither, dust, the tape head's low-pass, hiss, the transport's sag;
  * cross-faded with the dry voice from rm0 to rm1 across the block (so switching never clicks), unity for small signals */
 static __attribute__((noinline)) void relic_run(voice_t *v, int32_t *h0, const int32_t age, const int32_t rm0, const int32_t rm1)
@@ -650,11 +673,11 @@ static __attribute__((noinline)) void relic_run(voice_t *v, int32_t *h0, const i
     const int32_t drive = tab5(T_RDRIVE, age);                             /* <= 11059 */
     const int32_t make = (tab5(T_RMAKE, age) * (32767 - ((tab5(T_RSAG, age) * relic_sag) >> 15))) >> 15;
     const int32_t a = memo_lp_coef(tab5(T_RHZ, age), v->memo[M_RELIC]);
-    const uint32_t rinc = (uint32_t)tab5(T_RRATE, age) * 194783u;         /* Hz -> Q32 per sample (2^32 / 22050) */
+    const uint32_t rinc = (uint32_t)tab5(T_RRATE, age) * 97392u;          /* Hz -> Q32 per sample (2^32 / 44100) */
     const int sh = (int)tab5(T_RBITS, age);
     const int32_t mask = -(1 << sh), half = 1 << (sh - 1);
     const int32_t hiss = tab5(T_RHISS, age), popsz = tab5(T_RPOP, age);
-    const uint32_t pthr = (uint32_t)tab5(T_RPOPS, age) * 194783u;          /* pops per second -> chance per sample */
+    const uint32_t pthr = (uint32_t)tab5(T_RPOPS, age) * 97392u;           /* pops per second -> chance per sample */
     int32_t lp = v->relp, lp2 = v->relp2, hold = v->rhold, pop = v->rpop;
     uint32_t rph = v->rph, rng = v->rrng;
     const int32_t dm = rm1 - rm0;
@@ -662,8 +685,9 @@ static __attribute__((noinline)) void relic_run(voice_t *v, int32_t *h0, const i
     {   /* kennel: the loop below in hs_voice.S */
         int32_t k[29];
         k[0] = 1664525; k[1] = HS_LCG_C; k[2] = (int32_t)rinc; k[3] = sh - 32; k[4] = hold - half;
-        k[5] = mask; k[6] = a; k[7] = lp2; k[8] = -16384; k[9] = hiss; k[10] = make; k[11] = (int32_t)pthr;
+        k[5] = mask; k[6] = (int32_t)(((uint32_t)RELIC_POP << 16) | (uint32_t)a); k[7] = lp2; k[8] = -16384; k[9] = hiss; k[10] = make; k[11] = (int32_t)pthr;
         k[12] = drive; k[13] = 32767; k[14] = half; k[15] = popsz;
+        /* k[6]: a (<= 32767) in the low half, RELIC_POP in the high half (hs_voice.S's pop decay) */
         for (int sb = 1; sb <= 8; sb++) k[15 + sb] = rm0 + ((dm * sb) >> 3);
         k[24] = (int32_t)rng; k[25] = lp; k[26] = pop; k[27] = (int32_t)rph;
 #ifdef HS_RELIC_LITE
@@ -698,13 +722,13 @@ static __attribute__((noinline)) void relic_run(voice_t *v, int32_t *h0, const i
             /* kennel: the lighter tape (owner 2026-10-29): no dither, one tape-head pole; the LCG still steps (the
              * hiss and the pops) */
             const int32_t q = clampi((hold & mask) + pop, -32768, 32767);
-            pop -= pop >> 1;
+            pop = m16(pop, RELIC_POP) >> 15;
             lp = clampi(lp + (m16((q - lp) >> 1, a) >> 14), -32768, 32767);
             const int32_t nz = (int32_t)(r >> 17) - 16384;
             const int32_t wet = (m16(clampi(lp + (m16(nz, hiss) >> 15), -32768, 32767), make) >> 14);
 #else
             const int32_t q = clampi(((hold + (int32_t)(r >> (32 - sh)) - half) & mask) + pop, -32768, 32767);
-            pop -= pop >> 1;
+            pop = m16(pop, RELIC_POP) >> 15;
             /* the tape head: two dark one-pole low-passes (inputs and states within int16, so their differences
              * >> 1 are too) */
             lp = clampi(lp + (m16((q - lp) >> 1, a) >> 14), -32768, 32767);
@@ -748,12 +772,12 @@ static void take_drone(int to)
 #ifdef HS_SHARED_ROOM
 /* ---------------------------------------------------------------- kennel: the shared stage (owner 2026-10-29)
  * To fit the unit's CPU budget: one room for all voices (HS_SHARED_ROOM), one relic tape for all voices
- * (HS_SHARED_RELIC), the body combs at 11.025 kHz (HS_CAT11K). A synth plugin only renders voices, and R246
+ * (HS_SHARED_RELIC), the body combs at 22.05 kHz (HS_CAT11K). A synth plugin only renders voices, and R246
  * multiplies each voice's output by its own stock envelope after render (bus += out x env), so:
  * - each voice keeps its body combs (short and close to the dry sound: no added delay) and adds its room input
  *   (its body and bells, x its level x envelope) into BUS.racc; with the shared tape it also adds its finished signal
  *   (after section 4) x envelope into BUS.acc;
- * - the first voice of the next block runs the room (and the tape) on those sums, one block (2.9 ms) late;
+ * - the first voice of the next block runs the room (and the tape) on those sums, one block (1.45 ms) late;
  * - every voice of that block adds a share of the result, share = its envelope / the sum of the voices' squared
  *   envelopes (floored at 0.5^2, so a lone release fades out over its second half instead of holding the tail up to
  *   its last sample): after R246's envelopes the shares add up to one. The tape saturates, so it hears the sum divided
@@ -763,8 +787,8 @@ static void take_drone(int to)
  * together (it saturates and wobbles as one) after the darkening; with the tape shared the room hears the untaped
  * body; the room input is clamped where several loud voices meet. */
 #ifdef HS_CAT11K
-#define BB1 45                           /* the body combs at 11.025 kHz: 4.08 ms, 5.17 ms */
-#define BB2 57
+#define BB1 CB1                          /* the body combs at 22.05 kHz: 4.04 ms, 5.12 ms (hs_bus.S: L 178 / 226) */
+#define BB2 CB2
 #else
 #define BB1 CB1
 #define BB2 CB2
@@ -786,7 +810,8 @@ static struct {
     uint8_t taping;                      /* the tape runs: the voices add to BUS.acc */
 #endif
 } BUS = { .fresh = 1 };
-static voice_t BV;                       /* the shared room's lines and filters and the tape (voice_t's fields of those names) */
+static voice_t BV;                       /* the shared room's filters and the tape (voice_t's fields of those names) */
+static int16_t room_a1[RA1], room_a2[RA2], room_r[RR];   /* the shared room's lines (only BV's room: none per voice) */
 static uint8_t bus_new_block;
 #ifdef HS_SHARED_RELIC
 static int32_t bus_rb[HB];               /* the tape's input and output */
@@ -795,7 +820,7 @@ static int32_t bus_rb[HB];               /* the tape's input and output */
 static int32_t bus_room[QB + 1];         /* kennel: hs_room's room samples: [0] the last block's last, [1..32] this block's */
 #endif
 
-/* the bells of one voice (struck at its first render, as in section 3) into bellw at 11.025 kHz; 0 when silent */
+/* the bells of one voice (struck at its first render, as in section 3) into bellw at 22.05 kHz; 0 when silent */
 static const int32_t *bell_voice(voice_t *v, const int32_t *inc, const int32_t c, const int32_t vel)
 {
     if (v->bell_pending) {
@@ -811,11 +836,11 @@ static const int32_t *bell_voice(voice_t *v, const int32_t *inc, const int32_t c
         for (int j = 0; j < 4; j++) {
             if (!v->benv[j]) continue;
             const uint32_t u = ((uint32_t)inc[0] >> 12) * BELL_RATIO[j];
-            if (u >= 0x1999999Au) { v->benv[j] = 0; continue; }
+            if (u >= BELL_CUT) { v->benv[j] = 0; continue; }
             bk[2 + 3 * nb] = (int32_t)v->bph[j]; bk[3 + 3 * nb] = (int32_t)(u << 2); bk[4 + 3 * nb] = v->benv[j] >> 8;
             idx[nb++] = j;
             int32_t en = v->benv[j];
-            for (int r = 0; r < QB; r += 8) en -= (en >> (BELL_DECAY[j] - 3)) + 8;
+            for (int r = 0; r < QB; r += 8) en -= (en >> (BELL_DECAY[j] - 3)) + 4;
             v->benv[j] = en < 256 ? 0 : en;
         }
         if (!nb) return 0;
@@ -829,7 +854,7 @@ static const int32_t *bell_voice(voice_t *v, const int32_t *inc, const int32_t c
     for (int j = 0; j < 4; j++) {
         if (!v->benv[j]) continue;
         const uint32_t u = ((uint32_t)inc[0] >> 12) * BELL_RATIO[j];
-        if (u >= 0x1999999Au) { v->benv[j] = 0; continue; }
+        if (u >= BELL_CUT) { v->benv[j] = 0; continue; }
         if (!any) { for (int q = 0; q < QB; q++) bellw[q] = 0; any = 1; }
         uint32_t ph = v->bph[j];
         const uint32_t bi = u << 2;
@@ -837,7 +862,7 @@ static const int32_t *bell_voice(voice_t *v, const int32_t *inc, const int32_t c
         for (int q = 0; q < QB; q++) { ph += bi; bellw[q] += m16(sine(ph), e) >> 15; }
         v->bph[j] = ph;
         int32_t en = v->benv[j];
-        for (int r = 0; r < QB; r += 8) en -= (en >> (BELL_DECAY[j] - 3)) + 8;
+        for (int r = 0; r < QB; r += 8) en -= (en >> (BELL_DECAY[j] - 3)) + 4;
         v->benv[j] = en < 256 ? 0 : en;
     }
     return any ? bellw : 0;
@@ -878,7 +903,7 @@ static void body_voice(voice_t *v, const int32_t c, const int32_t *g0, const int
             const int m = (sb - 1) * 8 + n, q = m >> 1;
             int32_t b0, b1, rx;
 #ifdef HS_CAT11K
-            {   /* one comb sample per pair, on the pair's mean / 8; the body back to 22.05 kHz between pairs */
+            {   /* one comb sample per pair, on the pair's mean / 8; the body back to 44.1 kHz between pairs */
                 const int32_t x = (hb[m] + hb[m + 1]) >> 4;
                 const int32_t y1 = x + (m16(bfb, *p1) >> 15), y2 = x - (m16(bfb, *p2) >> 15);
                 *p1++ = (int16_t)y1; *p2++ = (int16_t)y2;
@@ -919,7 +944,7 @@ static void body_voice(voice_t *v, const int32_t c, const int32_t *g0, const int
 static void bus_stage(const int16_t *k)
 {
     if (BUS.fresh) BUS.kc = knob(k, 3);
-    BUS.kc += (knob(k, 3) - BUS.kc) >> 1;
+    BUS.kc += ((knob(k, 3) - BUS.kc) * 9598 + 16384) >> 15;              /* 1 - sqrt 1/2 a block */
     const int32_t c = BUS.kc;
     const int32_t t[2] = { tab5(T_CWET, c), tab5(T_CROOM, c) };
     if (BUS.fresh) { BUS.g[0] = t[0]; BUS.g[1] = t[1]; BUS.fresh = 0; }
@@ -980,26 +1005,26 @@ static void bus_stage(const int16_t *k)
     if (!(g0[0] | t[0])) { v->cat_on = 0; for (int q = 0; q < QB; q++) rx[q] = 0; return; }
     BUS.live = 1;
     if (!v->cat_on) {
-        for (int i = 0; i < CA1; i++) v->ca1[i] = 0;
-        for (int i = 0; i < CA2; i++) v->ca2[i] = 0;
-        for (int i = 0; i < CR; i++) v->cr[i] = 0;
+        for (int i = 0; i < RA1; i++) room_a1[i] = 0;
+        for (int i = 0; i < RA2; i++) room_a2[i] = 0;
+        for (int i = 0; i < RR; i++) room_r[i] = 0;
         v->ia1 = v->ia2 = v->ir = 0;
         v->rdl = v->roomp = v->dark = 0;
         v->cat_on = 1;
     }
-    /* diffusers and the room (11.025 kHz), as section 3 */
+    /* diffusers and the room (22.05 kHz), as section 3 */
     {
         const int32_t rfb = tab5(T_CRFB, c);
         const int32_t rdamp = memo_lp_coef(tab5(T_CDAMP, c) * 2, v->memo[M_DAMP]);
-        int16_t *pa1 = v->ca1 + v->ia1, *pa2 = v->ca2 + v->ia2, *pr = v->cr + v->ir;
-        int16_t *const ea1 = v->ca1 + CA1, *const ea2 = v->ca2 + CA2, *const er = v->cr + CR;
+        int16_t *pa1 = room_a1 + v->ia1, *pa2 = room_a2 + v->ia2, *pr = room_r + v->ir;
+        int16_t *const ea1 = room_a1 + RA1, *const ea2 = room_a2 + RA2, *const er = room_r + RR;
         int32_t rdl = v->rdl;
 #ifdef HS_ASM
         {   /* kennel: the loop below in hs_bus.S (the room samples into bus_room[1..]) */
             int32_t rk[12];
-            rk[0] = (int32_t)(uintptr_t)v->ca1; rk[1] = (int32_t)(uintptr_t)pa1;
-            rk[2] = (int32_t)(uintptr_t)v->ca2; rk[3] = (int32_t)(uintptr_t)pa2;
-            rk[4] = (int32_t)(uintptr_t)v->cr; rk[5] = (int32_t)(uintptr_t)(pr == v->cr ? er - 1 : pr - 1);
+            rk[0] = (int32_t)(uintptr_t)room_a1; rk[1] = (int32_t)(uintptr_t)pa1;
+            rk[2] = (int32_t)(uintptr_t)room_a2; rk[3] = (int32_t)(uintptr_t)pa2;
+            rk[4] = (int32_t)(uintptr_t)room_r; rk[5] = (int32_t)(uintptr_t)(pr == room_r ? er - 1 : pr - 1);
             rk[6] = rdl; rk[7] = rfb; rk[8] = rdamp; rk[9] = (int32_t)(uintptr_t)bus_room; rk[10] = ROOM_MAX; rk[11] = -ROOM_MAX;
             bus_room[0] = v->roomp;
             hs_room(rx, rk);
@@ -1023,12 +1048,12 @@ static void bus_stage(const int16_t *k)
             rdl += (((r - rdl) >> 1) * rdamp) >> 14;
             *pr++ = sat16(z + ((rfb * rdl) >> 15));
             roomb[q] = r;
-            if (pa1 == ea1) pa1 = v->ca1;
-            if (pa2 == ea2) pa2 = v->ca2;
-            if (pr == er) pr = v->cr;
+            if (pa1 == ea1) pa1 = room_a1;
+            if (pa2 == ea2) pa2 = room_a2;
+            if (pr == er) pr = room_r;
         }
 #endif
-        v->ia1 = (uint16_t)(pa1 - v->ca1); v->ia2 = (uint16_t)(pa2 - v->ca2); v->ir = (uint16_t)(pr - v->cr);
+        v->ia1 = (uint16_t)(pa1 - room_a1); v->ia2 = (uint16_t)(pa2 - room_a2); v->ir = (uint16_t)(pr - room_r);
         v->rdl = rdl;
     }
     /* the room into BUS.out: x16 as section 3 (>> 11), / 4 for the input's x4 (>> 13); darkened as section 4 */
@@ -1125,7 +1150,7 @@ static void hs_note_on(void *self, const int16_t *k)
     /* OP1_PITCH_INC is not this voice's pitch yet (the firmware writes it before render): nothing here reads it */
     v->rng = 0x9E3779B9u ^ ((uint32_t)vi * 0x85EBCA6Bu) ^ (v->rng << 7);   /* varies from note to note */
     v->ph = lcg(&v->rng) & 0x3FFFFFFFu;     /* random start in the first quarter: no two voices line up */
-    v->drift = v->drift_t = ((int32_t)(lcg(&v->rng) >> 24) - 128) >> 1;   /* +-64 = +-3.4 cents from the start */
+    v->drift = v->drift_t = (((int32_t)(lcg(&v->rng) >> 24) - 128) >> 1) * 2;   /* +-64 = +-3.4 cents (Q1) */
     v->tone = v->flp = v->fbp = 0;
 #ifdef HS_HIGH_HALF
     v->sprev = 0;
@@ -1187,14 +1212,14 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
         if (best == vi && owner != vi) take_drone(vi);     /* the new owner takes over when it renders */
     }
 
-    /* knobs: ~6 ms smoothing (two blocks); a fresh note starts at the current position */
-    for (int i = 0; i < 4; i++) v->ks[i] += (knob(k, i) - v->ks[i]) >> 1;
+    /* knobs: ~6 ms smoothing (1 - sqrt 1/2 a block, four blocks); a fresh note starts at the current position */
+    for (int i = 0; i < 4; i++) v->ks[i] += ((knob(k, i) - v->ks[i]) * 9598 + 16384) >> 15;
     const int32_t d = v->ks[0], s = v->ks[1], bz = v->ks[2], c = v->ks[3];
 #ifdef HS_SHARED_ROOM
     if (bus_new_block) { bus_new_block = 0; bus_process(k); }             /* kennel: the shared stage, once a block */
 #endif
 
-    /* the wheel: stroke phase at the block start and its step per 22.05 kHz sample, from the beat clock */
+    /* the wheel: stroke phase at the block start and its step per 44.1 kHz sample, from the beat clock */
     uint32_t sp = 0, sinc = 0;
     const int zone = stroke_zone(k);
     const uint32_t s4 = STROKES4[zone];                                    /* strokes per beat x4 */
@@ -1223,10 +1248,10 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
             if (bc.step != 0x100000) sinc = (sinc >> 10) * (uint32_t)(clampi(bc.step, 0, 0x400000) >> 10);
             wheel_free = sp;                                               /* the free phase continues from here */
         } else {
-            if (wheel_new_block) wheel_free += sinc * BLK;
+            if (wheel_new_block) wheel_free += sinc * (BLK / 2);           /* a block is 64 output frames */
             sp = wheel_free;
         }
-        sinc <<= 1;                                                        /* per 22.05 kHz sample */
+        /* sinc is per output frame = per 44.1 kHz voice sample */
     }
     wheel_new_block = 0;
     int32_t senv[8];                                                       /* stroke envelope per sub-block */
@@ -1251,11 +1276,11 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
     const int32_t age = relic_age(k);
     if (relic_new_block) {
         relic_new_block = 0;
-        relic_wow += 6838u << 10;                                          /* 0.55 Hz at 344.5 blocks a second */
-        relic_wow2 += 2858u << 10;                                         /* 0.23 Hz */
-        relic_flut += 80816u << 10;                                        /* 6.5 Hz */
-        if ((lcg(&relic_rng) >> 24) < 2) relic_sag_t = (int32_t)(lcg(&relic_rng) >> 17);   /* a new sag every ~0.4 s */
-        relic_sag += (relic_sag_t - relic_sag) >> 5;
+        relic_wow += 3419u << 10;                                          /* 0.55 Hz at 689 blocks a second */
+        relic_wow2 += 1429u << 10;                                         /* 0.23 Hz */
+        relic_flut += 40408u << 10;                                        /* 6.5 Hz */
+        if ((lcg(&relic_rng) >> 24) < 1) relic_sag_t = (int32_t)(lcg(&relic_rng) >> 17);   /* a new sag every ~0.4 s */
+        relic_sag += (relic_sag_t - relic_sag) >> 6;
     }
     int32_t wob = 0;                                                       /* this voice's pitch wobble, Q15 */
 #ifdef HS_SHARED_RELIC
@@ -1274,13 +1299,13 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
     }
 
     /* pitch: drift wanders to a new random target every ~0.15 s on average (~0.2 s glide) */
-    if ((lcg(&v->rng) >> 24) < 5) v->drift_t = ((int32_t)(lcg(&v->rng) >> 24) - 128) * 3 >> 2;   /* +-96 */
-    v->drift += (v->drift_t - v->drift) >> 6;
-    const int32_t drift = v->drift + wob;
+    if ((lcg(&v->rng) >> 23) < 5) v->drift_t = (((int32_t)(lcg(&v->rng) >> 24) - 128) * 3 >> 2) * 2;   /* +-96, Q1 */
+    v->drift += (v->drift_t - v->drift) >> 7;
+    const int32_t drift = (v->drift >> 1) + wob;
     /* the drift as a constant phase offset per sample for this block (the pitch's own per-sample changes, LFO or
      * bend, still come through inc[n]; the drift is a few cents of the block's first increment) */
-    const uint32_t doff = (uint32_t)((int32_t)((uint32_t)inc[0] >> 15) * drift) << 1;   /* per 22.05 kHz sample */
-    int32_t dt = (int32_t)((uint32_t)inc[0] >> 16);                       /* phase step per 22.05 kHz sample, Q15 */
+    const uint32_t doff = (uint32_t)((int32_t)((uint32_t)inc[0] >> 15) * drift) << 1;   /* per 44.1 kHz sample */
+    int32_t dt = (int32_t)((uint32_t)inc[0] >> 16);                       /* phase step per 44.1 kHz sample, Q15 */
     dt += (dt * drift) >> 15;
     dt = clampi(dt, 1, 16384);
 #ifndef HS_HIGH_HALF
@@ -1292,7 +1317,7 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
     const int32_t bow = 18000 + ((vel * 14767) >> 15);                     /* 0.55 .. 1.0 */
 
     /* bow lift after note off: k = c^2 x BOW_LIFT per block */
-    if (!v->held) v->bowg -= (v->bowg * ((((c * c) >> 15) * BOW_LIFT) >> 15)) >> 15;
+    if (!v->held) v->bowg -= (v->bowg * ((((c * c) >> 15) * BOW_LIFT) >> 15) + 65536) >> 17;
     const int32_t bowg = v->bowg;
 
     /* block targets. The string's loudness compensation is folded into its source gains (the filters are linear), so
@@ -1327,13 +1352,13 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
     int32_t g0[NG], dg[NG];
     for (int i = 0; i < NG; i++) { g0[i] = v->g[i]; dg[i] = t[i] - v->g[i]; v->g[i] = t[i]; }
 
-    /* ======== 1. the string, 22.05 kHz, into hb (the loop specialised on whether the sine pair and the grit run) */
+    /* ======== 1. the string, 44.1 kHz, into hb (the loop specialised on whether the sine pair and the grit run) */
     {
         string_t st;
         st.pw = (uint32_t)tab5(T_PW, s) << 17;
-        const int32_t f0x = (dt * 689) >> 10;                              /* the pitch in Hz (dt * 22050 / 32768) */
+        const int32_t f0x = (dt * 11025) >> 13;                            /* the pitch in Hz (dt * 44100 / 32768) */
 #ifdef HS_HIGH_HALF
-        /* kennel: above HS_HIGH_MIDI the string runs at 11.025 kHz: two 22.05 kHz increments per step (the pairs summed
+        /* kennel: above HS_HIGH_MIDI the string runs at 22.05 kHz: two 44.1 kHz increments per step (the pairs summed
          * here), dt and the drift offset doubled, the coefficients for the halved rate (twice the frequency for lp_coef,
          * t = pi fc / 11025 for the SVF) */
         const int high = (uint32_t)inc[0] > HS_MIDI_INC(HS_HIGH_MIDI);
@@ -1352,7 +1377,7 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
             st.dt = clampi(2 * dt, 1, 16384);
             st.doff = doff << 1;
             st.ta = memo_lp_coef(((tab5(T_LPK, s) * f0x * (bow >> 5)) >> 10) * 2, v->memo[M_TONE]);
-            const int32_t th = (clampi(tab5(T_FHZ, s), 20, 3500) * 4781) >> 9;   /* pi / 11025 in Q15 */
+            const int32_t th = (clampi(tab5(T_FHZ, s), 20, 3500) * 4781 + 512) >> 10;   /* pi / 22050 in Q15 */
             st.ff = 2 * th - (((((th * th) >> 15) * th) >> 15) * 10923 >> 15);
             st.nsb = 4; st.out = hb + HB / 2;
         } else {
@@ -1378,7 +1403,7 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
 #ifdef HS_HIGH_HALF
         if (!high) v->sprev = hb[HB - 1];
 #ifndef HS_STRING_ASM
-        else {                             /* back to 22.05 kHz in place: hb[2m], hb[2m + 1] from hb[32 + m] */
+        else {                             /* back to 44.1 kHz in place: hb[2m], hb[2m + 1] from hb[32 + m] */
             int32_t p = v->sprev;
             for (int m = 0; m < HB / 2; m++) { const int32_t y = hb[HB / 2 + m]; hb[2 * m] = (p + y) >> 1; hb[2 * m + 1] = y; p = y; }
             v->sprev = p;
@@ -1387,14 +1412,14 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
 #endif
     }
 
-    /* ======== 2. drone and trompette (the owner, and a former owner while it fades out), 22.05 kHz, added to hb */
+    /* ======== 2. drone and trompette (the owner, and a former owner while it fades out), 44.1 kHz, added to hb */
     uint32_t ri[HB];                                                       /* drone root increment per sample */
     const int run_drone = (g0[G_DRONE] | t[G_DRONE]) != 0, run_buzz = (g0[G_BUZZ] | t[G_BUZZ]) != 0;
     if (run_drone || run_buzz) {
         const int key = drone_key(k);
-        /* per 22.05 kHz sample: a fixed key's 44.1 kHz increment x2; FOLLOW: an octave below the note, i.e. half its
-         * increment over two 44.1 kHz samples */
-        if (key) for (int m = 0; m < HB; m++) ri[m] = KEY_INC[key - 1] << 1;
+        /* per 44.1 kHz sample: a fixed key's increment; FOLLOW: an octave below the note, i.e. half its increment
+         * over two 88.2 kHz samples */
+        if (key) for (int m = 0; m < HB; m++) ri[m] = KEY_INC[key - 1];
         else for (int m = 0; m < HB; m++) ri[m] = ((uint32_t)inc[2 * m] + (uint32_t)inc[2 * m + 1]) >> 1;
         if (wob) for (int m = 0; m < HB; m++) ri[m] += (uint32_t)((int32_t)(ri[m] >> 15) * wob);   /* the relic's tape */
     }
@@ -1418,7 +1443,7 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
     if (rm0 | rm1) relic_run(v, hb, age, rm0, rm1);                            /* before the cathedral: the room hears it */
 #endif
 
-    /* ======== 3. cathedral: body combs (22.05 kHz), diffusers, room and bell (11.025 kHz), mixed back into hb */
+    /* ======== 3. cathedral: body combs (44.1 kHz), diffusers, room and bell (22.05 kHz), mixed back into hb */
 #ifdef HS_SHARED_ROOM
     {   /* kennel: the body per voice, the room shared (bus_stage) */
         const int32_t *bw = bell_voice(v, inc, c, vel);
@@ -1472,7 +1497,7 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
             }
             v->ib1 = (uint16_t)(p1 - v->cb1); v->ib2 = (uint16_t)(p2 - v->cb2);
         }
-        /* the bell partials (11.025 kHz increments; partials above ~4.4 kHz left out), then the room */
+        /* the bell partials (22.05 kHz increments; partials above ~4.4 kHz left out), then the room */
         {
             uint32_t binc[4], bph[4];
             int32_t benv[4];
@@ -1480,7 +1505,7 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
             for (int j = 0; j < 4; j++) {
                 if (!v->benv[j]) continue;
                 const uint32_t u = ((uint32_t)inc[0] >> 12) * BELL_RATIO[j];
-                if (u >= 0x1999999Au) { v->benv[j] = 0; continue; }
+                if (u >= BELL_CUT) { v->benv[j] = 0; continue; }
                 binc[nb] = u << 2; bph[nb] = v->bph[j]; benv[nb] = v->benv[j]; nb++;
             }
             /* the bells summed first, partial by partial (bellb stays all zero while no bell rings). Each term is at
@@ -1507,7 +1532,7 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
                 bl = bellw;
             }
             const int32_t rfb = tab5(T_CRFB, c);
-            const int32_t rdamp = memo_lp_coef(tab5(T_CDAMP, c) * 2, v->memo[M_DAMP]);   /* the coefficient at 11.025 kHz */
+            const int32_t rdamp = memo_lp_coef(tab5(T_CDAMP, c) * 2, v->memo[M_DAMP]);   /* the coefficient at 22.05 kHz */
             int16_t *pa1 = v->ca1 + v->ia1, *pa2 = v->ca2 + v->ia2, *pr = v->cr + v->ir;
             int16_t *const ea1 = v->ca1 + CA1, *const ea2 = v->ca2 + CA2, *const er = v->cr + CR;
             int32_t rdl = v->rdl;
@@ -1541,7 +1566,7 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
                 if (!v->benv[j]) continue;
                 v->bph[j] = bph[i++];
                 int32_t e = v->benv[j];
-                for (int r = 0; r < QB; r += 8) e -= (e >> (BELL_DECAY[j] - 3)) + 8;   /* 4 steps of 8 samples */
+                for (int r = 0; r < QB; r += 8) e -= (e >> (BELL_DECAY[j] - 3)) + 4;   /* 4 steps of 8 samples */
                 v->benv[j] = e < 256 ? 0 : e;
             }
             v->ia1 = (uint16_t)(pa1 - v->ca1); v->ia2 = (uint16_t)(pa2 - v->ca2); v->ir = (uint16_t)(pr - v->cr);
@@ -1556,7 +1581,7 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
                 const int32_t gbw = (GAIN(G_BODY, sb) * gw) >> 15, grw = (GAIN(G_ROOM, sb) * gw) >> 15;
                 for (int n = 0; n < 8; n += 2) {
                     const int m = (sb - 1) * 8 + n, q = m >> 1;
-                    const int32_t r1 = roomb[q], r0 = (rp + r1) >> 1;      /* the room back to 22.05 kHz */
+                    const int32_t r1 = roomb[q], r0 = (rp + r1) >> 1;      /* the room back to 44.1 kHz */
                     rp = r1;
                     /* bodyb within +-27304, gbw <= 32767, the room int16, grw <= 39322 x 20316 >> 15 = 24380 */
                     hb[m]     = ((hb[m] * gdry) >> 15) + (m16(bodyb[m], gbw) >> 12) + (m16(r0, grw) >> 11);
@@ -1571,7 +1596,7 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
 #endif
 
     /* ======== 4. darkening low-pass (blended in from 25 % CATHEDRAL), DC blocker, level x velocity, the strokes
-     * swelling the string; 22.05 kHz */
+     * swelling the string; 44.1 kHz */
     {
         const int32_t kd = clampi((c - 8192) * 2, 0, 32767);
         const int32_t dcoef = 32767 - (((32767 - memo_lp_coef(tab5(T_CDARK, c), v->memo[M_DARK])) * kd) >> 15);   /* 32767: transparent */
@@ -1598,7 +1623,7 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
                 for (int n = 0; n < 8; n++) {
                     int32_t y = clampi(h[n], -65535, 65535);
                     dark += (((y - dark) >> 1) * dcoef) >> 14; y = dark;
-                    dc8 += (y * 256 - dc8) >> 8;
+                    dc8 += (y * 256 - dc8) >> 9;
                     y -= dc8 >> 8;
                     h[n] = clampi((y * go) >> 15, -26000, 26000);          /* the interpolator then stays in int16 */
                 }
@@ -1606,7 +1631,7 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
                 for (int n = 0; n < 8; n++) {
                     int32_t y = clampi(h[n], -65535, 65535);
                     dark = y;
-                    dc8 += (y * 256 - dc8) >> 8;
+                    dc8 += (y * 256 - dc8) >> 9;
                     y -= dc8 >> 8;
                     h[n] = clampi((y * go) >> 15, -26000, 26000);
                 }
@@ -1620,7 +1645,7 @@ static void hs_render(void *self, int16_t *out, const int16_t *k)
     bus_voice();                                                           /* kennel: the shared stage's share */
 #endif
 
-    /* ======== 5. 2x interpolation to 44.1 kHz: each 22.05 kHz sample, then the half-band midpoint after it
+    /* ======== 5. 2x interpolation to 88.2 kHz: each 44.1 kHz sample, then the half-band midpoint after it
      * ((-a + 9 b + 9 c - d) / 16, |out| <= 26000 x 20 / 16 = 32500: int16 without saturation) */
 #ifdef HS_ASM
     hs_up(hb, out, v->up);                                                 /* kennel: the loop below, hs_post.S */
@@ -1695,10 +1720,10 @@ static void sc_show(void *n, int on) { if (n) op1_node_set_visible(n, on); }
 /* the key a pitch falls on: semitones above G3, folded into the instrument's 24 keys */
 static int sc_key(uint32_t inc)
 {
-    static const uint32_t G3 = 19088521u;                             /* G3 increment at 44.1 kHz */
+    static const uint32_t G3 = 9544261u;                              /* G3 increment at 88.2 kHz (OP1_PITCH_INC) */
     /* half-semitone boundaries above G3 within an octave: G3 * 2^((k + 0.5) / 12), k = 0 .. 11 */
-    static const uint32_t B[12] = { 19647858u, 20816180u, 22053975u, 23365372u, 24754749u, 26226743u,
-                                    27786267u, 29438524u, 31189030u, 33043626u, 35008502u, 37090216u };
+    static const uint32_t B[12] = { 9823929u, 10408090u, 11026988u, 11682686u, 12377375u, 13113372u,
+                                    13893134u, 14719262u, 15594515u, 16521813u, 17504251u, 18545108u };
     int oct = 0;
     while (inc >= 2u * G3 && oct < 8) { inc >>= 1; oct++; }
     while (inc < G3 && oct > -8) { inc <<= 1; oct--; }

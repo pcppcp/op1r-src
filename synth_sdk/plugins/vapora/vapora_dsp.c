@@ -1,7 +1,10 @@
 /* Copyright (C) 2026 AiAAAA. GPL-3.0-or-later with the OP-1 firmware permission. */
 /* VAPORA R3. GPL-3.0-or-later with OP-1 firmware permission.
  * WARM preserves R2. Compact banks wrap the same 64-sample fundamental period.
- * Native pitch is Q32 at 44.1 kHz; two increments feed each 22.05 kHz step.
+ * Native pitch is Q32 per 88.2 kHz voice sample; two increments feed each 44.1 kHz internal step
+ * (64 steps a call, 689 calls a second). kennel rate fix 2026-11-03: written as if a call were 128 samples
+ * at 44.1 kHz (22.05 kHz internal, 344.5 calls a second), so the filter, LFO, bank fade, Interval fade and
+ * control smoothing ran 2x on R246; their constants are now derived at the real rates.
  * Controls run at block rate with sample ramps. Single guarded mip at rest;
  * one shared bank fade handles family/LOD changes without multiplying fades.
  */
@@ -44,7 +47,9 @@ static int32_t cutoff(int bright,int depth)
 {
     bright=ps_clamp(bright+(depth>>2),0,32767);
     int c=700+((bright*bright)>>15);if(c>30000)c=30000;
-    return 32768-(((32768-c)*(32768-c))>>15);
+    /* One pole, c = 1 - exp(-2 pi f / fs). Designed at fs 22.05 kHz as 1-(1-c)^2; at the real 44.1 kHz
+     * internal rate the same cutoff is c itself: 151 Hz at bright 0, 17.3 kHz at the top. */
+    return c;
 }
 PS_INLINE uint32_t auxiliary(uint32_t inc,int ratio,int detune)
 {
@@ -69,15 +74,16 @@ void ps_render(ps_voice *v,int16_t out[PS_BLOCK],const int32_t pitch[PS_BLOCK],
 {
     int start[PS_CONTROLS];
     for(int k=0;k<PS_CONTROLS;k++){
-        start[k]=v->smooth[k];int d=p->q[k]-start[k],s=d/8;
+        /* 1/8 per 344.5 Hz call (~22 ms) = 1-sqrt(7/8) = 529/8192 per 689 Hz call */
+        start[k]=v->smooth[k];int d=p->q[k]-start[k],s=(d*529)>>13;
         if(d&&!s)s=d;
         v->smooth[k]+=s;
     }
-    int aux0=v->aux_gain;
+    int aux0=v->aux_gain; /* Interval fade: 8 calls each way, 11.6 ms */
     if(v->interval!=p->interval){
-        if(!aux0){v->interval=p->interval;v->ratio=ps_interval_ratio(p->interval);v->aux_gain=8192;}
-        else v->aux_gain=ps_clamp(aux0-8192,0,32768);
-    }else v->aux_gain=ps_clamp(aux0+8192,0,32768);
+        if(!aux0){v->interval=p->interval;v->ratio=ps_interval_ratio(p->interval);v->aux_gain=4096;}
+        else v->aux_gain=ps_clamp(aux0-4096,0,32768);
+    }else v->aux_gain=ps_clamp(aux0+4096,0,32768);
 
     uint32_t maxinc=0;int flat=1;
     for(int n=0;n<PS_BLOCK;n++){
@@ -100,14 +106,15 @@ void ps_render(ps_voice *v,int16_t out[PS_BLOCK],const int32_t pitch[PS_BLOCK],
         v->bank_lod=target;v->bank_family=p->character;v->bank_mix=0;
     }
     int bank0=v->bank_mix;
-    v->bank_mix=ps_clamp(bank0+2048,0,32768); /* 46 ms, one fade at a time */
+    v->bank_mix=ps_clamp(bank0+1024,0,32768); /* 32 calls, 46 ms, one fade at a time */
     int bank_step=v->bank_mix-bank0;
     ps_bank current=bank(v->bank_family,v->bank_lod);
     ps_bank previous=bank(v->old_family,v->old_lod);
 
+    /* LFO step per 44.1 kHz internal step (2^32 / 44100 / 1000 per mHz), 64 steps a call */
     uint32_t lstep=((uint32_t)ps_speed_millihz(v->smooth[PS_SPEED])*24932u)>>8;
     int d0=(wave(v->lfo)*start[PS_MOTION])>>15;
-    v->lfo+=lstep*PS_BLOCK;
+    v->lfo+=lstep*(PS_BLOCK/2);
     int d1=(wave(v->lfo)*v->smooth[PS_MOTION])>>15;
     int m0=ps_clamp(start[PS_MORPH]+(d0>>3),0,32767);
     int m1=ps_clamp(v->smooth[PS_MORPH]+(d1>>3),0,32767);

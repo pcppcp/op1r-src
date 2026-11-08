@@ -15,9 +15,9 @@
 /* Vibrato frequency range: red (orange) knob maps to VIBRATO_MIN_INC..VIBRATO_MAX_INC (0..32 Hz) on a squared
  * curve: slow speeds get most of the knob travel (knob 1/4 = 2 Hz, 1/2 = 8 Hz, 3/4 = 18 Hz, full = 32 Hz).
  * The LFO is advanced once per SAMPLE, so these are per-sample phase increments:
- * inc = f * 2^32 / 44100 (1 Hz = 97392). */
+ * inc = f * 2^32 / 88200 (OP1_VOICE_RATE, 1 Hz = 48696). */
 #define VIBRATO_MIN_INC   0          /*  0   Hz */
-#define VIBRATO_MAX_INC   3116530    /* 32   Hz */
+#define VIBRATO_MAX_INC   1558265    /* 32   Hz */
 
 /* Vibrato depth range: white knob maps to 0..~90 cents (peak). */
 #define VIBRATO_MAX_AMT   (BEND_AMOUNT * 2)
@@ -27,9 +27,9 @@
  * several blocks (not one) so the slow tail of an attack or decay curve is not mistaken for sustain.
  * Vibrato starts late: raise ENV_STEADY_BLOCKS or lower ENV_STEADY_TOL. Vibrato starts early: the opposite. */
 #define ENV_STEADY_TOL    8
-#define ENV_STEADY_BLOCKS 8          /* ~23 ms */
-#define VIB_FADE_IN       1600       /* depth gained per block while steady (~20 blocks = ~60 ms to full) */
-#define VIB_FADE_OUT      4096       /* depth lost per block otherwise */
+#define ENV_STEADY_BLOCKS 16         /* ~23 ms (689 blocks / s) */
+#define VIB_FADE_IN       800        /* depth gained per block while steady (~41 blocks = ~60 ms to full) */
+#define VIB_FADE_OUT      2048       /* depth lost per block otherwise */
 
 /* Voice state (the firmware gives us 0x24 bytes: vtable + 32 bytes). */
 typedef struct {
@@ -144,20 +144,20 @@ static void brass_render(void *self, int16_t *out, const int16_t *params)
     /* Red/orange knob (0..32767) maps to vibrato frequency (per-sample LFO increment), squared: x^2 in Q15 gives
      * fine control at the slow end and squeezes the fast end into the last part of the knob. */
     int32_t knob_sq = (params[3] * params[3]) >> 15;
-    /* = (int64_t)(VIBRATO_MAX_INC - VIBRATO_MIN_INC) * knob_sq >> 15 in 32 bits (no __muldi3): 3116530 = 95 * 2^15 + 3570
+    /* = (int64_t)(VIBRATO_MAX_INC - VIBRATO_MIN_INC) * knob_sq >> 15 in 32 bits (no __muldi3): 1558265 = 47 * 2^15 + 18169
      * and knob_sq >= 0, so the product's high part shifts out exactly */
-    _Static_assert(VIBRATO_MAX_INC - VIBRATO_MIN_INC == 95 * 32768 + 3570, "vibrato increment split");
-    int32_t vibrato_phase_inc = VIBRATO_MIN_INC + 95 * knob_sq + ((3570 * knob_sq) >> 15);
+    _Static_assert(VIBRATO_MAX_INC - VIBRATO_MIN_INC == 47 * 32768 + 18169, "vibrato increment split");
+    int32_t vibrato_phase_inc = VIBRATO_MIN_INC + 47 * knob_sq + ((18169 * knob_sq) >> 15);
 
     /* White knob (0..32767) maps to vibrato depth, scaled by the fade-in. */
     int32_t vibrato_amt_q15 = (params[2] * VIBRATO_MAX_AMT) >> 15;
     vibrato_amt_q15 = op1_mul16(vibrato_amt_q15, v->vibrato_depth);
 
     /* Smooth blue/green tracking of the start position. Rounded up when rising so it reaches the target exactly
-     * (a plain >> 6 would stop up to 63 short on the way up, and the top of the range must stay reachable). */
+     * (a plain >> 7 would stop up to 127 short on the way up, and the top of the range must stay reachable). */
     int32_t interp_start = v->interp_start;
     int32_t start_diff = interp_start_for(params) - interp_start;
-    interp_start += (start_diff + (start_diff > 0 ? 63 : 0)) >> 6;
+    interp_start += (start_diff + (start_diff > 0 ? 127 : 0)) >> 7;   /* tau 128 blocks = 186 ms */
 
     /* Green knob (0..32767) is the sweep: 0%..100% of the whole interpolation range, scaled by the envelope. */
     int32_t width = params[1];
@@ -224,8 +224,8 @@ static void brass_render(void *self, int16_t *out, const int16_t *params)
         /* Lookup sine value. */
         int32_t sample = op1_sin(sine_idx);
 
-        /* One-pole low-pass filter. */
-        lp += ((sample - lp) * 16384) >> 15;
+        /* One-pole low-pass, 4.9 kHz at OP1_VOICE_RATE (a = 0.297, shifts as brass_dsp.S). */
+        { int32_t d = sample - lp; lp += (d >> 2) + (d >> 5) + (d >> 6); }
 
         /* Velocity, half scale as the other engines (six voices on the synth bus); the firmware applies the
          * gain envelope. */

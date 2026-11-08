@@ -20,7 +20,7 @@ static void update(void *scr,int dt){
  unsigned mode=sid_wave_mode(q[0]);
  static const char *names[6]={"triangle","saw","pulse","noise","sync","ring"};
  text(r,238,18,"wave",colors[0]);text(r,238,32,names[mode],colors[0]);
- text(r,238,53,mode>=4?"interval":mode==2?"width":"voices",colors[1]);if(mode>=4){unsigned n=100+(((unsigned)q[1]*300+16383)>>15);char b[6]={(char)('0'+n/100),'.',(char)('0'+n/10%10),(char)('0'+n%10),'x',0};text(r,238,67,b,colors[1]);}
+ text(r,238,53,mode>=4?"interval":mode==2?"width":"voices",colors[1]);if(mode>=4){unsigned n=sid_interval_semi(q[1]);char b[7],*o=b;*o++='+';if(n>=10)*o++=(char)('0'+n/10);*o++=(char)('0'+n%10);*o++=' ';*o++='s';*o++='t';*o=0;text(r,238,67,b,colors[1]);}
  else number(r,238,67,mode==2?3+(((unsigned)q[1]*94+16383)>>15):(((unsigned)q[1]*99+16383)>>15),colors[1]);
  text(r,238,88,"cutoff",colors[2]);number(r,238,102,((unsigned)q[2]*99+16383)>>15,colors[2]);
  text(r,238,123,"res",colors[3]);number(r,238,137,((unsigned)q[3]*99+16383)>>15,colors[3]);

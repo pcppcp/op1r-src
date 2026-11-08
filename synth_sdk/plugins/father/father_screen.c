@@ -8,8 +8,16 @@
 static unsigned text_slot;
 static void *gate_person;
 extern volatile int16_t father_gate[3];
-static uint8_t text_objects[5][OP1_TEXT_SIZE] __attribute__((aligned(4)));
-static uint8_t made[5];static char cached[5][16];
+/* five labels; white's page 2 label (classic on / off, in COLOR's place); the CLASSIC tag on page 1 while it is on:
+   size 8 right-aligned with COLOR's right edge (x 301) just above it (glyphs y 113..122, COLOR from 125, 5 px from the
+   floor's diagonal edge; owner 2026-11-08). TAG_X is measured on native captures: the native stock font at size 8 is
+   wider than the host render ("classic" 42 px there, 35 on the host). */
+#define TEXTS 7
+#define TAG_SIZE 8
+#define TAG_Y 126
+#define TAG_X 260
+static uint8_t text_objects[TEXTS][OP1_TEXT_SIZE] __attribute__((aligned(4)));
+static uint8_t made[TEXTS];static char cached[TEXTS][16];
 static const uint8_t black[4]={1,1,1,255};
 static void line(void *r,int x,int y,int xx,int yy,int width,const uint8_t *c){
  y-=SCREEN_LIFT*1024;yy-=SCREEN_LIFT*1024;
@@ -20,7 +28,7 @@ static void line(void *r,int x,int y,int xx,int yy,int width,const uint8_t *c){
  op1_pt a={x,y},b={xx,yy};op1_raster_line(r,&a,&b,width,c);
 }
 static void text(void *r,int x,int y,int size,const char *s,const uint8_t *c){
- unsigned n=text_slot++;if(n>=5)return;
+ unsigned n=text_slot++;if(n>=TEXTS)return;
  static const int32_t ident[9]={1024,0,0,0,1024,0,0,0,1024};
  if(!made[n]){op1_text_ctor(text_objects[n],OP1_Q10(x),y-SCREEN_LIFT,size,c);made[n]=1;}
  unsigned j=0;while(j<15&&s[j]&&cached[n][j]==s[j])j++;
@@ -76,7 +84,14 @@ static void update(void *s,int dt){
  const uint8_t blue[4]={107,142,255,255},green[4]={0,239,148,255},white[4]={255,255,255,255},red[4]={255,58,93,255};
  char number[3]={(char)('0'+value/10),(char)('0'+value%10),0};text_slot=0;
  text(r,14,23,12,"distance",blue);text(r,14,39,30,number,white);
- text(r,14,138,12,"gate",green);text(r,260,138,12,"color",white);text(r,284,23,12,"mix",red);
+ /* CLASSIC (father.c): white's page 2 word 7, two steps; page 2 shows its state where "color" was */
+ const int pos=op1_fx_screen_pos();const int16_t w7=op1_fx_knobs(pos)[7];
+ const int classic=(w7<0?0:w7)*2>>15,page2=op1_fx_page[pos%3][2]!=0;
+ text(r,14,138,12,"gate",green);
+ if(page2)text_slot++;else text(r,260,138,12,"color",white);
+ text(r,284,23,12,"mix",red);
+ if(page2){text_slot=5;text(r,214,138,12,classic?"classic on":"classic off",white);}
+ else if(classic){text_slot=6;text(r,TAG_X,TAG_Y,TAG_SIZE,"classic",white);}
  int height=((int)k[3]*46+16383)>>15;
  const uint8_t dim[4]={80,21,30,255};line(r,302*1024,48*1024,302*1024,94*1024,9*1024,dim);
  if(height)line(r,302*1024,(94-height)*1024,302*1024,94*1024,9*1024,red);

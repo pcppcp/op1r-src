@@ -14,9 +14,9 @@
  *   slots: saw (0) d, inv1, inv2, c2; square (1) d, inv1, 1 << 29; pulse (2) 2d, inv1;
  *     saw-pulse (3) dh = (d + 1) >> 1, 2 inv1, 2 inv2, c2; c2 = 2^29 - d inv2
  *   pairs[i] = (tf_cos[i + 1] - tf_cos[i]) << 16 | tf_cos[i] (taffy_pairs.h)
- * void tf_out(int16_t *out, const int16_t *y, int32_t *dc_q10, int32_t gain)
+ * void tf_out(int16_t *out, const int16_t *y, int32_t *dc_q11, int32_t gain)
  *   the C's DC rejection and output gain over the 128 samples (controls held)
- * void tf_out_fade(int16_t *out, const int16_t *y, const int16_t *yp, int32_t *dc_q10, int32_t gain,
+ * void tf_out_fade(int16_t *out, const int16_t *y, const int16_t *yp, int32_t *dc_q11, int32_t gain,
  *                  const uint32_t *w)
  *   the same after the knob crossfade y = yp + (((y - yp) * i) >> 7) (yp: the previous block's setup);
  *   w[i - 1] = 256 i << 16 | (32768 - 256 i) for i = 1..127, w[127] read and not used (taffy_pairs.h tf_fade)
@@ -36,7 +36,7 @@
  *     the high half truncated; frac >= 1 here, so 32768 - frac fits 16 bits; the same for k3 >= 1
  *   (cosq(..) (32767 - x)) >> 15: 2 c 32767 - 2 c x in A1, high half truncated
  *   the crossfade: floor((yp (32768 - 256 i) + y 256 i) / 2^15) for i = 1..127 (fractional, truncated); i = 0 is yp
- *   DC: dc += (v 1024 - dc) >> 10 in 32 bits (v 1024 as an integer product); q = dc >> 10 lies in -32768..32767
+ *   DC: dc += (v 2048 - dc) >> 11 in 32 bits (v 2048 as an integer product); q = dc >> 11 lies in -32768..32767
  *   output: engine_sat16(((v - q) g) >> 15) = 2 v g - 2 q g in A0, the high half truncated and saturated to 16 bits
  *     (v - q stays exact in the 40-bit accumulator)
  * All values that meet a 16-bit multiply are in -32768..32767 (shapes, mixes, crossfade: floored convex
@@ -292,14 +292,14 @@ EVAL_BEGIN _tf_eval_pulse_sawpulse_r
 	TAIL_R
 EVAL_END _tf_eval_pulse_sawpulse_r
 
-/* ---- output: v in R0.H; R5 dc, R6 = 1024 << 16 | gain; the 16-bit result into R2.L ---- */
+/* ---- output: v in R0.H; R5 dc, R6 = 2048 << 16 | gain; the 16-bit result into R2.L ---- */
 
 .macro DCGAIN
-	R1 = R0.H * R6.H (IS);                                      /* v 1024 */
+	R1 = R0.H * R6.H (IS);                                      /* v 2048 */
 	R1 = R1 - R5 (NS);
-	R1 = R1 >>> 10;
+	R1 = R1 >>> 11;
 	R5 = R5 + R1 (NS);
-	R1 = R5 >>> 10;                                             /* q */
+	R1 = R5 >>> 11;                                             /* q */
 	A0 = R0.H * R6.L;
 	R2.L = (A0 -= R1.L * R6.L) (T);
 .endm
@@ -313,7 +313,7 @@ _tf_out:
 	I2 = R1;                                                    /* y */
 	P3 = R2;                                                    /* &dc */
 	R6 = [SP + 56];
-	R6.H = 1024;
+	R6.H = 2048;
 	R5 = [P3];
 	R0.H = W[I2++];
 	DCGAIN                                                      /* sample 0 */
@@ -323,9 +323,9 @@ _tf_out:
 3:
 	R1 = R0.H * R6.H (IS) || W[I1++] = R2.L || NOP;            /* the previous sample out */
 	R1 = R1 - R5 (NS);
-	R1 = R1 >>> 10;
+	R1 = R1 >>> 11;
 	R5 = R5 + R1 (NS);
-	R1 = R5 >>> 10;
+	R1 = R5 >>> 11;
 	A0 = R0.H * R6.L;
 4:
 	R2.L = (A0 -= R1.L * R6.L) (T) || R0.H = W[I2++] || NOP;   /* reads y[128] at the end (the spare halfword) */
@@ -345,7 +345,7 @@ _tf_out_fade:
 	I3 = R2;                                                    /* yp */
 	P3 = [SP + 56];                                             /* &dc */
 	R6 = [SP + 60];
-	R6.H = 1024;
+	R6.H = 2048;
 	R5 = [P3];
 	R0.H = W[I3++];                                             /* sample 0: v = yp[0] */
 	DCGAIN
@@ -361,9 +361,9 @@ _tf_out_fade:
 	R0.H = (A1 += R3.H * R4.H) (T);                             /* v */
 	R1 = R0.H * R6.H (IS) || R3.L = W[I3++] || NOP;
 	R1 = R1 - R5 (NS) || R3.H = W[I2++] || NOP;                /* reads one past the buffers at the end (spare) */
-	R1 = R1 >>> 10 || R4 = [I0++] || NOP;                      /* the next sample's weights (w[127]: spare) */
+	R1 = R1 >>> 11 || R4 = [I0++] || NOP;                      /* the next sample's weights (w[127]: spare) */
 	R5 = R5 + R1 (NS);
-	R1 = R5 >>> 10;
+	R1 = R5 >>> 11;
 	A0 = R0.H * R6.L;
 6:
 	R2.L = (A0 -= R1.L * R6.L) (T);
