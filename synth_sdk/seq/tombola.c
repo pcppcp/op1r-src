@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Stock Tombola in short physics steps.
  *
  * R246 steps Tombola's ball world from the Gfx thread: screens_update (0x01A3BB20) hands the frame's tick count
@@ -13,7 +14,7 @@
  * TOMBOLA_STEP ticks goes to R246 unchanged; a longer one (clamped to R246's 102) is split into 2..4 equal advances of
  * 13..26 ticks, each a whole stock advance (step, ball positions, note on / off timers), so the physics runs as in
  * normal frames and the notes' timing adds up to the same ticks.
- * Copyright (C) 2026 Hundekraft. */
+ * Copyright (C) 2026 Hundekraft. GPL-3.0-or-later with the OP-1 firmware permission (see LICENSE and NOTICE). */
 #include "tombola.h"
 
 #ifdef OP1_HOST
