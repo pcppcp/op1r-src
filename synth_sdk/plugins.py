@@ -19,9 +19,11 @@ plugin.json fields (paths relative to the plugin folder):
   source_cflags  (optional) {"file.c": ["-O3"]}: extra compiler flags for one source, keyed by its file name and
                  added after the default -O2. Only -O0 .. -O3 and -Os are accepted. For a hot loop that -O3 speeds
                  up; check that the output stays the same.
+  cflags         (optional) ["-DNAME", "-O3", ...]: extra compiler flags for every source of the plugin, before its
+                 source_cflags. Only -D defines, -O0 .. -O3 / -Os and -fno-tree-loop-distribute-patterns are accepted.
 Orders 1..31 per kind (OP1_MAX_ORDER in op1_plugin.h).
 """
-import json, os
+import json, os, re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DIR = os.path.join(HERE, 'plugins')
@@ -52,16 +54,22 @@ def load():
     return engs, fxs
 
 
+CFLAGS_OK = re.compile(r'-(?:D[A-Za-z_][A-Za-z0-9_]*(?:=[A-Za-z0-9_]+)?|O[0123s]|fno-tree-loop-distribute-patterns)$')
+
+
 def source_flags(e, srcs):
-    """-> {source path: [flags]} for the sources `srcs` of plugin entry `e` (plugin.json "source_cflags", keyed by
-    file name); a key that names no source, or a flag other than -O0..-O3 / -Os, is an error"""
+    """-> {source path: [flags]} for the sources `srcs` of plugin entry `e`: plugin.json "cflags" (every source), then
+    "source_cflags" (keyed by file name); a key that names no source, or a flag outside the accepted set, is an error"""
+    cf = e.get('cflags', [])
+    assert isinstance(cf, list) and all(isinstance(f, str) and CFLAGS_OK.fullmatch(f) for f in cf), \
+        f'{e["name"]}: cflags takes -DNAME[=VALUE], -O0 .. -O3, -Os and -fno-tree-loop-distribute-patterns only'
     sf = e.get('source_cflags', {})
     names = {os.path.basename(s) for s in srcs}
     assert isinstance(sf, dict) and set(sf) <= names, f'{e["name"]}: source_cflags names a file that is not a source'
     for flags in sf.values():
         assert isinstance(flags, list) and all(f in ('-O0', '-O1', '-O2', '-O3', '-Os') for f in flags), \
             f'{e["name"]}: source_cflags takes -O0 .. -O3 and -Os only'
-    return {s: sf.get(os.path.basename(s), []) for s in srcs}
+    return {s: cf + sf.get(os.path.basename(s), []) for s in srcs}
 
 
 def load_seqs(kind='seq'):
