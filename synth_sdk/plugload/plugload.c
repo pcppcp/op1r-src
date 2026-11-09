@@ -23,6 +23,7 @@ const op1_screen_t *op1_engine_screens[OP1_SLOTS];
 const char         *op1_engine_svgs[OP1_SLOTS];
 const op1_fx_t     *op1_fxs[OP1_SLOTS];
 uint8_t            op1_fx_stereo[OP1_SLOTS];
+const op1_engine_ext_t *op1_engine_exts[OP1_SLOTS];   /* extended engines (file flag OP1P_F_EXT), else 0 */
 uint8_t            op1_engine_coarse[OP1_SLOTS];   /* synth: knobs (bit k) turned in 8 steps (file flag) */   /* the FX has render_stereo (file flag OP1P_F_STEREO, or built in) */
 int                 op1_fx_count;
 const char         *op1_fx_names[OP1_SLOTS + 1];
@@ -483,6 +484,8 @@ static int load_one(void *db, const char *file)
             op1_engine_screens[n] = scr; op1_engine_svgs[n] = svg;
             if (v.hdr->flags & OP1P_F_USES_SAMPLE) reg_list(op1_sample_engine_names, name);
             op1_engine_coarse[n] = (uint8_t)OP1P_COARSE(v.hdr->flags);
+            op1_engine_exts[n] = (v.hdr->flags & OP1P_F_EXT) && !(v.hdr->flags & OP1P_F_INPUT)   /* extended engine (op1r 60) */
+                                 ? (const op1_engine_ext_t *)op1_engines[n] : 0;
             if (v.hdr->flags & OP1P_F_INPUT) {                       /* input engine (input/in_host.c): the extended entry */
                 extern const op1_input_engine_t *op1_input_engines[];
                 const op1_input_engine_t *ie = (const op1_input_engine_t *)op1_engines[n];

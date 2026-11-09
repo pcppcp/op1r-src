@@ -1,12 +1,13 @@
 {
   "name": "granular",
-  "author": "pcppcp",
+  "author": "pcppcp / displayname808; OP1R port",
   "kind": "synth",
   "order": 3,
   "symbol": "ENGINE_granular",
   "sources": [
     "granular.c",
-    "granular_dsp.S"
+    "grain_loop.S",
+    "keys.c"
   ],
   "defaults": [
     4000,
@@ -15,11 +16,14 @@
     12000
   ],
   "uses_sample": true,
+  "engine_ext": true,
   "screen": {
     "svg": "granular.svg",
     "symbol": "SCREEN_granular"
   },
   "source_cflags": {
-    "granular.c": ["-O3"]
+    "granular.c": [
+      "-O3"
+    ]
   }
 }

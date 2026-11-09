@@ -868,6 +868,47 @@ static int custom_engine_page(void)                /* custom engine index if its
     return SCREEN_TABLE[ITER_SCREEN_ID] == (void *)eng_scr[n] ? n : 0;
 }
 
+/* ---- extended engines (op1_engine_ext_t, op1r 60) ---- */
+extern const op1_engine_ext_t *op1_engine_exts[];
+int sb_is_open(int owner);
+static int cur_ext_engine(void)                    /* the current synth slot's engine if extended (synth mode), else 0 */
+{
+    if (CUR_MODE()) return 0;
+    int n = engine_index(op1_synth_knobs(*(volatile int *)0xFF8016D4 & 7)[4] - OP1_ENGINE_MAGIC);
+    return n && n < MAX_ENG && op1_engine_exts[n] ? n : 0;
+}
+static uint8_t ext_shift_on, ext_saved_page[4];   /* Shift pages active: op1_eng_page before */
+static void ext_shift_end(void)
+{
+    if (!ext_shift_on) return;
+    for (int k = 0; k < 4; k++) if (ext_shift_on >> k & 1) op1_eng_page[k] = ext_saved_page[k];
+    ext_shift_on = 0;
+}
+static int ext_engine_key(int code, int pressed)
+{
+    int n = cur_ext_engine();
+    if (!n) { ext_shift_end(); return 0; }
+    const op1_engine_ext_t *x = op1_engine_exts[n];
+    int page = custom_engine_page() == n && !sb_is_open(n) && !se_is_open();
+    if (code == 0x26) {                                          /* Shift: the declared knobs show page 2 meanwhile */
+        if (pressed && page && x->shift_page && !ext_shift_on) {
+            for (int k = 0; k < 4; k++) if (x->shift_page >> k & 1) { ext_saved_page[k] = op1_eng_page[k]; op1_eng_page[k] = 1; }
+            ext_shift_on = x->shift_page;
+        } else if (!pressed) ext_shift_end();
+    }
+    return x->key ? x->key(code, pressed, page) : 0;
+}
+static int ext_shift_word(int n, int knob)         /* page word a Shift turn edits (declared knobs), else -1 */
+{
+    const op1_engine_ext_t *x = n > 0 && n < MAX_ENG ? op1_engine_exts[n] : 0;
+    return x && (x->shift_page >> knob & 1) && *(volatile uint8_t *)0x01DD7F78 ? OP1_ENG_PAGE_WORD(knob) : -1;
+}
+void ext_engine_service(void)                      /* main loop (screens/overlay.c tool_service) */
+{
+    int n = cur_ext_engine();
+    if (n && op1_engine_exts[n]->service) op1_engine_exts[n]->service();
+}
+
 static int custom_fx_page(void)                    /* custom FX index if its page is on screen, else 0 */
 {
     if (CURRENT_SCREEN != FILTER_SCREEN_ID) return 0;
@@ -1025,6 +1066,7 @@ void key_event_hook(int code, int pressed)
     if (code == 0x0B && tape_shift_drop(pressed)) return;        /* Shift + Drop: all tracks as one */
     extern int tool_key(int code, int pressed);
     if (tool_key(code, pressed)) return;                         /* tool plugins (screens/overlay.c) */
+    if (ext_engine_key(code, pressed)) return;                   /* extended engines (op1r 60): key callback, Shift pages */
     if (code == 0x3E && tape_page()) {                         /* red press: add, Shift: remove */
         if (pressed) { if (*(volatile uint8_t *)0x01DD7F78) tm_remove(); else tm_add(); }
         return;
@@ -1219,6 +1261,8 @@ void midi_start_hook(void)
 static int eng_turn_word(int n, int knob)
 {
     uint8_t m = op1_engines[n]->press[knob];
+    int xw = ext_shift_word(n, knob);
+    if (xw >= 0) return xw;
     if ((m == OP1_PRESS_PAGE || op1_press_steps(m)) && op1_eng_page[knob]) return OP1_ENG_PAGE_WORD(knob);
     if (m == OP1_PRESS_SHIFT && knob < 3 && *(volatile uint8_t *)0x01DD7F78) return OP1_ENG_PAGE_WORD(knob);
     return -1;

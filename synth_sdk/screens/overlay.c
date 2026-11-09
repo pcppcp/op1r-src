@@ -94,6 +94,9 @@ void tool_service(void)                                         /* main loop: se
 {
     { extern void sb_service(void); sb_service(); }              /* sample browser: page after an engine load */
     for (int i = 0; i < op1_tool_count; i++) if (op1_tools[i]->service) op1_tools[i]->service();
+#ifndef OP1_HOST
+    { extern void ext_engine_service(void); ext_engine_service(); }   /* extended synth engines (dispatcher.c, op1r 60) */
+#endif
     if (!ov_obj) return;
     uintptr_t *obj = page_obj();
     uint32_t m = irq_off();

@@ -264,6 +264,7 @@ def gen_table(engs, fxs):
     eo, fo = by_order(engs), by_order(fxs)
     assert all(e['order'] < 32 for e in engs + fxs), 'built-in orders are 1..31 (32.. = plugin files)'
     assert not any(e.get('input_engine') for e in engs), 'input engines are plugin files only (input/in_host.c)'
+    assert not any(e.get('engine_ext') for e in engs), 'extended engines (engine_ext) are plugin files only'
     ptr = lambda lst, f: ''.join(', ' + f(e) if e else ', 0' for e in lst[1:])
     name = lambda lst: ''.join(json.dumps(e['name'] if e else '') + ', ' for e in lst[1:]) + '0'
     svg = lambda e: json.dumps(os.path.basename(e['screen']['svg'])) if e.get('screen') else '0'

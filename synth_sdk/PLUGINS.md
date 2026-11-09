@@ -51,6 +51,12 @@ Include only `op1_plugin.h`.
   and level included), computed just before `render`. Use it inside `render` to modulate the timbre (cutoff, FM depth,
   fold amount, …); the firmware still applies it to the volume afterwards. Only valid during `render`.
 
+**Extended synth engine** (op1r 60+, `"engine_ext": true` in plugin.json): the symbol is an `op1_engine_ext_t`, an
+`op1_engine_t` followed by `key(code, pressed, page)` (every key while the current synth slot uses the engine; return
+1 to consume), `service()` (main loop, while current) and `shift_page` (knobs, bit 0 = blue, that edit their page-2
+word while Shift is held, also next to a press page or the sample browser). Example: `plugins/granular` (freeze,
+sync toggle, Shift pages for shape and gain). Older cores ignore the extra fields.
+
 **Effect** (`op1_fx_t`): `init(pos)`, `render(pos, buf[64], params)` (in place).
 - `pos`: 0 synth FX, 1 drum FX, 2 master FX (mono sum, mixed back as the wet part). Keep all state per position
   (e.g. `static state_t st[3]`): the same FX can run in several positions at once.

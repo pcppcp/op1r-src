@@ -106,6 +106,24 @@ static inline int op1_press_steps(unsigned p) { return p >= 0x42 && p <= 0x7F ? 
 #define OP1_TRIM_ONE 8192
 static inline int32_t op1_preset_trim(const int16_t *params) { return params[7] > 0 ? params[7] : OP1_TRIM_ONE; }
 extern volatile uint8_t op1_eng_page[4];   /* synth engine screen: page 2 on per knob (blue..red) */
+/* Extended synth engine (op1r 60, plugin.json "engine_ext": true, plugin files only): the symbol is this struct.
+ *   key        every key event while the current synth slot (synth mode) uses this engine, before the core acts on
+ *              it; page = the engine's page is shown (no sample browser / editor over it). Return 1 to consume
+ *              (press and release are separate calls). Key-handler thread. May be 0.
+ *   service    main loop, regularly, while the current synth slot uses this engine (bounded work). May be 0.
+ *   shift_page knobs (bit k, blue = bit 0) that edit their page-2 word while Shift is held on the engine page, also
+ *              when their press is a page toggle or the sample browser (op1_eng_page[k] shows 1 meanwhile and is
+ *              restored on release). Red's page word is word 7, as OP1_PRESS_PAGE. */
+typedef struct {
+    op1_engine_t engine;
+    int  (*key)(int code, int pressed, int page);
+    void (*service)(void);
+    uint8_t shift_page;
+    uint8_t reserved[3];
+} op1_engine_ext_t;
+#ifndef OP1_HOST
+typedef char op1_engine_ext_size[(sizeof(op1_engine_ext_t) == 28) ? 1 : -1];
+#endif
 #ifndef OP1_HOST
 static inline int op1_shift_held(void) { return *(volatile uint8_t *)0x01DD7F78 != 0; }   /* any thread, read only */
 #endif

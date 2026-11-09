@@ -1,0 +1,1054 @@
+/* displayname808.granular: op1r's granular engine (pcppcp, https://github.com/pcppcp/op1r-src,
+ * synth_sdk/plugins/granular/granular.c, GPL-3.0) as an Opus 2 engine. Its sounds load: the engine claims op1r's
+ * type "granular" and its mark (0x5303), so a sound saved under op1r plays here unchanged.
+ *
+ * Grains of the slot's sample. 0.5.0 (core 2.10, Opus's sampler service): a sample engine (OPUS_ENGINE_SAMPLE). Its
+ * row in the engine list is a folder of the sampler's samples; mic or shift + mic samples straight into it; the
+ * sample is saved, loaded at the start and kept with its presets, as a sampler's is. A sampled sound plays at its own
+ * pitch on the key it was sampled at (the OS's base_freq); an op1r sound with no such key on C4, as op1r's.
+ * Up to 4 overlapping grains a voice, a Hann window, linear interpolation, 22.10 positions.
+ *   blue: position      green: grain size      orange: density
+ *   shift + blue: pitch   shift + green: grain shape   shift + orange: sample gain (0-4x, knob 7; 0 reads as 1x)
+ *   orange push: freeze, a sustain latch (0.9.0)
+ *
+ * From op1r (see README.md): the voice's state in the voice the core gives it; the velocity applied by the OS; the
+ * window a sin^2 table made at the start; each grain run over a stretch of samples at once (3.5x less CPU, the same
+ * output); the page new (four moving dotted waves under a thin dotted bar of the sample). No firmware addresses
+ * since 0.5.0: the sample comes from opus_sample. */
+#include "opus_plugin.h"
+#include "op1fw.h"
+
+typedef unsigned int u32;
+typedef int s32;
+typedef unsigned short u16;
+typedef unsigned char u8;
+
+#define BLOCK        128
+#define VOICES       6
+#define MAX_GRAINS   4
+#define FRAC         10                        /* position fraction bits */
+#define INC_C4       25480370u                 /* op1r's C4 step (2^32 a cycle) */
+#define WIN_BITS     11                        /* the window table: 2048 steps over the half sine */
+#define BAR_N        80                        /* the page's bar: a column every 4 units */
+
+/* ---------------------------------------------------------------- the slot's sample ---------------------------- */
+
+/* What the main pass found in the current slot's sample, a little at a time: its length (the recorded end when the
+ * OS knows it, else where the sound stops: the last sample above a small threshold, as op1r's peak table found it)
+ * and the bar's peaks. The voices and the page read it; seq changes when it is new. */
+static struct {
+    volatile s32 len;
+    volatile u32 base;                         /* the key it was sampled at, milli-Hz (0: never sampled) */
+    volatile int slot;
+    short peak[BAR_N];
+    short top;                                 /* the loudest peak (the bar's full height) */
+} S = { 0, 0, -1, { 0 }, 1 };
+
+static const short *slot_sample(int slot) { unsigned frames; return opus_sample(slot, &frames); }
+
+static void wfast_sync(void);
+static void freeze_main(void);
+static int sync_of_sound(void);
+static volatile u8 sync_on;                    /* clock sync (0.10.0, below) */
+
+/* the main pass: a signature of the slot's sample each pass; on a change, a scan in steps of 16,384 samples */
+static void scan(void)
+{
+    static u32 sig_seen = 1;
+    static int step = -1, sslot;               /* -1: idle; else the scan's place, in steps */
+    static s32 last;                           /* the last loud sample found so far (from the end) */
+    static const short *sdata;
+    static u32 sbase, send, sframes;
+    const int slot = opus_sound_slot(0);
+    unsigned frames;
+    wfast_sync();
+    freeze_main();
+    sync_on = (u8)sync_of_sound();              /* the sound's own switch: a new sound or preset brings its own */
+    const short *d = opus_sample(slot, &frames);
+    unsigned end;
+    const u32 base = opus_sample_base(slot, &end);
+    if (!d || !frames) { S.len = 0; S.slot = slot; return; }
+    u32 sig = (u32)slot * 2654435761u ^ (u32)(unsigned long)d ^ base * 40503u ^ end * 9973u;
+    for (unsigned i = 0; i < 16; i++) sig = sig * 31u + (u16)d[(frames - 1) * i / 15];    /* a recording changes these */
+    if (step < 0) {
+        if (sig == sig_seen) return;
+        sig_seen = sig; sslot = slot; sdata = d; sbase = base; send = end; sframes = frames;
+        step = 0; last = -1;
+    } else if (slot != sslot || d != sdata) { step = -1; sig_seen = 1; return; }   /* moved on: start again */
+    /* the length: the recorded end, or the last sample above 96 (searched from the end, a step a pass) */
+    const s32 n = (s32)sframes;
+    if (!send && last < 0) {
+        const s32 hi = n - 1 - step * 16384, lo = hi - 16383 < 0 ? 0 : hi - 16383;
+        for (s32 i = hi; i >= lo; i--) if (sdata[i] > 96 || sdata[i] < -96) { last = i; break; }
+        if (last < 0 && lo > 0) { step++; return; }
+        if (last < 0) last = 0;
+    }
+    const s32 len = send ? (s32)(send > sframes ? sframes : send)                  /* the recorded end, exactly */
+                  : last < 255 ? 0 : ((last + 256) & ~255) > n ? n : (last + 256) & ~255;   /* op1r's 256s */
+    /* the bar's peaks over the length (every 4th sample: enough for a picture) */
+    int top = 1;
+    for (int c = 0; c < BAR_N; c++) {
+        const s32 a0 = (s32)((long long)len * c / BAR_N), a1 = (s32)((long long)len * (c + 1) / BAR_N);
+        int m = 0;
+        for (s32 i = a0; i < a1; i += 4) { const int v = sdata[i] < 0 ? -sdata[i] : sdata[i]; if (v > m) m = v; }
+        S.peak[c] = (short)(m > 32767 ? 32767 : m);
+        if (m > top) top = m;
+    }
+    S.top = (short)(top > 32767 ? 32767 : top);
+    S.base = sbase; S.len = len; S.slot = sslot;
+    step = -1;
+}
+
+/* the current slot's usable length, as the main pass left it (0 until it has looked) */
+static s32 sample_len(int slot) { return S.slot == slot ? S.len : 0; }
+
+/* ---------------------------------------------------------------- the voices ---------------------------------- */
+
+typedef struct {
+    u32 pos;            /* 22.10 sample position */
+    u32 rate;           /* 22.10 a sample */
+    u32 wph;            /* window phase, 0..2^31 = the half sine */
+    u32 winc;           /* its step (0: free) */
+    s32 left;           /* the samples it still sounds (worked out when it starts) */
+    s32 sh;             /* its shape (0.10.0): kept for its life, so a shape change never cuts into a grain */
+} grain_t;
+
+typedef struct {
+    grain_t g[MAX_GRAINS];
+    s32 next;           /* samples to the next grain */
+    s32 len;            /* the recording's usable length */
+    u32 rng;
+    s32 index;          /* 0-5 */
+    volatile u32 blocks;    /* renders: the page shows a voice's grains only while it renders */
+    /* 0.8.6: what a block works out from the knobs and the pitch, kept while they stay the same (they mostly do): the
+     * software divisions and 64-bit products it took cost more than the grains of a sparse voice */
+    u32 k_size;         /* (u16)par[1] | (u16)par[3] << 16 the values below are for (0xFFFFFFFF: none yet) */
+    s32 size, interval, gain;
+    u32 winc, life;     /* a grain's window step and its life in samples, from the size */
+    u32 r_pitch, r_base;    /* pitch[0] and the base the rate is for */
+    s32 r_st;           /* and the semitones (-1000: none yet) */
+    u32 rate;
+    u32 k_sync;         /* 0.10.0: the clock sync the size is for: 0 off, else the tempo << 4 | the step + 1 */
+} gvoice_t;
+
+static gvoice_t *voice_of[VOICES];
+/* the block's sum of a voice's grains: in fast memory when there is room (0.8.6; every grain adds into it every
+ * sample, and from ordinary memory its 16 lines missed the cache each block), else here */
+static s32 acc_mem[BLOCK + 1];
+static s32 *acc_buf = acc_mem + 1;      /* a word before it (0.9.3): grain_loop_asm's first store is acc[-1], its own value */
+static short win2[1 << WIN_BITS];              /* sin^2(pi t), Q15: Hann, the first shape */
+/* the grain shapes (0.6.0, knob 6; 0 = Hann, so every older sound keeps its sound) */
+#define SHAPES 6
+static short win_x[SHAPES - 1][1 << WIN_BITS];  /* gauss, tukey, triangle, pluck, swell */
+static const short *const WIN[SHAPES] = { win2, win_x[0], win_x[1], win_x[2], win_x[3], win_x[4] };
+static const char *const SHAPE_NAME[SHAPES] = { "hann", "gauss", "tukey", "tri", "pluck", "swell" };
+static inline int shape_of(s32 k6) { return (int)(((u32)(k6 < 0 ? 0 : k6) * SHAPES) >> 15); }
+/* The window in the CPU's fast memory (0.7.1): the audio block reads it at a stride (a short grain steps through the
+ * whole 4 KB table in a few samples), and from the ordinary memory every line of it was a cache miss: with the grains
+ * short and dense that was half the engine's cost. The main pass copies the chosen shape into it when the shape
+ * changes; until then the table in ordinary memory is read. */
+static short *wfast;
+static volatile int wshape = -1;
+static struct opl_self *me;
+/* pitch (0.8.0, shift + blue, knob 5): -24 to +24 semitones, 512 a semitone around 16384; 0 (every older sound) is
+ * none. The grains' rate times 2^(st/12), Q16 from a table made at the start. */
+#define PITCH_ST 24
+static u32 semi_q16[2 * PITCH_ST + 1];
+static inline int pitch_st(s32 k5)
+{
+    if (k5 <= 0) return 0;
+    const s32 st = (k5 - 16384 + (k5 >= 16384 ? 256 : -256)) / 512;
+    return st < -PITCH_ST ? -PITCH_ST : st > PITCH_ST ? PITCH_ST : (int)st;
+}
+
+static void wfast_sync(void)                                            /* main pass: the shape's table into fast memory */
+{
+    if (!wfast) return;
+    short kk[8];
+    opus_engine_knobs(kk);
+    const int sh = shape_of(kk[6]);
+    if (sh == wshape) return;
+    wshape = -1;
+    __asm__ __volatile__("" ::: "memory");                              /* 0.8.6: the copy stays between the two */
+    for (int i = 0; i < (1 << WIN_BITS); i++) wfast[i] = WIN[sh][i];
+    __asm__ __volatile__("" ::: "memory");
+    wshape = sh;
+}
+
+static inline u32 rnd(gvoice_t *v) { v->rng = v->rng * 1664525u + 1013904223u; return v->rng; }
+static inline short sat16(s32 x)                                    /* as a min and a max: no branch (0.8.7) */
+{
+    x = x < 32767 ? x : 32767;
+    x = x > -32768 ? x : -32768;
+    return (short)x;
+}
+/* floor(x g / 2^sh) without overflow, for 0 <= g < 2^15 and |x >> sh| < 2^15: x's high part times g, plus its low
+ * part's product shifted (x x g = (x >> sh) x g x 2^sh + (x & mask) x g, the low part 0 or more); two 16 x 16 products */
+static inline s32 mul_shr_s(s32 x, short g, int sh)
+{
+    return (s32)(short)(x >> sh) * g + (((s32)(short)(x & ((1 << sh) - 1)) * g) >> sh);
+}
+
+static void v_init(void *voice, int index)
+{
+    gvoice_t *v = voice;
+    for (int i = 0; i < MAX_GRAINS; i++) v->g[i].winc = 0;
+    v->next = 0; v->len = 0; v->rng = 0x9E3779B9u * (u32)(index + 1); v->index = index; v->blocks = 0;
+    v->k_size = 0xFFFFFFFFu; v->r_st = -1000;                           /* nothing kept yet */
+    if (index >= 0 && index < VOICES) voice_of[index] = v;
+}
+
+static void v_note_on(void *voice, const short *knobs)
+{
+    gvoice_t *v = voice;
+    (void)knobs;
+    for (int i = 0; i < MAX_GRAINS; i++) v->g[i].winc = 0;
+    v->next = 0;
+    v->len = sample_len(opus_sound_slot(0));
+    v->rng ^= (u32)(v->index + 1) * 2654435761u + 12345u;
+}
+
+static void v_release(void *voice, const short *knobs) { (void)voice; (void)knobs; }
+
+/* ---------------------------------------------------------------- the cpu meter (0.9.5) --------------------- */
+
+/* Setting "cpu meter" on: the audio work timed by the CPU's cycle counter, a block at a time, and shown on the page:
+ * now, a second's average and the worst block since it went on, and what that worst block did. Off (the default):
+ * a test of one byte where it would time. */
+static volatile u8 meter;
+enum { M_TOTAL, M_LOOP, M_SAMPLES, M_LINES, M_SPAWNS, M_RECALC, M_SLOWWIN, M_VOICES, M_N };
+static u32 m_cur[M_N], m_worst[M_N], m_last[M_N];   /* the audio writes them; the page reads (a torn read: a frame) */
+static u32 m_acc, m_n, m_avg;
+static inline u32 cyc(void)
+{
+#ifdef __bfin__
+    u32 c;
+    __asm__ __volatile__("%0 = CYCLES;" : "=d"(c));
+    return c;
+#else
+    return 0;
+#endif
+}
+static void meter_reset(void) { for (int i = 0; i < M_N; i++) m_cur[i] = m_worst[i] = m_last[i] = 0; m_acc = m_n = m_avg = 0; }
+
+static void on_setting(const char *name, int value)                    /* the key thread: the meter on or off */
+{
+    if (name[0] == 'c') { meter_reset(); meter = (u8)(value == 1); }
+}
+
+/* floor(n / d) for n < d x 2^32 (the quotient fits 32 bits), a bit a step (0.9.5): the same as the 64-bit division,
+ * which libgcc does in ~2,800 cycles (458 instructions and up to 17 calls) and this in about 32 x 5 */
+static u32 div64_32(unsigned long long n, u32 d)
+{
+    u32 hi = (u32)(n >> 32), lo = (u32)n, q = 0;
+    if (hi >= d) return (u32)(n / d);                                   /* never here: the rate's quotient is small */
+    for (int i = 0; i < 32; i++) {
+        const u32 top = hi >> 31;
+        hi = hi << 1 | lo >> 31;
+        lo <<= 1;
+        q <<= 1;
+        if (top || hi >= d) { hi -= d; q |= 1; }
+    }
+    return q;
+}
+
+/* (u64)a * b >> sh as op1r's 64-bit products had it, for a < 2^16 and b < 2^31 >> 0, in 32-bit steps: a x (b's high
+ * part) plus the low part's product shifted (the same bits; the Blackfin has no 64-bit multiply, __muldi3 is a call) */
+static inline u32 mul_shr(u32 a, u32 b, int sh, u32 lomask) { return a * (b >> sh) + ((a * (b & lomask)) >> sh); }
+
+static void spawn(gvoice_t *v, const short *par, u32 rate, s32 size, int shp)
+{
+    int i;
+    for (i = 0; i < MAX_GRAINS; i++) if (!v->g[i].winc) break;
+    if (i == MAX_GRAINS) return;                                        /* all busy: this grain is skipped */
+    if (meter) m_cur[M_SPAWNS]++;
+    grain_t *g = &v->g[i];
+    const s32 len = v->len;
+    s32 start = (s32)((u32)len < 0x80000000u ? mul_shr((u16)par[0], (u32)len, 15, 0x7FFF)
+                                              : (((unsigned long long)(u16)par[0] * (u32)len) >> 15));
+    const s32 span = (s32)((u32)size < (1u << 22) ? (size * (rate >> FRAC) + ((size * (rate & ((1 << FRAC) - 1))) >> FRAC))
+                                                  : (((unsigned long long)size * rate) >> FRAC));   /* the frames a grain reads */
+    start -= span >> 1;                                                 /* centred: the window's peak lands on the position */
+    const s32 spray = (s32)(((u32)par[2] * 66150u) >> 15);             /* up to 1.5 s */
+    if (spray) start += (s32)(rnd(v) % (u32)(2 * spray + 1)) - spray;
+    /* kept inside the sample, whole (0.7.2): near either end the grain moves in rather than wrapping round to the
+     * other end (heard as a click at position 0, and drawn at the end) or being cut off before its window ends */
+    if (start > len - 2 - span) start = len - 2 - span;
+    if (start < 0) start = 0;
+    u32 r = rate;                                                       /* +-1 % detune with the spray up */
+    if (par[2] > 4096) {
+        const s32 dt = (s32)(rnd(v) >> 22) - 512;
+        r = (u32)((s32)rate + ((s32)(rate >> 10) * dt * (par[2] >> 8) >> 12));
+    }
+    g->pos = (u32)start << FRAC;
+    g->rate = r;
+    g->wph = 0;
+    g->winc = v->winc;                                                  /* 2^31 / size: the window spans size samples */
+    g->sh = shp;
+    /* its life, once (0.1.0 tested both ends every sample): the window's end, ceil(2^31 / winc) samples (v->life), or
+     * the recording's, the samples while pos >> FRAC < len - 1: ceil(d / r), d the room left. That is less than the
+     * life only when d <= (life - 1) x r, so the division is done only then (0.8.6: near the sample's end) */
+    const s32 life = (s32)v->life;
+    const u32 end = (u32)(len - 1) << FRAC;
+    if (g->pos >= end) g->left = 0;
+    else {
+        const u32 d = end - g->pos, l1 = (u32)life - 1;
+        if (r < 65536u && l1 < 65536u && d > l1 * r) g->left = life;   /* l1 x r < 2^32: exact */
+        else { const s32 room = (s32)((d + r - 1) / r); g->left = room < life ? room : life; }
+    }
+    if (!g->left) g->winc = 0;
+}
+
+/* a grain over n samples (n <= left) added into acc */
+/* the loop by hand (grain_loop.S, 0.9.3): the same numbers as grain_c below in 16 instructions a sample for its 31;
+ * used only when the start's self-test found the two agree on every sample (use_asm) */
+struct gk { u32 pos, rate, wph, winc; const short *data; const short *win; s32 *acc; s32 n; };
+#ifdef __bfin__
+void grain_loop_asm(struct gk *k);
+#endif
+static u8 use_asm;
+
+static __attribute__((noinline)) void grain_c(grain_t *g, const short *data, s32 *acc, int n, const short *win)
+{
+    u32 pos = g->pos, wph = g->wph;
+    const u32 rate = g->rate, winc = g->winc;
+    /* 0.8.6, the same output in fewer cycles:
+     * - the interpolation as (a x 1024 + b x f - a x f) >> 10: the same number as a + ((b - a) x f >> 10), but 16 x 16
+     *   products (a cycle each) for a 32 x 32 one (several on the Blackfin; b - a needs 17 bits);
+     * - the window's product 16 x 16 too: the interpolated sample lies between a and b, so it is a short;
+     * - the next sample's addresses worked out a sample ahead: an address register loaded from a data register stalls
+     *   the instructions just after it that use it, twice a sample before */
+    const short *p = data + (pos >> FRAC), *w = win + (wph >> (31 - WIN_BITS));
+    s32 *const end = acc + n;
+    while (acc != end) {
+        const short a = p[0], b = p[1], ww = *w;
+        const short f = (short)(pos & ((1 << FRAC) - 1));
+        pos += rate;
+        wph += winc;
+        p = data + (pos >> FRAC);
+        w = win + (wph >> (31 - WIN_BITS));
+        const short s = (short)(((s32)a * (1 << FRAC) + (s32)b * f - (s32)a * f) >> FRAC);
+        *acc++ += ((s32)s * ww) >> 15;
+    }
+    g->pos = pos; g->wph = wph;
+}
+
+/* a grain over n samples (1 <= n <= left) added into acc */
+static void grain_run(grain_t *g, const short *data, s32 *acc, int n, const short *win)
+{
+    u32 t0 = 0;
+    const u32 p0 = g->pos;
+    if (meter) t0 = cyc();
+#ifdef __bfin__
+    if (use_asm) {
+        struct gk k = { g->pos, g->rate, g->wph, g->winc, data, win, acc, n };
+        grain_loop_asm(&k);
+        g->pos = k.pos; g->wph = k.wph;
+    } else
+#endif
+        grain_c(g, data, acc, n, win);
+    if (meter) {                                                        /* its time, samples and sample-memory lines */
+        m_cur[M_LOOP] += cyc() - t0;
+        m_cur[M_SAMPLES] += (u32)n;
+        m_cur[M_LINES] += (((g->pos >> FRAC) + 1) >> 4) - ((p0 >> FRAC) >> 4) + 1;
+    }
+    if (!(g->left -= n)) g->winc = 0;                                   /* the grain is done */
+}
+
+/* The start's self-test of grain_loop_asm against grain_c (0.9.3): every grain shape, lengths 1 to 128 (the loop's
+ * one-sample path too), slow to fast rates, the window from both ends, full-scale and edge samples; the sums and
+ * the positions compared word for word. Any difference, and the engine keeps the C loop. */
+static int asm_selftest(void)
+{
+#ifdef __bfin__
+    static short td[512];
+    static s32 ta[BLOCK + 1], tb[BLOCK + 1];
+    u32 x = 0x2545F491u;
+    for (int i = 0; i < 512; i++) {
+        x = x * 1664525u + 1013904223u;
+        td[i] = (short)(i % 37 == 0 ? 32767 : i % 41 == 0 ? -32768 : (s32)(x >> 16) - 32768);
+    }
+    static const s32 NS[] = { 1, 2, 3, 7, 64, 127, 128 };
+    static const u32 RATES[] = { 16, 300, 512, 1023, 1024, 3000 };
+    for (int sh = 0; sh < SHAPES; sh++)
+        for (unsigned ni = 0; ni < sizeof NS / sizeof NS[0]; ni++)
+            for (unsigned ri = 0; ri < sizeof RATES / sizeof RATES[0]; ri++) {
+                const s32 n = NS[ni];
+                const u32 rate = RATES[ri];
+                if ((unsigned long long)rate * (u32)n > 500ull << FRAC) continue;    /* within the test's 512 samples */
+                const u32 size = (u32)n + 7 * ri + 441 * (ni & 1);
+                grain_t g = { 777u + 1000u * ri, rate, 0, 0x80000000u / size, n, 0 };
+                if (ni & 2) g.wph = 0x80000000u - g.winc * (u32)n;      /* the window's far end */
+                grain_t h = g;
+                const int off = 1 + (int)(ni * 5 % (BLOCK + 1 - n));
+                for (int i = 0; i <= BLOCK; i++) ta[i] = tb[i] = (s32)(i * 40503u) - 2000000;
+                struct gk k = { g.pos, g.rate, g.wph, g.winc, td, WIN[sh], ta + off, n };
+                grain_loop_asm(&k);
+                grain_c(&h, td, tb + off, n, WIN[sh]);
+                if (k.pos != h.pos || k.wph != h.wph) return 0;
+                for (int i = 0; i <= BLOCK; i++) if (ta[i] != tb[i]) return 0;
+            }
+    return 1;
+#else
+    return 0;
+#endif
+}
+
+/* the block out, through the gains (in a function of its own: inside v_render the compiler, seeing the gains are
+ * small, made the products 32 x 32 again) */
+static __attribute__((noinline)) void gains_out(short *out, s32 *acc, short gain, short sg)
+{
+    /* each sum cleared as it is read (0.8.8, as op1r's): the sum is ready at 0 for the next voice without a pass of
+     * its own, 128 stores less a voice */
+    if (sg == 8192)                                                     /* 1x: (x x 8192) >> 13 is x */
+        for (int n = 0; n < BLOCK; n++) { const s32 a = acc[n]; acc[n] = 0; out[n] = sat16(mul_shr_s(a, gain, 15)); }
+    else
+        for (int n = 0; n < BLOCK; n++) { const s32 a = acc[n]; acc[n] = 0; out[n] = sat16(mul_shr_s(mul_shr_s(a, gain, 15), sg, 13)); }
+}
+
+/* ---------------------------------------------------------------- clock sync (0.10.0) ------------------------ */
+
+/* White push on the T1 page: the grain size in time with the OP-1's tempo (core 2.21's tempo service). Green then
+ * steps through note lengths instead of milliseconds: the middle of its turn a beat (a quarter note), turned down
+ * divisions of it, up multiples. Kept in the sound (its engine data), so a preset brings it back. */
+#define SYNC_STEPS 15
+static const u16 SYNC_TICKS[SYNC_STEPS] = {                             /* 96 ticks a beat */
+    6, 8, 12, 16, 24, 32, 48, 96, 192, 288, 384, 576, 768, 1152, 1536 };
+static const char *const SYNC_NAME[SYNC_STEPS] = {
+    "1/64", "1/32t", "1/32", "1/16t", "1/16", "1/8t", "1/8", "1/4", "1/2", "3/4", "1 bar", "1.5 bar", "2 bar",
+    "3 bar", "4 bar" };
+static volatile u32 tempo_mbpm = 120000;        /* the tempo, thousandths of a BPM, as the last block found it */
+static inline int sync_step(s32 k1)
+{
+    const int i = (int)(((u32)(k1 < 0 ? 0 : k1) * SYNC_STEPS) >> 15);
+    return i >= SYNC_STEPS ? SYNC_STEPS - 1 : i;
+}
+/* the step's length in samples: ticks x 44100 x 60 / (bpm x 96) = ticks x 27,562,500 / mbpm; at most 12 seconds */
+static s32 sync_size(int step, u32 mbpm)
+{
+    const u32 s = div64_32((unsigned long long)SYNC_TICKS[step] * 27562500u, mbpm);
+    return s < 64 ? 64 : s > 529200 ? 529200 : (s32)s;
+}
+static void tempo_read(void)                    /* any thread: the tempo now, 120 BPM until a MIDI clock has one */
+{
+    struct opus_tempo t = { sizeof t, 0, 0, 0, 0, 0, 0 };
+    opus_tempo(&t);
+    tempo_mbpm = t.mbpm >= 20000 && t.mbpm <= 400000 ? t.mbpm : t.mbpm ? (t.mbpm < 20000 ? 20000 : 400000) : 120000;
+}
+/* the sound's engine data: "gs" and the switch (0.10.0); no data, or another engine's, is off */
+static int sync_of_sound(void)
+{
+    unsigned char d[3];
+    return opus_engine_data(d, 3) == 3 && d[0] == 'g' && d[1] == 's' && d[2] == 1;
+}
+
+static void v_render(void *voice, short *out, const short *par, const unsigned *pitch)
+{
+    gvoice_t *v = voice;
+    const u32 t_start = meter ? cyc() : 0;
+    const int slot = opus_sound_slot(0);
+    const short *data = slot_sample(slot);
+    v->blocks++;
+    v->len = sample_len(slot);                                          /* every block: a new recording changes it */
+    if (!data || v->len < 256) {                                        /* nothing sampled (or not looked at) yet */
+        for (int n = 0; n < BLOCK; n++) out[n] = 0;
+        return;
+    }
+    /* the keyboard's pitch, steady a block: the sample's own speed on the key it was sampled at (rate 512 = half a
+     * sample a 88.2 kHz output sample, its speed: rate = 512 x f / base, f = step x 88200 / 2^32 Hz, base in
+     * milli-Hz), else on C4 as op1r's */
+    const u32 base = S.base;
+    const int st = pitch_st(par[5]);
+    if (pitch[0] != v->r_pitch || base != v->r_base || st != v->r_st) {    /* 0.8.6: worked out on a change only */
+        u32 rate = base ? div64_32(((unsigned long long)pitch[0] * 11025000u) >> 20, base) : pitch[0] / (INC_C4 >> FRAC);
+        if (meter) m_cur[M_RECALC]++;
+        if (st) rate = (u32)(((unsigned long long)rate * semi_q16[st + PITCH_ST]) >> 16);
+        if (rate < 16) rate = 16;
+        v->rate = rate; v->r_pitch = pitch[0]; v->r_base = base; v->r_st = st;
+    }
+    const u32 rate = v->rate;
+    const u32 ks = (u32)(u16)par[1] | (u32)(u16)par[3] << 16;
+    const u32 ksync = sync_on ? tempo_mbpm << 4 | (u32)(sync_step(par[1]) + 1) : 0;
+    if (ks != v->k_size || ksync != v->k_sync) {                        /* 0.8.6: as the rate */
+        const s32 size = ksync ? sync_size(sync_step(par[1]), tempo_mbpm) : 441 + (s32)(((u32)par[1] * 16000u) >> 15);
+        const s32 ovl8 = 4 + (par[3] >> 10);                            /* overlap x 8: 4..35 */
+        s32 interval = size * 8 / ovl8;
+        if (interval < 32) interval = 32;
+        s32 gain = ovl8 <= 8 ? 32767 : 32767 * 8 / ovl8 + 6000;        /* for the overlapping grains */
+        if (gain > 32767) gain = 32767;
+        v->size = size; v->interval = interval; v->gain = gain;
+        v->winc = 0x80000000u / (u32)size;
+        v->life = (0x80000000u + v->winc - 1) / v->winc;
+        v->k_size = ks; v->k_sync = ksync;
+        if (meter) m_cur[M_RECALC]++;
+    }
+    const s32 size = v->size, interval = v->interval, gain = v->gain;
+    const s32 sg = par[7] > 0 ? par[7] : 8192;                         /* the sample gain, Q13 */
+    const int shp = shape_of(par[6]);
+    const int ws = wshape;                                              /* the shape in fast memory now */
+    if (meter && !(wfast && ws == shp)) m_cur[M_SLOWWIN]++;             /* the window from ordinary memory */
+    s32 next = v->next;
+    s32 *const acc = acc_buf;           /* the voices render one after another; it is 0 here: gains_out leaves it so */
+    /* in stretches between grain starts: a grain starts where the countdown runs out, at that stretch's first
+     * sample; every grain then runs over the whole stretch at once */
+    for (int n = 0; n < BLOCK; ) {
+        if (--next <= 0) { spawn(v, par, rate, size, shp); next = interval; }
+        const int seg = next < BLOCK - n ? next : BLOCK - n;
+        for (int i = 0; i < MAX_GRAINS; i++) {
+            grain_t *g = &v->g[i];
+            if (g->winc) grain_run(g, data, acc + n, g->left < seg ? g->left : seg,
+                                   wfast && ws == g->sh ? wfast : WIN[g->sh]);   /* the shape it started with */
+        }
+        next -= seg - 1;
+        n += seg;
+    }
+    /* the gains as op1r's, (acc x gain) >> 15, then (x sg) >> 13, but never wrapping (0.8.7): loud grains overlapping
+     * sum past 16 bits, and the 32-bit products wrapped round (a sign-flipped crackle where it should clip). Now in
+     * exact halves (mul_shr_s), the same numbers wherever the products fitted, the true ones where they did not */
+    gains_out(out, acc, (short)gain, (short)sg);                        /* both 1-32767 */
+    v->next = next;
+    if (meter) { m_cur[M_TOTAL] += cyc() - t_start; m_cur[M_VOICES]++; }
+}
+
+/* ---------------------------------------------------------------- the page ------------------------------------ */
+
+#define U(v) ((v) << 8)                         /* units x 256 */
+#define C_POS   OPUS_RGB(0x4D9EFF)
+#define C_SIZE  OPUS_RGB(0x00ED95)
+#define C_WHITE OPUS_RGB(0xFFFFFF)
+#define C_GRAIN OPUS_RGB(0xFF3A5D)
+/* the columns' text: colour ids (page text takes no RGB); the white column in the font's white, as the white wave */
+static const int TXT4[4] = { OPUS_COLOR_E(0), OPUS_COLOR_E(1), OPUS_COLOR_TEXT, OPUS_COLOR_E(3) };
+/* shift + an encoder: green the grain shape, orange the sample gain (blue, white none) */
+static const int SHIFT_KNOB[4] = { 5, 6, -1, 7 };
+/* when each encoder was last turned or pushed (ms): its label and value fade away when not in use */
+/* Use of an encoder: the key thread sets poke[i] at every turn (opus_on_knob, any page, shift or not) and push; the
+ * page stamps it in its own time, tenths of a second from the OP-1's clock (opus_clock), the frames between its
+ * seconds dividing each second. Nothing shows until an encoder is used. */
+static volatile u8 poke[4];
+#define SHOW_T  30                             /* tenths of a second shown after a use, then gone (no dim) */
+
+static u32 tenths(void)
+{
+    static u32 secs, fr, fps = 30, quiet;
+    static int last = -1;
+    struct opus_clock c;
+    opus_clock(&c);
+    if (c.second != last) {                                             /* a new second: its frames counted */
+        if (last >= 0) { ++secs; if (fr >= 5 && fr < 1000) fps = fr; }
+        last = c.second; fr = 0; quiet = 0;
+    } else if (++quiet > 4 * fps) {                                     /* the clock still: count frames alone */
+        ++secs; quiet = 0; fr = 0;
+    }
+    const u32 f = fr < fps ? fr : fps - 1;
+    ++fr;
+    return secs * 10 + f * 10 / fps;
+}
+
+static int on_knob(int index, short *delta)
+{
+    (void)delta;
+    poke[index & 3] = 1;
+    return 0;                                                           /* never taken: the turn goes on */
+}
+
+static void line(int x0, int y0, int x1, int y1, int w, int c) { opus_page_stroke_line(x0, y0, x1, y1, w, c); }
+
+
+static char *num(char *p, s32 v, int dec)      /* v in 1/10^dec: 125, 2 -> "1.25" */
+{
+    char t[12]; int n = 0;
+    do { t[n++] = (char)('0' + v % 10); v /= 10; } while (v || n <= dec);
+    while (n) { *p++ = t[--n]; if (n == dec && dec) *p++ = '.'; }
+    return p;
+}
+static char *cat(char *p, const char *s) { while (*s) *p++ = *s++; return p; }
+static void ms_text(char *s, s32 samples)      /* "120ms", "1.25s" */
+{
+    const s32 ms = (samples * 10 + 220) / 441;
+    char *p = ms < 1000 ? cat(num(s, ms, 0), "ms") : cat(num(s, ms / 10, 2), "s");
+    *p = 0;
+}
+
+/* the page: four dotted waves, one an encoder, each moving with what its knob does (in the waveform's place);
+ * the labels and values under them. The waves drift while a note plays and lie still in silence.
+ *   blue  (position): the wave slides sideways as the position moves; the live grains ride it as white marks, at
+ *                     their place in the recording, as tall as their window is now
+ *   green (size):     its waves as long as the grains
+ *   orange (density): its dots as close together as the grains overlap; on page 2 its height is the sample gain
+ * Above them, the recording as a thin dotted bar, the position in blue (0.4.0). */
+#define SIN_N   256
+static short sin_t[SIN_N];                     /* sin(2 pi i / 256), x 4096 */
+#define WAVE_Y0 47                             /* the first wave's middle: the four centred on y 74, the window's middle (2-146) */
+#define WAVE_DY 18                             /* the waves' spacing */
+#define AMP     3                              /* a wave's height, units */
+#define COL_X0  16                             /* the four columns: 80 units apart, the same margin both sides */
+#define COL_DX  80
+
+static void dot(int x, int y, int c) { line(x - 0x20, y, x + 0x20, y, 0x1C0, c); }
+static void dot_s(int x, int y, int c) { line(x - 0x18, y, x + 0x18, y, 0x170, c); }   /* the bar's, smaller */
+#define C_SIL    OPUS_RGB(0xC4C6CC)            /* the recording's bar: a light grey (0.8.1: was the kit's dim grey) */
+#define BAR_Y    14                            /* the bar's middle, above the waves */
+#define BAR_H    5                             /* its half height at the loudest */
+
+/* A wave's y (units x 256): ph the phase there in 1/65536 of a cycle, amp units x 256; linear between the table's
+ * steps (0.8.0: the waves move by less than a step a frame, so each frame is a little different, never a jump) */
+static int wave_at(int y0, u32 ph, int amp)
+{
+    const int i = (int)(ph >> 8) & (SIN_N - 1), f = (int)(ph & 255);
+    const int sn = sin_t[i] + (((sin_t[(i + 1) & (SIN_N - 1)] - sin_t[i]) * f) >> 8);
+    return U(y0) + amp * sn / 4096;
+}
+
+/* the grain shape's value (Q15) at t (1/65536 of the grain), a shape change crossfaded over a few frames */
+static int shape_prev, shape_now, shape_mix = 256;
+static int win_at(u32 t)
+{
+    const int i = (int)((t & 0xFFFF) >> (16 - WIN_BITS));
+    const int a = WIN[shape_now][i];
+    if (shape_mix >= 256) return a;
+    return WIN[shape_prev][i] + (((a - WIN[shape_prev][i]) * shape_mix) >> 8);
+}
+
+/* the page's clock (0.8.2): the engine's block call counts the audio blocks (64 samples at 44.1 kHz: 689 a second)
+ * while its sound is the current one, so the page moves by time, not by how often the OS redraws it (it redraws
+ * faster while a knob turns: everything sped up, then fell back) */
+static volatile u32 ticks, ours_at;
+static volatile u32 all_blocks;                /* every audio block (opus_on_block), ours or not */
+static void e_block(short *buf)
+{
+    (void)buf;
+    ticks++; ours_at = all_blocks;
+    tempo_read();                               /* for the next block's sizes (0.10.0) */
+    if (meter) {                                /* after the voices' renders: this block's figures done */
+        if (m_cur[M_TOTAL] > m_worst[M_TOTAL]) for (int i = 0; i < M_N; i++) m_worst[i] = m_cur[i];
+        m_acc += m_cur[M_TOTAL];
+        if (++m_n == 512) { m_avg = m_acc >> 9; m_acc = m_n = 0; }     /* 512 blocks: 0.74 s */
+        for (int i = 0; i < M_N; i++) { m_last[i] = m_cur[i]; m_cur[i] = 0; }
+    }
+}
+static void on_block(void) { all_blocks++; }
+
+/* ---------------------------------------------------------------- freeze (0.9.0) ----------------------------- */
+
+/* Orange push on the T1 page: freeze, a sustain latch. While it is on, the key filter (first in line, before the
+ * OS) holds back the release of every keyboard note, so the notes held when it went on, and every note played
+ * after, keep sounding; every knob still works on them. A latched key pressed again stays latched (its press and
+ * release both held back). Off: the held releases are sent on (opus_key_post), in pairs with their presses, so the
+ * OS's envelope lets them go as usual. Only while the synth plays a granular sound: on the drum, or another
+ * engine's sound, freeze goes off by itself. Notes from MIDI or a sequencer do not pass the keys: not latched. */
+static const u8 NOTE_KEY[24] = { 0x0D, 0x0E, 0x0F, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+                                 0x27, 0x28, 0x29, 0x2A, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35 };
+/* a note key as the filter knows it: down as the OS has it (after the events let through), down under the finger,
+ * and the releases sent (opus_key_post) not yet back. A sent release comes back through the filter as a key event
+ * like any other: the filter decides by what the OS and the finger have, so a press or release that comes between
+ * a send and its return never reaches the OS twice. */
+static volatile u8 os_down[24], finger[24], sent[24];
+static volatile u8 frozen;
+
+static int note_index(int key)
+{
+    for (int i = 0; i < 24; i++) if (NOTE_KEY[i] == key) return i;
+    return -1;
+}
+
+/* the synth plays a granular sound: the engine's block call came within the last 64 blocks (93 ms) */
+static int ours(void) { return opus_instrument_now() == 0 && all_blocks - ours_at < 64; }
+
+/* a release sent on for every note the OS has down and no finger holds; a send that did not queue is tried again by
+ * the main pass */
+static void release_held(void)
+{
+    for (int i = 0; i < 24; i++) {
+        if (!os_down[i] || finger[i] || sent[i]) continue;
+        sent[i]++;                             /* first: the release can come back through the filter at once */
+        if (!opus_key_post(NOTE_KEY[i], 0)) sent[i]--;
+    }
+}
+
+static int key_filter(int key, int pressed)
+{
+    const int i = note_index(key);
+    if (i < 0) return 0;                       /* not a note key: never touched */
+    if (pressed) {                             /* presses are only the fingers' (only releases are sent) */
+        finger[i] = 1;
+        if (os_down[i]) return 1;              /* the OS has it down already (latched): stays as it is */
+        os_down[i] = 1;
+        return 0;
+    }
+    if (sent[i]) {                             /* one of ours (or a finger's in its place: the same in the end) */
+        sent[i]--;
+        if (finger[i]) return 1;               /* pressed again since: the finger holds it, its release will come */
+    } else finger[i] = 0;
+    if (!os_down[i]) return 1;                 /* the OS has it up already */
+    if (frozen && ours()) return 1;            /* frozen: held, the OS keeps it down */
+    os_down[i] = 0;
+    return 0;
+}
+
+static void freeze_set(int on)
+{
+    frozen = (u8)on;
+    if (!on) release_held();
+}
+
+/* the main pass: off when the synth no longer plays a granular sound; a release that did not queue sent again */
+static void freeze_main(void)
+{
+    if (frozen && !ours()) freeze_set(0);
+    if (!frozen) release_held();
+}
+
+/* orange push on the T1 page: freeze on or off (the push and its release taken) */
+/* white push: clock sync on or off (0.10.0), kept in the sound */
+static int e_key(int key, int pressed, int pg)
+{
+    if (pg != 0 || (key != 0x3E && key != 0x3D)) return 0;
+    if (pressed && key == 0x3E) freeze_set(!frozen);    /* the orange value shows for turns only (0.9.4), not this push */
+    if (pressed && key == 0x3D) {
+        const unsigned char d[3] = { 'g', 's', (unsigned char)!sync_on };
+        if (opus_engine_data_set(d, 3)) sync_on = d[2];
+    }
+    return 1;
+}
+#define JIT_T 184                              /* the spray's dots take a new place every 184 blocks (0.27 s) */
+
+/* the spray's jitter at a dot: two random sets, one every JIT_T blocks, the dot sliding from one to the next */
+static int jitter(int dot_i, u32 group, int sub, int reach)
+{
+    if (!reach) return 0;
+    u32 a = 0x2545F491u + group * 2654435761u + (u32)dot_i * 40503u, b = a + 2654435761u;
+    a = a * 1664525u + 1013904223u; a ^= a >> 13; a *= 0x5bd1e995u; a ^= a >> 15;
+    b = b * 1664525u + 1013904223u; b ^= b >> 13; b *= 0x5bd1e995u; b ^= b >> 15;
+    /* each dot's place as a fraction (-1 to 1, Q15) scaled by the reach: turning white only spreads or draws them in
+     * (0.8.4: 0.8.3 took the random number modulo the reach, so every small change of the reach threw every dot to a
+     * new place: the dots raced while white turned) */
+    const s32 fa = (s32)(a >> 16) - 32768, fb = (s32)(b >> 16) - 32768;
+    const s32 f = fa + (fb - fa) * sub / JIT_T;
+    return (int)((f * reach) >> 15);
+}
+
+/* 2^(st/12) in Q16 for st in 1/256 of a semitone (a smoothed pitch), between the table's semitones */
+static u32 ratio_q16(int st8)
+{
+    int i = (st8 + PITCH_ST * 256) >> 8, f = (st8 + PITCH_ST * 256) & 255;
+    if (i < 0) { i = 0; f = 0; }
+    if (i >= 2 * PITCH_ST) { i = 2 * PITCH_ST; f = 0; }
+    const u32 a = semi_q16[i], b = semi_q16[i + (i < 2 * PITCH_ST)];
+    return a + (u32)(((s32)(b - a) * f) >> 8);
+}
+
+/* every value the waves show follows its knob smoothly (a quarter of the way a frame) instead of jumping */
+static inline void follow(s32 *v, s32 target, int first) { *v = first ? target : *v + ((target - *v) >> 2); }
+
+static void page(void)
+{
+    short k[8];
+    opus_engine_knobs(k);                                               /* the LFOs in, as the stock screens */
+    const int sh = fw_shift_held();
+    const s32 len = sample_len(opus_sound_slot(0));
+    const s32 pos = (s32)(((unsigned long long)(u16)k[0] * (u32)len) >> 15);
+    const int syn = sync_on;
+    const s32 size = syn ? sync_size(sync_step(k[1]), tempo_mbpm) : 441 + (s32)(((u32)k[1] * 16000u) >> 15);
+    const s32 spray = (s32)(((u32)k[2] * 66150u) >> 15);
+    const s32 ovl8 = 4 + (k[3] >> 10);
+    const s32 gq = k[7] > 0 ? k[7] : 8192;
+
+    /* a note playing: a voice rendered since the last frame */
+    static u32 seen[VOICES];
+    int live[VOICES], any = 0;
+    u32 vdt = 0;                                                        /* the most blocks a voice rendered since */
+    for (int vi = 0; vi < VOICES; vi++) {
+        const gvoice_t *v = voice_of[vi];
+        live[vi] = v && v->blocks != seen[vi];
+        if (v) { const u32 d = v->blocks - seen[vi]; if (d > vdt) vdt = d; seen[vi] = v->blocks; }
+        any |= live[vi];
+    }
+
+    /* the time since the last frame, in audio blocks: the engine's block calls, else the voices' renders (the same
+     * length); none in silence (0.8.3: 0.8.2 counted a frame's worth then, so in silence the page still went by
+     * frames and sped up while a knob turned). Only time moves the waves: in silence they stand still and only
+     * ease to the knobs. */
+    static u32 last_t, tclk;
+    const u32 tn = ticks;
+    u32 dt = tn - last_t;
+    last_t = tn;
+    if (dt == 0) dt = vdt;
+    if (dt > 200) dt = 200;
+    tclk += dt;
+
+    /* the smoothed values (x 16), the pitch in 1/256 semitone, the orange wave's height: a step for each 23 blocks
+     * (a 30th of a second) gone by, so they ease at the same speed however often the page is drawn */
+    const int nst = (int)((dt + 11) / 23) < 1 ? 1 : (int)((dt + 11) / 23) > 8 ? 8 : (int)((dt + 11) / 23);   /* at least one */
+    static s32 s0, s1, s2, s3, st8, amp4;
+    static int first = 1;
+    for (int n = 0; n < nst; n++) {
+        follow(&s0, (s32)(u16)k[0] * 16, first);
+        follow(&s1, (s32)k[1] * 16, first);
+        follow(&s2, (s32)k[2] * 16, first);
+        follow(&s3, (s32)k[3] * 16, first);
+        follow(&st8, pitch_st(k[5]) * 256, first);
+        follow(&amp4, sh ? (s32)(U(1) + gq * U(5) / 32767) : U(AMP), first);
+        first = 0;
+    }
+    const int shp = shape_of(k[6]);                                     /* a new shape: crossfade to it */
+    if (shp != shape_now) { shape_prev = shape_now; shape_now = shp; shape_mix = 0; }
+    else if (shape_mix < 256) shape_mix += 32 * nst;
+    const u32 ratio = ratio_q16(st8);
+
+    /* the drift: its speed eases in when a note starts and out when it stops, faster with the pitch up; 33 a block
+     * is 0.35 of a cycle a second */
+    static s32 vel;
+    static u32 drift;                                                   /* 1/65536 of a cycle */
+    const s32 vt = any ? (s32)((33u * ratio) >> 16) : 0;
+    for (int n = 0; n < nst; n++) vel += (vt - vel) >> 3;
+    drift += (u32)vel * dt;
+
+    /* above the waves: the recording as a thin dotted bar (a column of dots every 4 units, as tall as the sound
+     * there, up to 5 units each side); the position a blue column of its own, sliding */
+    if (len >= 256) {
+        int cb = C_SIL;
+        if (syn) {                              /* clock sync (0.10.0): the bar flashes white at the size's pace */
+            u32 n = SYNC_TICKS[sync_step(k[1])];
+            while (n < 24) n <<= 1;             /* a sixteenth at the fastest: quicker only flickers */
+            const u32 ph = opus_tempo_phase(n) >> 24;                   /* 0-255 over the cycle */
+            const int b = ph >= 128 ? 0 : 255 - (int)ph * 2;            /* white at its start, gone by half way */
+            const int lo = 0x50;                                        /* between flashes: a dim grey */
+            const int g = lo + (((255 - lo) * b) >> 8);
+            cb = OPUS_RGB(g << 16 | g << 8 | g);
+        }
+        const int yc = BAR_Y, top = S.top > 0 ? S.top : 1;
+        const int xp = U(2) + (int)(((long long)s0 * U(316)) >> 19);   /* s0 / 32768 / 16 of the way */
+        int xa = (xp + 128) >> 8;                                       /* the arrow's flat side, in pixels */
+        if (xa > 319 - (BAR_H + 1)) xa = 319 - (BAR_H + 1);
+        for (int c = 0, x = 2; c < BAR_N; c++, x += 4) {
+            if (x >= xa - 1 && x <= xa + BAR_H + 2) continue;           /* the arrow's own dots stand in for these */
+            const int h = S.peak[c] * BAR_H / top;
+            dot_s(U(x), U(yc), cb);
+            for (int y = 2; y <= h; y += 2) { dot_s(U(x), U(yc - y), cb); dot_s(U(x), U(yc + y), cb); }
+        }
+        /* the play head (0.9.7): an arrow pointing on, of the bar's own dots on its two-pixel grid (columns of 7, 5, 3
+         * and 1 dots: 13 pixels tall, as the marker was), its flat side at the position; the blue encoder's colour,
+         * the orange's while frozen */
+        {
+            const int c = frozen ? OPUS_COLOR_E(3) : OPUS_COLOR_E(0);
+            for (int j = 0; j <= BAR_H + 1; j += 2)
+                for (int y = -(BAR_H + 1) + j; y <= BAR_H + 1 - j; y += 2) dot_s(U(xa + j), U(yc + y), c);
+        }
+    }
+
+    /* blue: position, the wave sliding with it (four cycles over the knob's turn); with the pitch up its waves get
+     * shorter (an octave halves them) */
+    const int yb = WAVE_Y0;
+    const u32 pb = (u32)(((unsigned long long)s0 * 4 * 65536) >> 19);
+    const u32 bper8 = (56u << 24) / ratio;                              /* units x 256 */
+    const u32 bstep = (1u << 24) / bper8;                               /* phase a unit */
+    for (int x = 2; x < 320; x += 4) dot(U(x), wave_at(yb, pb + drift + (u32)x * bstep, U(AMP)), C_POS);
+    if (len >= 256)                                                     /* the live grains on it, as tall as the shape */
+        for (int vi = 0; vi < VOICES; vi++) {
+            if (!live[vi]) continue;
+            const gvoice_t *v = voice_of[vi];
+            for (int i = 0; i < MAX_GRAINS; i++) {
+                const grain_t *g = &v->g[i];
+                if (!g->winc) continue;
+                const int x8 = U(2) + (int)(((long long)g->pos * U(316)) / ((long long)len << FRAC));
+                const int h = U(1) + ((win_at(g->wph >> 15) * U(AMP + 3)) >> 15);
+                const int y = wave_at(yb, pb + drift + (u32)(((unsigned long long)x8 * bstep) >> 8), U(AMP));
+                line(x8, y - h, x8, y + h, 0x180, C_WHITE);
+            }
+        }
+
+    /* green: grain size, a row of the grain shape, each as long as a grain (24 units at the shortest, 200 at the
+     * longest): hann draws round bumps, pluck sharp spikes, swell ramps */
+    const u32 gper8 = U(24) + (u32)(((long long)s1 * 176) >> 11);      /* s1 / 32768 / 16 x 176 units x 256 */
+    const u32 gstep = (1u << 24) / gper8;
+    for (int x = 2; x < 320; x += 4)
+        dot(U(x), U(yb + WAVE_DY) + U(AMP) - ((win_at(drift + (u32)x * gstep) * U(2 * AMP)) >> 15), C_SIZE);
+
+    /* the spray's own clock (0.8.5): it runs faster the more the spray, 4x at the top, so the dots dance quicker; a
+     * clock of its own (x 256) rather than a shorter step, so a change of speed never moves a dot by itself */
+    static u32 jclk;
+    jclk += dt * (u32)(256 + ((s2 * 3) >> 11));                         /* s2 / 32768 / 16 x 768 */
+
+    /* white: spray, the dots scattered as far as it reaches, sliding to new places on the spray clock */
+    const int reach = (int)(((long long)s2 * U(7)) >> 19);
+    for (int x = 2, n = 0; x < 320; x += 4, n++)
+        dot(U(x), wave_at(yb + 2 * WAVE_DY, drift * 2 + (u32)x * (65536 / 56), U(AMP)) + jitter(n, jclk / (JIT_T * 256), (int)(jclk % (JIT_T * 256) / 256), reach), C_WHITE);
+
+    /* orange: density, the dots as close as the grains overlap (8 units apart at 0.5x, 2 at 4.3x); with shift held
+     * its height is the sample gain */
+    const int ovq = 64 + (int)(s3 >> 10);                               /* the overlap x 8, x 16 */
+    const int step = U(8) - (ovq - 64) * U(6) / (31 * 16);
+    for (int x = U(2); x < U(320); x += step)
+        dot(x, wave_at(yb + 3 * WAVE_DY, drift + 32768u + (u32)(((unsigned long long)x * (65536 / 56)) >> 8), (int)amp4), C_GRAIN);
+
+    /* the bottom row: a label and a value a knob. Each fades away when its encoder is left alone: full colour
+     * for SHOW_T tenths of a second after a turn, then not drawn. */
+    static const char *const LAB1[4] = { "pos", "size", "spray", "dens" };
+    static const char *const LAB2[4] = { "pitch", "shape", "spray", "gain" };
+    static char val[4][12];
+    static u32 used[4];
+    static u8 ever[4];
+    const u32 now = tenths();
+    for (int i = 0; i < 4; i++)
+        if (poke[i]) { poke[i] = 0; used[i] = now; ever[i] = 1; }
+    {                                           /* the cpu meter's two lines, under the bar (0.9.5) */
+        static char m1[64], m2[64];
+        if (meter) {
+            char *p = m1;
+            p = cat(p, "now "); p = cat(num(p, (s32)((m_last[M_TOTAL] + 500) / 1000), 0), "k  avg ");
+            p = cat(num(p, (s32)((m_avg + 500) / 1000), 0), "k  worst ");
+            p = cat(num(p, (s32)((m_worst[M_TOTAL] + 500) / 1000), 0), "k ");
+            p = cat(num(p, (s32)((unsigned long long)m_worst[M_TOTAL] * 1000 / 580525), 1), "%");
+            *p = 0;
+            p = m2;
+            p = cat(p, "loop "); p = cat(num(p, (s32)((m_worst[M_LOOP] + 500) / 1000), 0), "k ln ");
+            p = cat(num(p, (s32)m_worst[M_LINES], 0), " sp ");
+            p = cat(num(p, (s32)m_worst[M_SPAWNS], 0), " re ");
+            p = cat(num(p, (s32)m_worst[M_RECALC], 0), " v ");
+            p = num(p, (s32)m_worst[M_VOICES], 0);
+            if (m_worst[M_SLOWWIN]) p = cat(p, " slow win");
+            *p = 0;
+        }
+        opus_page_text(me, 8, 2, 22, 8, OPUS_COLOR_TEXT, meter ? m1 : " ");
+        opus_page_text(me, 9, 2, 31, 8, OPUS_COLOR_TEXT, meter ? m2 : " ");
+    }
+    *cat(num(val[0], (pos + 220) / 441, 2), "s") = 0;
+    if (syn) *cat(val[1], SYNC_NAME[sync_step(k[1])]) = 0;
+    else ms_text(val[1], size);
+    ms_text(val[2], spray);
+    *cat(num(val[3], ovl8 * 10 / 8, 1), "x") = 0;
+    if (sh) {                                                       /* pitch: "+7st", "0st", "-12st" */
+        const int st = pitch_st(k[5]);
+        char *p = val[0];
+        if (st > 0) *p++ = '+';
+        if (st < 0) *p++ = '-';
+        *cat(num(p, st < 0 ? -st : st, 0), "st") = 0;
+    }
+    if (sh) { char *p = cat(val[1], SHAPE_NAME[shape_of(k[6])]); *p = 0; }
+    if (sh) *cat(num(val[3], gq * 10 / 8192, 1), "x") = 0;
+    for (int i = 0; i < 4; i++) {
+        const u32 age = ever[i] ? now - used[i] : SHOW_T;
+        const int col = TXT4[i];
+        const int gone = age >= SHOW_T;
+        const int c = col;
+        const char *l = sh ? LAB2[i] : LAB1[i];
+        opus_page_text(me, i, COL_X0 + COL_DX * i, 112, 12, c, gone ? " " : l);
+        opus_page_text(me, 4 + i, COL_X0 + COL_DX * i, 126, 12, c, gone ? " " : val[i]);
+    }
+}
+
+/* shift + blue, green or orange: the pitch, the grain shape, the sample gain (key thread) */
+static int e_turn(int encoder, int detents, int pg)
+{
+    if (pg != 0 || encoder < 0 || encoder > 3) return 0;
+    poke[encoder] = 1;                                                  /* without shift the turns stay the OS's */
+    if (!fw_shift_held() || SHIFT_KNOB[encoder] < 0) return 0;
+    short k[8];
+    opus_engine_knobs(k);
+    s32 v;
+    switch (encoder) {
+    case 0: {                                                           /* pitch: a semitone a detent */
+        int st = pitch_st(k[5]) + detents;
+        st = st < -PITCH_ST ? -PITCH_ST : st > PITCH_ST ? PITCH_ST : st;
+        v = 16384 + st * 512;
+        break;
+    }
+    case 1: {                                                           /* shape: one a detent, middle of its range */
+        int sh = shape_of(k[6]) + detents;
+        sh = sh < 0 ? 0 : sh >= SHAPES ? SHAPES - 1 : sh;
+        v = (2 * sh + 1) * 32768 / (2 * SHAPES);
+        break;
+    }
+    default:                                                            /* gain: 1/16 a detent */
+        v = (k[7] > 0 ? k[7] : 8192) + detents * 512;
+    }
+    opus_engine_knob_set(SHIFT_KNOB[encoder], v < 1 ? 1 : v > 32767 ? 32767 : v);
+    return 1;
+}
+
+static const struct opus_engine GRANULAR = {
+    .size = sizeof(struct opus_engine),
+    .name = "granular",
+    .knobs = { 4000, 8000, 3000, 12000, 0, 0, 0, 0 },                  /* op1r's defaults */
+    .voice = sizeof(gvoice_t),
+    .init = v_init,
+    .note_on = v_note_on,
+    .release = v_release,
+    .render = v_render,
+    .block = e_block,
+    .page = page,
+    .turn = e_turn,
+    .key = e_key,
+    .type = "granular",                                                 /* op1r's sounds load as this engine */
+    .mark = 0x5303,                                                     /* op1r's 0x5300 + its order (3) */
+    .flags = OPUS_ENGINE_SAMPLE,                                        /* the sampler service (core 2.10) */
+};
+
+/* e^-x for 0 <= x <= 8, from (1 - x / 1024)^1024: within about 0.1 % here, plenty for a window (the start only) */
+static float exp_neg(float x)
+{
+    float y = 1.0f - x / 1024.0f;
+    for (int i = 0; i < 10; i++) y *= y;
+    return y;
+}
+
+/* the other grain shapes, Q15 over t = i / 2048 (0 at both ends, as Hann) */
+static void make_shapes(void)
+{
+    const int N = 1 << WIN_BITS;
+    const float g0 = exp_neg(4.5f), p0 = exp_neg(6.0f);
+    for (int i = 0; i < N; i++) {
+        const float t = (float)i / N, d = (t - 0.5f) * 6.0f;            /* gauss: +-3 sigma across the grain */
+        float w;
+        w = (exp_neg(0.5f * d * d) - g0) / (1.0f - g0);
+        win_x[0][i] = (short)(w * 32767.0f);
+        win_x[1][i] = i < N / 8 ? win2[i * 4] : i >= N - N / 8 ? win2[(N - i) * 4 >= N ? N - 1 : (N - i) * 4] : 32767;
+                                                                        /* tukey: an eighth fading each end */
+        win_x[2][i] = (short)(i < N / 2 ? (i * 65534L) / N : ((N - i) * 65534L) / N);   /* triangle */
+        /* pluck: a rise, then a fall to 0. 0.10.0: the rise 10 % of the grain on Hann's curve (0.9.x: 3 % in a
+         * straight line, a click at every grain's start when the grains were short) */
+        const int ra = N / 10;
+        const float a = (float)ra / N;
+        w = t < a ? 0.0f : (exp_neg(6.0f * (t - a) / (1.0f - a)) - p0) / (1.0f - p0);
+        win_x[3][i] = i < ra ? win2[i * (N / 2) / ra] : (short)(w * 32767.0f);
+    }
+    for (int i = 1; i < N; i++) win_x[4][i] = win_x[3][N - i];         /* swell: the pluck backwards (its fall */
+    win_x[4][0] = 0;                                                    /* Hann's too, 0.10.0) */
+}
+
+int opl_init(struct opl_self *self)
+{
+    me = self;
+    for (int i = 0; i < (1 << WIN_BITS); i++) {                         /* sin^2(pi i / 2048), Q15 */
+        int s, c;
+        opus_sincos(i, &s, &c);                                         /* sin(2 pi i / 4096) = sin(pi i / 2048) */
+        win2[i] = (short)((s * s) >> 9);                                /* 4096^2 >> 9 = 32768: Q15 */
+        if (win2[i] < 0) win2[i] = 32767;
+    }
+    make_shapes();
+    {                                                                   /* 2^(st/12), Q16 */
+        float m = 1.0f;
+        for (int i = 0; i < PITCH_ST; i++) m *= 0.94387431f;           /* 2^(-1/12) */
+        for (int i = 0; i <= 2 * PITCH_ST; i++) { semi_q16[i] = (u32)(m * 65536.0f + 0.5f); m *= 1.05946309f; }
+    }
+    wfast = opus_fast(self, (unsigned)sizeof(short) << WIN_BITS);      /* 4 KB of the L1 (0 when none is left) */
+    { s32 *a = opus_fast(self, sizeof acc_mem); if (a) acc_buf = a + 1; }   /* 516 bytes more, the same way */
+    for (int i = -1; i < BLOCK; i++) acc_buf[i] = 0;                     /* fast memory is not cleared; from here on the
+                                                                         * output pass leaves it at 0 */
+    for (int i = 0; i < SIN_N; i++) {                                   /* the page's waves */
+        int sn, c;
+        const int a = i * 4096 / SIN_N;
+        opus_sincos(a > 2048 ? a - 4096 : a, &sn, &c);
+        sin_t[i] = (short)sn;
+    }
+    meter = (u8)(opus_setting(self, "cpu_meter") == 1);
+    opus_on_setting(self, on_setting);
+    use_asm = (u8)asm_selftest();
+    opus_log(self, use_asm ? "grain loop: by hand (self-test passed)" : "grain loop: c");
+    opus_on_main_pass(self, scan);
+    opus_on_knob(self, on_knob);
+    opus_on_key_filter(self, key_filter);
+    opus_on_block(self, on_block);
+    return opus_engine_add(self, &GRANULAR) < 0 ? -1 : 0;
+}

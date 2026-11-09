@@ -15,6 +15,8 @@ plugin.json fields (paths relative to the plugin folder):
   uses_sample    (synth, optional) engine reads the slot's sampler recording (synth_<slot>.raw loaded at boot)
   stereo         (fx, optional) op1_fx_t.render_stereo is set: the master position renders left / right itself
   coarse         (synth, optional) knob numbers 0..3 turned in 8 steps over the range (both pages), e.g. a selector
+  engine_ext     (synth, optional) `symbol` is an op1_engine_ext_t (op1_plugin.h): key callback, service, Shift pages
+                 (op1r 60; plugin files only, not together with input_engine)
   input_engine   (synth, optional) `symbol` is an op1_input_engine_t (op1_input.h): plays the selected input; plugin
                  files only (input/in_host.c)
   screen         (optional) {"svg": file name, must not clash with stock content/display, "symbol": op1_screen_t}
