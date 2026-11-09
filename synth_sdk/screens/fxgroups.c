@@ -150,7 +150,9 @@ int fg_knob(int knob, int delta)               /* knob_event_hook: white in the 
 /* cursor x 59.7..167.5 -> 106.7 (1/3 of the screen) .. 300.3 (the stock 6.3 px gap before the bar): scale + shift */
 #define SX_CURSOR      OP1_Q10((300.3 - 106.67) / 107.77)
 #define TX_CURSOR      OP1_Q10(106.67 - 59.718 * (300.3 - 106.67) / 107.77)
-#define DX_ROWS        OP1_Q10(46.95 * 1.25)              /* row texts: their tx moves 0.8 px per unit (measured) */
+/* row texts: their tx is in panel pixels (0.8 px per unit measured on rev 1, scale 1.25): units x the screen matrix's
+ * scale (0x01DE5E68 [3]: 1280 rev 1, 0x4B3 rev 2) */
+#define DX_ROWS        ((int32_t)((int64_t)OP1_Q10(46.95) * ((const volatile int32_t *)0x01DE5E68)[3] >> 10))
 #define DX_BAR         OP1_Q10(132.85)
 static int32_t **pb_obj;                       /* the browser screen object (its update's self) */
 static void set_tx(int32_t *node, int32_t tx)

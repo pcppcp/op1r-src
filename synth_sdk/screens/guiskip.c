@@ -42,7 +42,9 @@ static uint32_t *vbuf;
 #define TICK_BUF      (*(uint32_t *volatile *)0x01D08520)
 #define RASTER_CLEAR  ((void (*)(void *))0x01A23466)
 #define RASTER_TARGET ((void (*)(void *, void *))0x01A23442)
-#define BUF_BYTES     ((*(volatile uint32_t *)0xFF8017B4) << 9)
+#define BUF_ROWS      (*(volatile uint32_t *)0xFF8017B4)   /* panel long side: 400 rev 1, 376 rev 2, 320 FE (Opus kit) */
+#define BUF_BYTES     (BUF_ROWS << 9)
+#define BUF_COLS      ((int)BUF_ROWS / 2)                  /* its short side: 200 / 188 / 160 visible of each 256-pixel row */
 
 static int main_ras(const void *ras) { return ras == RASTER + 0x30; }
 
@@ -141,7 +143,7 @@ void op1_screen_static_done(void *scr)
     if (scr == rg_scr) no_hash = 0;
     if (!rg_active || scr != rg_scr || !rg_static) return;
     rg_static = 0;
-    copy_rows((uint8_t *)cur_buf, cache, 0, 399, 0, 199);          /* the new static picture into the shown buffer */
+    copy_rows((uint8_t *)cur_buf, cache, 0, (int)BUF_ROWS - 1, 0, BUF_COLS - 1);   /* the new static picture into the shown buffer */
     cache_gen = gen; buf_gen[slot_of(cur_buf)] = gen;
     gs_rg_stat.full_copies++;
     RASTER_TARGET(rg_raster, cur_buf);           /* the moving parts go to the display buffer */
@@ -170,14 +172,14 @@ static void rect_to_dev(const op1_rect_t *r, int16_t *d)
     }
     x0 = (x0 >> 10) - 2; y0 = (y0 >> 10) - 2; x1 = (x1 >> 10) + 2; y1 = (y1 >> 10) + 2;   /* antialiasing margin */
     d[0] = (int16_t)(x0 < 0 ? 0 : x0); d[1] = (int16_t)(y0 < 0 ? 0 : y0);
-    d[2] = (int16_t)(x1 > 199 ? 199 : x1); d[3] = (int16_t)(y1 > 399 ? 399 : y1);
+    d[2] = (int16_t)(x1 > BUF_COLS - 1 ? BUF_COLS - 1 : x1); d[3] = (int16_t)(y1 > (int)BUF_ROWS - 1 ? (int)BUF_ROWS - 1 : y1);
 }
 /* a render frame on the display buffer: region mode or the normal clear */
 static void render_start(void *raster)
 {
     void *only = 0;
     rg_active = 0;
-    if (rg_scr && rg_n && (void *)SCREEN_TABLE[CUR_SCREEN] == rg_scr && visible_screens(&only) == 1 && only == rg_scr
+    if (rg_scr && rg_n && BUF_ROWS <= 400 && (void *)SCREEN_TABLE[CUR_SCREEN] == rg_scr && visible_screens(&only) == 1 && only == rg_scr
         && slot_of(cur_buf) >= 0) {
         if (!rg_prev_active) gen++;               /* the buffers / cache hold another picture */
         rg_active = 1; rg_raster = raster; gs_rg_stat.frames++;
@@ -186,7 +188,7 @@ static void render_start(void *raster)
             rg_static = 1; gs_rg_stat.statics++;
             RASTER_TARGET(raster, cache); RASTER_CLEAR(raster);
         } else if (buf_gen[sl] != gen) {          /* this buffer still holds an older picture */
-            rg_static = 0; copy_rows((uint8_t *)cur_buf, cache, 0, 399, 0, 199); buf_gen[sl] = gen; gs_rg_stat.full_copies++;
+            rg_static = 0; copy_rows((uint8_t *)cur_buf, cache, 0, (int)BUF_ROWS - 1, 0, BUF_COLS - 1); buf_gen[sl] = gen; gs_rg_stat.full_copies++;
         } else {                                  /* restore the moving areas */
             rg_static = 0;
             for (int i = 0; i < rg_n; i++) {
@@ -210,8 +212,8 @@ void gs_frame(void *raster)                    /* CALL Raster::clear in Screen::
         if (h == last) {
             const uint8_t *x = scratch, *y = (const uint8_t *)vbuf;
             uint32_t n = BUF_BYTES, bad = 0, first = 0xFFFFFFFF;
-            for (uint32_t i = 0; i < n; i++)    /* visible pixels only: device x 0..199 of each 256-pixel row */
-                if ((i & 511) < 400 && x[i] != y[i]) { if (!bad) first = i; bad++; }
+            for (uint32_t i = 0; i < n; i++)    /* visible pixels only: device x 0..cols-1 of each 256-pixel row */
+                if ((i & 511) < (uint32_t)BUF_COLS * 2 && x[i] != y[i]) { if (!bad) first = i; bad++; }
             gs_stat.verified++;
             if (bad) { gs_stat.stale++; gs_stat.stale_bytes += bad; gs_stat.stale_first = first; }
         }
