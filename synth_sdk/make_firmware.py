@@ -195,7 +195,7 @@ def pond_words(rate=31, chaos=24):
     return [((bits >> (16 * k)) & 0xFFFF) - (0x10000 if (bits >> (16 * k)) & 0x8000 else 0) for k in range(8)]
 POND_LFO_DEFAULTS = pond_words()
 # optional: hidden OP-Z controller mode, gated by host-mode SysEx 00 01 03 (docs/12_opz_mode_patch.md)
-# exact GUI frame skip (screens/guiskip.c, docs/74): dev builds with OP1R_GUISKIP=1 only (A/B measurement)
+# exact GUI frame skip + screen regions (screens/guiskip.c, docs/74, docs/75): on by default, OP1R_GUISKIP=0 = off
 _SW = bytes.fromhex('09e1b45549e1a0ff')                                       # P1 = agg_sweep_scanlines
 GUISKIP_HOOKS = {0x019149C4: ('hook_gsmove', bytes.fromhex('00e80000')),      # rasterizer move_to entry (LINK 0)
                  0x01914904: ('hook_gsline', bytes.fromhex('00e80000')),      # rasterizer line_to entry (LINK 0)
@@ -205,8 +205,9 @@ GUISKIP_HOOKS = {0x019149C4: ('hook_gsmove', bytes.fromhex('00e80000')),      # 
                  0x01A24CBC: ('hook_gsdot', bytes.fromhex('00e80600')),       # Raster::dotted_hline entry (LINK 0x18)
                  0x01A24CA6: ('hook_gssw1', _SW), 0x01A254DC: ('hook_gssw2', _SW), 0x01A27316: ('hook_gssw3', _SW),
                  0x01A2749A: ('hook_gssw4', _SW), 0x01A274FE: ('hook_gssw5', _SW)}
-if os.environ.get('OP1R_GUISKIP'):                                          # OP1R_GUISKIP=sec,sec: only those (bisecting)
-    _only = os.environ['OP1R_GUISKIP'].split(',') if os.environ['OP1R_GUISKIP'] != '1' else None
+GUISKIP = os.environ.get('OP1R_GUISKIP', '1') != '0'                         # on by default (op1r 59); 0 = stock drawing
+if GUISKIP:                                                                 # OP1R_GUISKIP=sec,sec: only those (bisecting)
+    _only = os.environ['OP1R_GUISKIP'].split(',') if os.environ.get('OP1R_GUISKIP', '1') != '1' else None
     HOOKS.update({a: v for a, v in GUISKIP_HOOKS.items() if not _only or v[0] in _only})
 DEV_HOOKS = {0x019F01B8: ('hook_devboot', bytes.fromhex('05e37c52')),   # boot: access(te-boot.op1) -> apply a staged dev update first (docs/35)
              0x019E3CC8: ('hook_devrx', bytes.fromhex('ffe36efa'))}    # midi_poll: CALL midi_rx_parse -> copy our SysEx first
@@ -294,7 +295,7 @@ def build(engs, fxs):
     flags = {}                                       # plugin.json "source_cflags": e.g. -O3 after the default -O2
     for e in engs + fxs:
         flags.update(plugins.source_flags(e, [e['source']] + e.get('extra_sources', [])))
-    if os.environ.get('OP1R_GUISKIP'):                                        # docs/74: frame skip (+ self-check)
+    if GUISKIP:                                                               # docs/74: frame skip (+ self-check)
         flags['screens/guiskip.c'] = ['-DGS_ON'] + (['-DGS_VERIFY'] if os.environ.get('OP1R_GUISKIP_VERIFY') else []) \
             + (['-DGS_NOREG'] if os.environ.get('OP1R_GUISKIP_NOREG') else [])
     for s in srcs:
