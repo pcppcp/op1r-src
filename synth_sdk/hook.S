@@ -578,3 +578,82 @@ _l1v_metro:            JUMP.L _ci_metro_render
 _l1v_push_lr:          JUMP.L _usb6_push_lr
 _l1v_push_interleaved: JUMP.L _usb6_push_interleaved
 _l1v_rs_probe:         JUMP.L _l1_rs_probe
+
+/* Exact GUI frame skip (screens/guiskip.c, docs/74; hooked only with OP1R_GUISKIP=1). Entry stubs call the C
+ * recorder with the original arguments; a non-zero result skips the body (RTS to the caller), else the replaced
+ * first instruction(s) run and the body continues. */
+	.section .hook_gsmove,"ax"
+	jump.l _gs_move_stub;
+	.section .hook_gsline,"ax"
+	jump.l _gs_line_stub;
+	.section .hook_gsframe,"ax"
+	call _gs_frame;
+	.section .hook_gstext,"ax"
+	jump.l _gs_text_stub;
+	.section .hook_gsdim,"ax"
+	jump.l _gs_dim_stub;
+	.section .hook_gsdot,"ax"
+	jump.l _gs_dot_stub;
+	.section .hook_gssw1,"ax"
+	P1.L = _gs_sweep_stub; P1.H = _gs_sweep_stub;
+	.section .hook_gssw2,"ax"
+	P1.L = _gs_sweep_stub; P1.H = _gs_sweep_stub;
+	.section .hook_gssw3,"ax"
+	P1.L = _gs_sweep_stub; P1.H = _gs_sweep_stub;
+	.section .hook_gssw4,"ax"
+	P1.L = _gs_sweep_stub; P1.H = _gs_sweep_stub;
+	.section .hook_gssw5,"ax"
+	P1.L = _gs_sweep_stub; P1.H = _gs_sweep_stub;
+	.text
+	.align 2
+/* save R0..R2 / RETS, call C (args prepared by the macro user), CC = result != 0, restore */
+.macro GS_CALL fn
+	[--SP] = RETS; [--SP] = R0; [--SP] = R1; [--SP] = R2;
+	SP += -12;
+	call \fn;
+	SP += 12;
+	CC = R0 == 0;
+	R2 = [SP++]; R1 = [SP++]; R0 = [SP++]; RETS = [SP++];
+.endm
+_gs_move_stub:
+	[--SP] = P0; P0.L = _gs_caller; P0.H = _gs_caller; R3 = RETS; [P0] = R3; P0 = [SP++];
+	GS_CALL _gs_point
+	IF !CC JUMP 1f;
+	LINK 0;
+	jump.l _rs_move_body;
+_gs_line_stub:
+	[--SP] = P0; P0.L = _gs_caller; P0.H = _gs_caller; R3 = RETS; [P0] = R3; P0 = [SP++];
+	GS_CALL _gs_point
+	IF !CC JUMP 1f;
+	LINK 0;
+	jump.l _rs_line_body;
+_gs_text_stub:
+	GS_CALL _gs_text
+	IF !CC JUMP 1f;
+	LINK 0x24;
+	jump.l _txt_draw_body;
+_gs_dot_stub:
+	[--SP] = R0; R0 = 2;
+	GS_CALL _gs_misc_dot
+	R0 = [SP++];
+	IF !CC JUMP 1f;
+	LINK 0x18;
+	jump.l _dot_body;
+_gs_dim_stub:
+	GS_CALL _gs_misc_dim
+	IF !CC JUMP 1f;
+	P0 = R0;
+	[--SP] = (R7:4, P5:5);
+	jump.l _dim_body;
+_gs_sweep_stub:
+	[--SP] = RETS; [--SP] = R0; [--SP] = R1; [--SP] = R2;
+	SP += -12;
+	R1 = R2;
+	call _gs_sweep;
+	SP += 12;
+	CC = R0 == 0;
+	R2 = [SP++]; R1 = [SP++]; R0 = [SP++]; RETS = [SP++];
+	IF !CC JUMP 1f;
+	P1.L = 0x55b4; P1.H = 0xffa0;
+	jump (P1);
+1:	RTS;

@@ -24,9 +24,25 @@ SECTIONS {
   .hook_apsynth2 0x01A01866 : { KEEP(*(.hook_apsynth2)) }
   .hook_apsynth3 0x01A50F1C : { KEEP(*(.hook_apsynth3)) }
   .hook_vcdown 0x01A85750 : { KEEP(*(.hook_vcdown)) }
+  .hook_gsmove 0x019149C4 : { KEEP(*(.hook_gsmove)) }
+  .hook_gsline 0x01914904 : { KEEP(*(.hook_gsline)) }
+  .hook_gsframe 0x01A3BBE0 : { KEEP(*(.hook_gsframe)) }
+  .hook_gstext 0x01A6259C : { KEEP(*(.hook_gstext)) }
+  .hook_gsdim 0x01A2357A : { KEEP(*(.hook_gsdim)) }
+  .hook_gsdot 0x01A24CBC : { KEEP(*(.hook_gsdot)) }
+  .hook_gssw1 0x01A24CA6 : { KEEP(*(.hook_gssw1)) }
+  .hook_gssw2 0x01A254DC : { KEEP(*(.hook_gssw2)) }
+  .hook_gssw3 0x01A27316 : { KEEP(*(.hook_gssw3)) }
+  .hook_gssw4 0x01A2749A : { KEEP(*(.hook_gssw4)) }
+  .hook_gssw5 0x01A274FE : { KEEP(*(.hook_gssw5)) }
   .hook_vcup 0x01A85840 : { KEEP(*(.hook_vcup)) }
   _vc_down_body = 0x01A85754;      /* VoiceCtl key_down after its LINK 0x10 (sequencer hook) */
   _vc_up_body = 0x01A85844;        /* VoiceCtl key_up after its LINK 0x20 */
+  _rs_move_body = 0x019149C8;      /* rasterizer move_to after its LINK 0 (guiskip) */
+  _rs_line_body = 0x01914908;      /* rasterizer line_to after its LINK 0 */
+  _txt_draw_body = 0x01A625A0;     /* Text::draw after its LINK 0x24 (guiskip) */
+  _dot_body = 0x01A24CC0;          /* Raster::dotted_hline after its LINK 0x18 */
+  _dim_body = 0x01A2357E;          /* Raster::dim_all after P0 = R0; [--SP] = (R7:4, P5:5) */
   _bgs_queue_cont = 0x019411BC;    /* SaveSlotJob queue after its LINK 0 (bgsave.c) */
   _sp_adsr_cont = 0x0191212C;      /* Adsr_render after the two instructions the sampler+ hook replaces */
   .hook_screenload 0x019F07D2 : { KEEP(*(.hook_screenload)) }
