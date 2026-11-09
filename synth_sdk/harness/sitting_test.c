@@ -438,6 +438,114 @@ static void test_level(void)
     for (int g = 2; g < 30; g++) CHECK(pk[g] > 2000 && pk[g] < 32767, "gen %d peak %d", g, pk[g]);
 }
 
+/* ---------- slow tape, long free loops, gain ramp across blocks ---------- */
+static int32_t dry_run, dry_best;                                            /* blocks with the recording used up */
+static void block_dry(int16_t (*src)(int64_t))
+{
+    block(src);
+    dry_run = st[0].mode == S_ERODE && st[0].i >= st[0].len ? dry_run + 1 : 0;
+    if (dry_run > dry_best) dry_best = dry_run;
+}
+static void test_slow_tape(void)
+{
+    /* the reported case: a 1 BAR loop captured at the nominal tempo (tape stopped: our clock copy), then the tape runs
+     * at 25 %. Before: 1 beat of loop, 3 beats of silence (the recording used up until the bar line). Now: the loop
+     * restarts every beat, and when the tape goes back to 100 % it realigns to the tape's bar lines */
+    static const int32_t steps[3] = { 0x40000, 0x3FFFF, 0x40001 };
+    for (int c = 0; c < 3; c++) {
+        fx_reset(7100 + c);
+        M.follows = 1; M.tape_run = 0; M.step = 0x100000;
+        knobs[5] = (int16_t)(FREE_V + 4 * (32768 - FREE_V) / NSYNC + 500);   /* 1 BAR */
+        for (int k = 0; k < 12000 && st[0].gen < 3; k++) { if (k == 15) press(); block(src_speech); }
+        CHECK(st[0].mode == S_ERODE && st[0].lq == 16 && st[0].dsh == 1, "slow tape: capture %d lq %d", st[0].mode, st[0].lq);
+        int32_t spb = M.len >> 14;
+        M.tape_pos = spb * 8; M.tape_run = 1; M.step = steps[c]; M.phase = 0;  /* play from a bar line at 25 % */
+        int g0 = ngen, peak = 0;
+        dry_best = dry_run = 0;
+        for (int k = 0; k < 24000; k++) {
+            block_dry(src_speech);
+            if (blkpeak > peak) peak = blkpeak;
+        }
+        int64_t mn = 1 << 30, mx = 0;
+        for (int g = g0 + 3; g < ngen; g++) { int64_t L = gen_at[g] - gen_at[g - 1]; if (L < mn) mn = L; if (L > mx) mx = L; }
+        CHECK(dry_best <= 1, "slow tape step %x: recording used up for %d blocks", steps[c], dry_best);
+        CHECK(mn >= 88190 && mx <= 88210, "slow tape step %x: generations %lld..%lld (1 beat at 25 %% = 88200)", steps[c],
+              (long long)mn, (long long)mx);
+        CHECK(peak < 32767, "slow tape: clipped");
+        printf("  1 BAR captured at 120 BPM, tape at step 0x%X: restarts every %lld..%lld samples (1 beat), recording used "
+               "up for at most %d block(s) in a row, peak %.1f dBFS\n", steps[c], (long long)mn, (long long)mx, dry_best,
+               20 * log10(peak / 32768.0));
+        if (c) continue;
+        /* back to 100 %: one shorter pass to the next bar line, then whole bars on the tape's bar lines */
+        M.step = 0x100000;
+        int g1 = ngen, ok = 1, full = 0;
+        for (int k = 0; k < 12000; k++) {
+            int gb = st[0].gen;
+            block(src_speech);
+            if (st[0].gen != gb && ngen > g1 + 2) {
+                int64_t L = gen_at[ngen - 1] - gen_at[ngen - 2];
+                if (L >= 88199 && L <= 88201) full++;
+                if (st[0].qbar != 0) ok = 0;                                 /* every start on a bar line (tape) */
+            }
+        }
+        CHECK(ok && full >= 5, "back to 100 %%: on bar lines %d, full bars %d", ok, full);
+        printf("  tape back to 100 %%: %d whole-bar generations, all starting on the tape's bar lines\n", full);
+    }
+    /* captured at 25 % (1 BAR = 8 s does not fit, recorded as 1/2): no gaps either */
+    fx_reset(7200);
+    M.follows = 1; M.tape_run = 1; M.step = 0x40000;
+    knobs[5] = (int16_t)(FREE_V + 4 * (32768 - FREE_V) / NSYNC + 500);
+    for (int k = 0; k < 40000 && ngen < 6; k++) { if (k == 15) press(); block(src_speech); }
+    dry_best = dry_run = 0;
+    for (int k = 0; k < 12000; k++) block_dry(src_speech);
+    CHECK(st[0].lq == 8 && st[0].dsh == 2 && dry_best <= 1, "captured at 25 %%: lq %d dsh %d used up %d", st[0].lq, st[0].dsh,
+          dry_best);
+    printf("  1 BAR captured at 25 %%: runs as 1/2 at 11.025 kHz, recording used up for at most %d block(s)\n", dry_best);
+}
+
+static void test_free_long(void)
+{
+    static const int16_t w[3] = { 8100, 12000, 13000 };
+    for (int c = 0; c < 3; c++) {
+        fx_reset(7300 + c);
+        knobs[5] = w[c];
+        int clip = 0;
+        for (int k = 0; k < 80000 && ngen < 4; k++) {
+            if (k == 15) press();
+            block(src_speech);
+            if (blkpeak >= 32767 && st[0].mode == S_ERODE && st[0].gen > 0 && !clip) {   /* (the speech input reaches
+                                                                              * full scale: REC and generation 0 play it) */ clip = 1; printf("    clip at gen %d mode %d i %d\n", st[0].gen, st[0].mode, st[0].i); }
+        }
+        sit_t *s = &st[0];
+        int32_t want = free_len(w[c]);
+        int64_t L = gen_at[3] - gen_at[2];
+        CHECK(!clip, "free %d: clipped", w[c]);
+        CHECK(ngen >= 4 && s->dsh == (want > NMAX ? 2 : 1) && L == (int64_t)s->len << s->dsh && s->len == want >> (s->dsh - 1),
+              "free %d: dsh %d len %d gen %lld", w[c], s->dsh, s->len, (long long)L);
+        printf("  free w5 %5d: %.2f s at %s, generation %lld samples\n", w[c], (double)L / 44100,
+               s->dsh == 2 ? "11.025 kHz" : "22.05 kHz", (long long)L);
+    }
+}
+
+static void test_ramp_blocks(void)
+{
+    /* a free wrap's gain ramp (256 loop samples) spans several blocks: the old gain must survive the block boundary */
+    fx_reset(7400);
+    knobs[5] = 1000;
+    int bad = 0, seen = 0;
+    int32_t gm_prev = 0, rs_prev = 0;
+    for (int k = 0; k < 20000; k++) {
+        int gb = st[0].gen;
+        int32_t gmb = st[0].gm, rsb = st[0].rs;
+        if (k == 15) press();
+        block(src_speech);
+        if (st[0].mode == S_ERODE && st[0].gen != gb) { gm_prev = gmb; rs_prev = rsb; seen++; continue; }
+        if (st[0].mode == S_ERODE && st[0].gk > 0 && seen && (st[0].gmo != gm_prev || st[0].rso != rs_prev)) bad++;
+    }
+    CHECK(seen > 5 && !bad, "gain ramp: %d blocks with a lost old gain (%d wraps)", bad, seen);
+    printf("  free loop: the previous gain is kept through the ramp in all blocks (%d wraps)\n", seen);
+}
+
 /* ---------- screen states (JSON for plugins/sitting/preview.py) ---------- */
 static void screen_state(int n)
 {
@@ -481,6 +589,19 @@ static void screen_state(int n)
         press();
         for (int k = 0; k < 90000 && st[0].gen < 40; k++) block(src_speech);
         for (int k = 0; k < 300; k++) block(src_speech);
+        break;
+    case 8:                                                                   /* idle at 50 BPM: SYNC 1 BAR LO-FI */
+    case 9:                                                                   /* idle, tape at 25 %: SYNC 1 BAR AS 1/2 */
+        clock_set_tempo(n == 8 ? 50 : 120);
+        if (n == 9) { M.follows = 1; M.tape_run = 1; M.step = 0x40000; }
+        knobs[5] = (int16_t)bar1; op1_fx_page[0][0] = 1;
+        for (int k = 0; k < 20; k++) block(0);
+        break;
+    case 10:                                                                  /* free 7.5 s at 11.025 kHz, GEN 01 */
+        knobs[5] = 13000; press();
+        for (int k = 0; k < 40000 && st[0].gen < 1; k++) block(src_speech);
+        for (int k = 0; k < 1300; k++) block(src_speech);
+        op1_fx_page[0][0] = 1;
         break;
     }
     for (int i = 0; i < 8; i++) fk[i] = knobs[i];
@@ -538,6 +659,10 @@ int main(int argc, char **argv)
     test_wrap_click();
     printf("level:\n");
     test_level();
+    printf("slow tape / long free loops:\n");
+    test_slow_tape();
+    test_free_long();
+    test_ramp_blocks();
     printf("robustness:\n");
     test_random();
     printf(fails ? "%d FAILED\n" : "all passed\n", fails);

@@ -17,7 +17,7 @@ The FX list shows it as **in a room**. The source folder, the C symbols (`FX_sit
 
 | knob | page 1 | page 2 (press) |
 |---|---|---|
-| blue | **SIZE**: longest wall 0.8–8 m (log); 6.1 m at 88 % | **LOOP**: length of the next capture. First 40 %: FREE 0.5–3.9 s. Then 6 synced lengths: 1/16, 1/8, 1/4 (1 beat), 1/2 (2 beats), 1 BAR, 2 BARS (4/4) |
+| blue | **SIZE**: longest wall 0.8 - 8 m (log); 6.1 m at 88 % | **LOOP**: length of the next capture. First 40 %: FREE 0.5 - 7.6 s (2.6 s at the default; over 3.8 s it records at 11.025 kHz). Then 6 lengths synced to the tempo: 1/16, 1/8, 1/4 (1 beat), 1/2 (2 beats), 1 BAR, 2 BARS (4/4) |
 | green | **SHAPE**: CUBE 1:1:1, GOLDEN 2.618:1.618:1, BOLT 1.59:1.26:1, LUCIER 6.1 × 4.3 × 2.6 m | **ABSORB**: high-frequency loss per generation (none to a ~1.3 kHz one-pole) |
 | white | **ERODE**: how hard each pass is filtered (resonator Q 8–80, room share 12–100 %; the rest is direct sound plus early reflections) | – |
 | orange | **MIX**: dry to wet (wet = the loop) | press = **LATCH**: each toggle starts a new capture; with a synced length it **arms** it (press again to cancel) |
@@ -57,16 +57,27 @@ The page-2 LOOP default is FREE 2.6 s.
   then runs on at the tempo, so arming and looping keep working. When the tape plays again, the loop follows the
   tape's clock.
 - **Tape speed.** At a different tape speed the clock runs at that speed, and the loop follows it (at half speed,
-  a 1/4 loop lasts 44100 samples).
-- **Long loops.** A loop that does not fit in 3.9 s at 22.05 kHz is recorded at **11.025 kHz** (7.8 s, more
-  lo-fi; the screen shows 11K). At 120 BPM, 2 BARS (4 s) needs 11.025 kHz. 1 BAR fits at 22.05 kHz down to
-  65 BPM, and 2 BARS down to 33 BPM at 11.025 kHz. A length that does not fit even then is halved (LOOP page shows
-  `LONG`), for example 2 BARS at 50 BPM runs as 1 BAR.
-- **Tempo changes while a loop plays.** The loop keeps its recorded material and stays on the grid. Each
-  generation still starts on the counted grid point.
-  - If the tempo gets faster, the end of each pass is cut. A 256-sample de-click covers the step.
-  - If the tempo gets slower, the material runs out before the next grid point. It fades out over about 1.5 ms,
-    then there is silence until the grid point.
+  a 1/4 loop lasts 44100 samples). A loop captured at one speed and played at a slower one restarts more often
+  instead of leaving a gap (see "Tempo changes" below). Note that with the tape stopped the LOOP page previews the
+  length at the nominal tempo; capture while the tape runs at the speed you will play at.
+- **Long loops.** A loop that does not fit in 3.8 s at 22.05 kHz is recorded at **11.025 kHz** (7.6 s, more
+  lo-fi; the screen shows LO-FI). At 120 BPM, 2 BARS (4 s) needs 11.025 kHz. 1 BAR fits at 22.05 kHz down to
+  67 BPM and at 11.025 kHz down to 34 BPM; 2 BARS fits at 11.025 kHz down to 67 BPM. A length that does not fit even then is halved, and the LOOP
+  page says what will be recorded: `SYNC 2 BARS AS 1 BAR` at 50 BPM, or `SYNC 1 BAR AS 1/2` at 120 BPM with the
+  tape at 25 % (the clock runs at 30 BPM there).
+- **Tempo or tape speed changes while a loop plays.** The loop keeps its recorded material and stays on the grid.
+  - If the clock gets faster, the end of each pass is cut. A 256-sample de-click covers the step.
+  - If the clock gets slower, the loop restarts on the largest power-of-two part of its length (1 BAR, 1/2, 1/4,
+    ...) that the recording still fills, within a factor of 1.41. Each part starts on its own grid inside the bar
+    (a 1/4 part on a beat, a 1/2 part on beat 1 or 3). For example, a 1 BAR loop captured at 120 BPM restarts every
+    beat with the tape at 25 %, and goes back to whole bars on the bar lines when the tape returns to 100 %. Once
+    the recording has run out, the restart comes on the next such grid point, so the pass that was playing when
+    the clock slowed down does not leave a long gap either. Every restart is a generation, so at 25 % the room
+    erodes the loop 4 times as fast per bar.
+  - A slowdown smaller than that (up to 1.41 times slower) keeps the full length: the material runs out before
+    the next start, fades out over about 1.5 ms, and there is silence until the grid point.
+  - A pass shorter than 1/8 of the loop (realigning to the bar, a clock jump) does not count as a generation, so
+    its peaks do not jerk the normalisation gain.
   - Re-capture (two presses) to fit the new tempo.
 
   A jump of the clock (tape relocation, MIDI START) can lengthen or shorten one generation by the jump.
@@ -75,8 +86,9 @@ The page-2 LOOP default is FREE 2.6 s.
 
 ## How it works
 
-- **Loop.** Up to 86016 int16 samples in the FX scratch buffer, plus a 2048-sample early-reflection line (176128
-  of 176460 bytes).
+- **Loop.** Up to 84096 int16 samples in the FX scratch buffer, plus a 2048-sample early-reflection line and the
+  2048-sample crossfade pre-roll ring (176384 of 176460 bytes). Free loops longer than 3.8 s and long synced loops
+  run at 11.025 kHz.
   - 22.05 kHz: capture uses a [1 3 3 1]/8 decimator, and playback uses linear 2× upsampling.
   - 11.025 kHz: the same decimator twice, and linear 4× upsampling.
 
@@ -103,9 +115,10 @@ The page-2 LOOP default is FREE 2.6 s.
 
 - **Counter and tags.** The counter reads "GEN 07" ("REC" while capturing, "GEN --" before the first capture).
   Next to it, the loop length is shown in blue ("1 BAR", "1/16", "2.6 SEC"), and below that ARMED (blinking) or
-  11K.
+  LO-FI (11.025 kHz).
 - **Info lines.** They show the shape (green), the dimensions (blue), and the loudest room mode (white). While a
-  page-2 knob is edited, the third line shows `LOOP 2.6 SEC`, `SYNC 1 BAR [11K | LONG]` or `ABSORB nn%`. While
+  page-2 knob is edited, the third line shows `LOOP 2.6 SEC`, `LOOP 7.5 SEC LO-FI`, `SYNC 1 BAR [LO-FI | AS 1/2]` (what the next capture will record at the current clock)
+  or `ABSORB nn%`. While
   idle it shows `PRESS ORANGE` or `STARTS ON BEAT`.
 - **Floor plan.** An L × W rectangle in blue that grows with the size knob, with a side section for H. The nodal
   lines of the active axial modes light up with their resonator's energy.
@@ -117,8 +130,9 @@ The page-2 LOOP default is FREE 2.6 s.
   ERODE, MIX; on page 2: LOOP, ABSORB) and a 5-px bar on a dim track of the same colour.
   - Page-2 values are dashed.
   - The page-2 LOOP bar has ticks for FREE and the 6 synced lengths.
-- **Previews.** `sitting_preview.png` comes from `python -I plugins/sitting/preview.py`. It shows 8 states (idle,
-  armed, recording, synced generations, 2 BARS at 11K, free, 1/16, deep erosion), run through
+- **Previews.** `sitting_preview.png` comes from `python -I plugins/sitting/preview.py`. It shows 11 states (idle,
+  armed, recording, synced generations, 2 BARS at 11.025 kHz, free, 1/16, deep erosion, the LO-FI and AS labels, a
+  7.5 s free loop), run through
   `harness/sitting_test.c` with a modelled beat clock. The stock `harness/render.py "in a room"` still works but
   only shows the idle screen, because it never presses the latch.
 
@@ -150,11 +164,23 @@ The input is speech-like, into a dirty scratch buffer.
 - **Tempo change** in the middle of a 1 BAR loop:
   - 120 → 132 BPM: that generation is 86055 samples, then 80181..80182 (bar = 80181.8). The end is cut each pass.
   - 120 → 108 BPM: 90821, then 98000 (silence before each bar line). The loop stays locked.
+- **Slower tape** (`test_slow_tape`): 1 BAR captured at 120 BPM with the tape stopped, then the tape at 25 % (step
+  0x40000, 0x3FFFF, 0x40001). The old code played 1 beat and then left the recording used up for about 6 s per
+  bar (4134 blocks). Now every generation is 88199..88201 samples (1 beat at 25 %), the recording is never used up
+  for more than 1 block, and back at 100 % every generation is a whole bar starting on a tape bar line. A 1 BAR
+  capture made at 25 % runs as 1/2 at 11.025 kHz without gaps.
+- **Normal speed is unchanged:** rendered output of synced loops (1/16, 1/4, 1/2, 1 BAR, 2 BARS at 50 - 133 BPM)
+  is byte-identical to the previous version.
+- **Long free loops** (`test_free_long`): 2.6 s (default, 22.05 kHz), 6.5 s and 7.5 s (11.025 kHz) loop with
+  exact lengths and no clipping after generation 0.
+- **Gain ramp** (`test_ramp_blocks`): the previous generation's gain now survives the block boundaries of a free
+  loop's 256-sample ramp (it was lost after the first block, so the seam dipped to 4 - 13 % of the level; now
+  26 - 92 %). This is the only change to free loops of 2.6 s and less.
 - **Slow tempos.** 2 BARS at 120 BPM runs at 11.025 kHz with generations of exactly 176400 samples. 2 BARS at
   50 BPM runs as 1 BAR at 11.025 kHz (211680).
 - **Tape.** With a stopped tape, the clock copy runs on (15 generations). With the tape playing from 9.3 beats,
   a 1 BAR capture starts at tape beat 12 (a bar line). At half tape speed, a 1/4 loop is 44100 samples.
-- **Free mode** is bit-identical to the previous version. Checked against the old `sitting.c` with the same input
+- **Free mode** (before the crossfade and gain ramp were added) was bit-identical to the version before sync. Checked against the old `sitting.c` with the same input
   (two lengths, default and extreme knobs, 40 s, two captures): all erosion output is equal and the loop buffer
   is identical. Only the lo-fi monitor during REC differs: it now lags by one loop sample.
 - **Room convergence**, measured as energy within ±2 % of a mode:
