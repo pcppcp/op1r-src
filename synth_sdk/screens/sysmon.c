@@ -288,8 +288,22 @@ static void sm_update(void *scr, int dt)
     if ((frame & 31) == 16) sample_ram();
     if ((frame & 255) == 128) sample_disk();
     frame++;
-    op1_screen_draw(scr, dt);
+    /* regions (docs/75): per row the bar, its peak marker and the value; the bottom line. Static: frames, ticks, labels */
+    static const op1_rect_t dyn[SM_ROWS + 1] = {
+        { SM_BX0 - 2, 14 - 4, 319, 14 + 16 }, { SM_BX0 - 2, 38 - 4, 319, 38 + 16 }, { SM_BX0 - 2, 62 - 4, 319, 62 + 16 },
+        { SM_BX0 - 2, 86 - 4, 319, 86 + 16 }, { SM_BX0 - 2, 110 - 4, 319, 110 + 16 }, { 0, 132, 319, 152 } };
+    _Static_assert(SM_ROWS == 5, "regions per row");
+    op1_screen_regions(scr, dyn, SM_ROWS + 1);
     void *r = op1_raster();
+    if (op1_screen_static(scr)) {
+        op1_screen_draw(scr, dt);
+        if (txt_ok) {
+            for (int row = 0; row < SM_ROWS; row++) op1_text_draw(txt_mem[2 * row], r, ident);
+            op1_text_draw(txt_mem[2 * SM_ROWS], r, ident);
+            op1_text_draw(txt_mem[2 * SM_ROWS + 1], r, ident);
+        }
+        op1_screen_static_done(scr);
+    }
     for (int row = 0; row < SM_ROWS; row++) {
         int y = sm_row_y[row];
         if (row == SM_MIDI) {
@@ -310,11 +324,8 @@ static void sm_update(void *scr, int dt)
             op1_text_set(txt_mem[2 * row + 1], s);
             for (k = 0; (last[row][k] = s[k]) != 0; k++) ;
         }
-        op1_text_draw(txt_mem[2 * row], r, ident);
         op1_text_draw(txt_mem[2 * row + 1], r, ident);
     }
-    op1_text_draw(txt_mem[2 * SM_ROWS], r, ident);
-    op1_text_draw(txt_mem[2 * SM_ROWS + 1], r, ident);
     extern int32_t op1_db_last_err __attribute__((weak));
     char t[48], *q = t;
     *q++ = (char)('1' + sm_page); *q++ = '/'; *q++ = (char)('0' + PG_N); *q++ = ' ';

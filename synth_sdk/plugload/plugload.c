@@ -134,6 +134,9 @@ static const struct { const char *name; void *addr; } exports[] = {
     { "dpu_sync_auto", (void *)dpu_sync_auto },
     /* chord mode (docs/50): a consumed key for the MIDI recorder input I */
     { "op1_key_played", (void *)op1_key_played }, { "op1_dbg", (void *)op1_dbg },
+    /* static / dynamic screen regions (screens/guiskip.c, docs/75) */
+    { "op1_screen_regions", (void *)op1_screen_regions }, { "op1_screen_static", (void *)op1_screen_static },
+    { "op1_screen_static_done", (void *)op1_screen_static_done }, { "op1_screen_static_dirty", (void *)op1_screen_static_dirty },
     /* the sample browser (screens/sbrowse.c): sampler+ T1 */
     { "sb_open", (void *)sb_open }, { "sb_close", (void *)sb_close }, { "sb_is_open", (void *)sb_is_open },
     { "sb_turn", (void *)sb_turn }, { "sb_pick", (void *)sb_pick }, { "sb_page", (void *)sb_page },

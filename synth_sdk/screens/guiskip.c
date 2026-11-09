@@ -15,7 +15,8 @@
 uint32_t gs_log[2][1024], gs_logn[2];          /* debug: the hashed values of the last render / record frame */
 static uint32_t logn;
 static uint8_t recording;                       /* this frame is a record frame */
-#define FNV(h, v) do { uint32_t v_ = (uint32_t)(v); if (logn < 1024) gs_log[recording][logn++] = v_; (h) = ((h) ^ v_) * 0x01000193u; } while (0)
+static uint8_t no_hash;                         /* inside a region screen's static parts: not hashed (docs/75) */
+#define FNV(h, v) do { uint32_t v_ = (uint32_t)(v); if (no_hash) break; if (logn < 1024) gs_log[recording][logn++] = v_; (h) = ((h) ^ v_) * 0x01000193u; } while (0)
 static uint32_t fh = 0x811C9DC5u;               /* the frame being drawn */
 
 static uint32_t hash_buf[2], last;              /* what each display buffer shows; the newest frame */
@@ -87,12 +88,122 @@ int gs_misc(int id, const int32_t *a)          /* dim_all (id 1) / dotted_hline 
 
 int gs_misc_dim(void *raster) { (void)raster; return gs_misc(1, 0); }
 int gs_misc_dot(int id, const int32_t *a, const uint8_t *c) { (void)id; int r = gs_misc(2, a); FNV(fh, c[0] | c[1] << 8 | c[2] << 16); return r; }
+static int slot_of(const uint32_t *b);
+
+/* ---- static / dynamic screen regions (docs/75) ----
+ * Region mode for a frame: a render frame (not record / check), the registered screen is the current one and the only
+ * visible screen. Static parts are drawn once into `cache` (op1_screen_static = 1 in that frame); each display buffer
+ * gets one full copy of it (buf_gen); afterwards only the declared areas are restored from the cache each frame. */
+#define SCREEN_TABLE   ((uint8_t *const *)0x01DF4E54)
+#define CUR_SCREEN     (*(volatile int *)0x018B65C8)
+#define XFORM_PT       ((void (*)(int32_t *, const void *, const int32_t *))0x01A231B0)   /* (out, matrix, in) q10 */
+#ifdef GS_ON
+static uint8_t cache[400 * 512] __attribute__((aligned(32)));
+#else
+static uint8_t cache[4];
+#endif
+static void *rg_scr;                             /* the screen that declared regions */
+static op1_rect_t rg_scr_rect[OP1_REGIONS_MAX];  /* its areas (screen units) */
+static int16_t rg_dev[OP1_REGIONS_MAX][4];       /* the same in device pixels (x0, y0, x1, y1), set per region frame */
+static int rg_n;
+static uint32_t gen = 1, cache_gen, buf_gen[2];
+static uint8_t rg_active, rg_static, rg_prev_active;  /* this frame in region mode; static parts wanted this frame */
+static void *rg_raster;
+struct { uint32_t frames, statics, full_copies, restores; } gs_rg_stat;
+
+void op1_screen_regions(void *scr, const op1_rect_t *r, int n)
+{
+#ifdef GS_NOREG
+    (void)scr; (void)r; (void)n; return;          /* measurement builds: regions ignored */
+#endif
+    if (n > OP1_REGIONS_MAX) n = OP1_REGIONS_MAX;
+    if (rg_scr != scr) { rg_scr = scr; gen++; }
+    for (int i = 0; i < n; i++) rg_scr_rect[i] = r[i];
+    rg_n = n;
+}
+int op1_screen_static(void *scr)
+{
+    int r = !recording && (!rg_active || (scr == rg_scr && rg_static));
+    if (r && scr == rg_scr) no_hash = 1;         /* the hash covers the moving parts only, in every kind of frame */
+    return r;
+}
+void op1_screen_static_dirty(void *scr) { if (scr == rg_scr) { gen++; force = 2; } }
+static void copy_rows(uint8_t *dst, const uint8_t *src, int y0, int y1, int x0, int x1)   /* device px, inclusive */
+{
+    for (int y = y0; y <= y1; y++) {
+        uint32_t *d = (uint32_t *)(dst + y * 512 + (x0 & ~1) * 2);
+        const uint32_t *q = (const uint32_t *)(src + y * 512 + (x0 & ~1) * 2);
+        for (int n = ((x1 | 1) - (x0 & ~1) + 1) / 2; n > 0; n--) *d++ = *q++;
+    }
+}
+void op1_screen_static_done(void *scr)
+{
+    if (scr == rg_scr) no_hash = 0;
+    if (!rg_active || scr != rg_scr || !rg_static) return;
+    rg_static = 0;
+    copy_rows((uint8_t *)cur_buf, cache, 0, 399, 0, 199);          /* the new static picture into the shown buffer */
+    cache_gen = gen; buf_gen[slot_of(cur_buf)] = gen;
+    gs_rg_stat.full_copies++;
+    RASTER_TARGET(rg_raster, cur_buf);           /* the moving parts go to the display buffer */
+}
+static int visible_screens(void **only)
+{
+    int n = 0, cur = CUR_SCREEN;
+    for (int i = 0; i < 0x44; i++) {
+        uint8_t *o = SCREEN_TABLE[i];
+        if (!o) continue;
+        const uint8_t *vt = *(uint8_t *const *)(o + 0xC);
+        int (*vis)(void *, int) = *(int (*const *)(void *, int))(vt + 0x14);
+        if (vis(o + *(const int16_t *)(vt + 0x10), cur)) { n++; *only = o; }
+    }
+    return n;
+}
+static void rect_to_dev(const op1_rect_t *r, int16_t *d)
+{
+    int32_t in[4][2] = { { r->x0, r->y0 }, { r->x1 + 1, r->y0 }, { r->x0, r->y1 + 1 }, { r->x1 + 1, r->y1 + 1 } };
+    int32_t x0 = 1 << 30, y0 = 1 << 30, x1 = -(1 << 30), y1 = -(1 << 30);
+    for (int k = 0; k < 4; k++) {
+        int32_t p[2] = { in[k][0] << 10, in[k][1] << 10 }, o[2];
+        XFORM_PT(o, (const void *)0x01DE5E68, p);
+        if (o[0] < x0) x0 = o[0]; if (o[0] > x1) x1 = o[0];
+        if (o[1] < y0) y0 = o[1]; if (o[1] > y1) y1 = o[1];
+    }
+    x0 = (x0 >> 10) - 2; y0 = (y0 >> 10) - 2; x1 = (x1 >> 10) + 2; y1 = (y1 >> 10) + 2;   /* antialiasing margin */
+    d[0] = (int16_t)(x0 < 0 ? 0 : x0); d[1] = (int16_t)(y0 < 0 ? 0 : y0);
+    d[2] = (int16_t)(x1 > 199 ? 199 : x1); d[3] = (int16_t)(y1 > 399 ? 399 : y1);
+}
+/* a render frame on the display buffer: region mode or the normal clear */
+static void render_start(void *raster)
+{
+    void *only = 0;
+    rg_active = 0;
+    if (rg_scr && rg_n && (void *)SCREEN_TABLE[CUR_SCREEN] == rg_scr && visible_screens(&only) == 1 && only == rg_scr
+        && slot_of(cur_buf) >= 0) {
+        if (!rg_prev_active) gen++;               /* the buffers / cache hold another picture */
+        rg_active = 1; rg_raster = raster; gs_rg_stat.frames++;
+        int sl = slot_of(cur_buf);
+        if (cache_gen != gen) {                   /* static parts into the cache, then copied (static_done) */
+            rg_static = 1; gs_rg_stat.statics++;
+            RASTER_TARGET(raster, cache); RASTER_CLEAR(raster);
+        } else if (buf_gen[sl] != gen) {          /* this buffer still holds an older picture */
+            rg_static = 0; copy_rows((uint8_t *)cur_buf, cache, 0, 399, 0, 199); buf_gen[sl] = gen; gs_rg_stat.full_copies++;
+        } else {                                  /* restore the moving areas */
+            rg_static = 0;
+            for (int i = 0; i < rg_n; i++) {
+                rect_to_dev(&rg_scr_rect[i], rg_dev[i]);
+                copy_rows((uint8_t *)cur_buf, cache, rg_dev[i][1], rg_dev[i][3], rg_dev[i][0], rg_dev[i][2]);
+            }
+            gs_rg_stat.restores++;
+        }
+    } else RASTER_CLEAR(raster);
+    rg_prev_active = rg_active;
+}
 
 static int slot_of(const uint32_t *b) { if (buf_id[0] == b) return 0; if (buf_id[1] == b) return 1; return -1; }
 void gs_frame(void *raster)                    /* CALL Raster::clear in Screen::frame (0x01A3BBE0): a new frame */
 {
     /* the frame just drawn */
-    uint32_t h = fh; fh = 0x811C9DC5u;
+    uint32_t h = fh; fh = 0x811C9DC5u; no_hash = 0;
 #ifdef GS_VERIFY
     if (verifying) {                            /* the check render: compare with the shown buffer */
         verifying = 0; prev_buf = 0;            /* not a display frame */
@@ -125,12 +236,12 @@ void gs_frame(void *raster)                    /* CALL Raster::clear in Screen::
     recording = (uint8_t)rec; prev_rec = (uint8_t)rec; prev_buf = cur_buf;
 #ifdef GS_VERIFY
     if (rec && !(++vcount & 15)) {              /* render this frame in full into scratch, then compare */
-        verifying = 1; vbuf = cur_buf; recording = 0; prev_rec = 0;
+        verifying = 1; vbuf = cur_buf; recording = 0; prev_rec = 0; rg_active = 0;
         RASTER_TARGET(raster, scratch); RASTER_CLEAR(raster);
         return;
     }
 #endif
-    if (rec) { gs_stat.records++; RASTER_TARGET(raster, scratch); }
-    else { gs_stat.renders++; RASTER_CLEAR(raster); }
+    if (rec) { gs_stat.records++; rg_active = 0; rg_prev_active = rg_prev_active && 1; RASTER_TARGET(raster, scratch); }
+    else { gs_stat.renders++; render_start(raster); }
 }
 #endif

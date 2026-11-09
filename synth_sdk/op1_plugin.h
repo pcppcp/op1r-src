@@ -310,6 +310,29 @@ typedef struct {
 } op1_screen_t;
 #define OP1_Q10(v)          ((int32_t)((v) * 1024))
 
+/* ---- static / dynamic screen regions (opt-in, docs/75) ----
+ * A screen whose picture is mostly static declares the areas that change; the core then draws the static parts once into a
+ * cache and each frame restores only the declared areas from it before the screen draws its moving parts:
+ *     static const op1_rect_t dyn[] = { { 60, 20, 300, 34 }, ... };      (screen units, 320 x 160, inclusive)
+ *     update(scr, dt):  op1_screen_regions(scr, dyn, n);
+ *                       if (op1_screen_static(scr)) { op1_screen_draw(scr, dt); labels...; op1_screen_static_done(scr); }
+ *                       moving parts (only inside the declared areas: the screen's responsibility, nothing clips)
+ * op1_screen_static_dirty(scr): the static part changed (labels, page switch). Screens that never call these work as
+ * before. Builds without the region support: op1_screen_static always returns 1 (the screen draws everything). */
+typedef struct { int16_t x0, y0, x1, y1; } op1_rect_t;
+#define OP1_REGIONS_MAX 16
+#ifndef OP1_HOST
+void op1_screen_regions(void *scr, const op1_rect_t *r, int n);
+int  op1_screen_static(void *scr);
+void op1_screen_static_done(void *scr);
+void op1_screen_static_dirty(void *scr);
+#else
+static inline void op1_screen_regions(void *scr, const op1_rect_t *r, int n) { (void)scr; (void)r; (void)n; }
+static inline int  op1_screen_static(void *scr) { (void)scr; return 1; }
+static inline void op1_screen_static_done(void *scr) { (void)scr; }
+static inline void op1_screen_static_dirty(void *scr) { (void)scr; }
+#endif
+
 /* ---- sequencer plugins (plugin.json "kind": "seq", docs/44) ----
  * An extra sequencer type: a seq_types row with its name; selecting it runs it as the finger type (3) with
  * active[mode] set. The core shows its screen in the finger screen slot (0x2D), routes keys / encoders while that
