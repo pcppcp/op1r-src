@@ -1,7 +1,7 @@
 /* ENTE: sidechain compressor FX (docs/61). The detector listens to a selectable source, the gain goes on the FX's own
  * input; on the master (stereo) one linked gain for L and R.
  *   blue  threshold (-48 .. 0 dB)          press: attack (0.1 .. 50 ms)
- *   green ratio (1:1 .. 20:1 curved, top = inf)    press: makeup (0 .. +12 dB)
+ *   green ratio (1:1 .. 20:1 curved, top = inf)    press: makeup (0 .. +24 dB)
  *   white release (20 ms .. 1 s)            press: sidechain high-pass (off .. 250 Hz)
  *   red   source, a list knob (one entry per click, wraps; OP1_PRESS_LIST): SELF, T1..T4 (tape tracks, pre-fader),
  *         TAPE (their sum), IN (input), INST (master: the live instrument; synth / drum: its own input = SELF),
@@ -9,7 +9,10 @@
  * Sources other than SELF / BEAT come from the core (op1_sc_source). Screen: a rubber duck squeezed by the gain
  * reduction (flat at 24 dB), the source top left.
  * Attack: the detector rises within 0.1 ms and the attack time ramps the gain reduction in (log domain, every 8
- * samples); release is the detector's. Attack on the reduction: Copyright (C) 2026 Hundekraft. */
+ * samples); release is the detector's. Attack on the reduction: Copyright (C) 2026 Hundekraft.
+ * A newly picked ENTE starts at THRESHOLD 0 dB (plugin.json default), so picking it does not drop the level. The makeup
+ * range is 0 .. +24 dB: the page-2 word 6 is linear in dB, so a saved word reads twice the dB it did at 0 .. +12. The
+ * default word 0 is unchanged. The gain multiply is split (g >> 2) so 16x gain cannot overflow 32 bits. */
 #include "op1_plugin.h"
 
 enum { S_SELF, S_T1, S_T2, S_T3, S_T4, S_TAPE, S_IN, S_BEAT, S_INST };   /* T1..IN = OP1_SC_* numbers */
@@ -48,7 +51,7 @@ static int32_t log2_q10(uint32_t x)                        /* x > 0 */
     int32_t f = (int32_t)m - 32768, i = f >> 10, fr = f & 1023;
     return (n << 10) + lg_tab[i] + (((lg_tab[i + 1] - lg_tab[i]) * fr) >> 10);
 }
-static int32_t exp2_q14(int32_t v)                         /* 2^(v / 1024) in Q14, v <= 2048 */
+static int32_t exp2_q14(int32_t v)                         /* 2^(v / 1024) in Q14, v <= 4096 */
 {
     int32_t n = v >> 10, f = v & 1023, i = f >> 5, fr = f & 31;
     int32_t m = ex_tab[i] + (((ex_tab[i + 1] - ex_tab[i]) * fr) >> 5);
@@ -92,7 +95,7 @@ static void process(int pos, int16_t *l, int16_t *r, const int16_t *p)
     int32_t thr = 15360 - ((32767 - k0) * 8192 >> 15);                     /* 0 dBFS .. -48 dB */
     int32_t rq8 = 256 + ((((k1 * k1) >> 15) * 19 * 256) >> 15);            /* ratio Q8 1 .. 20, curved (k^2) */
     int32_t slope = k1 >= 32000 ? 1024 : 1024 - (1024 * 256) / rq8;
-    int32_t mk = (w6 * 2048) >> 15;                                        /* 0 .. +12 dB */
+    int32_t mk = (w6 * 4096) >> 15;                                        /* 0 .. +24 dB */
     int32_t ta = 4 + (((w5 * w5) >> 15) * 2201 >> 15), tr = 882 + (((k2 * k2) >> 15) * 43218 >> 15);
     int32_t ca = (1 << 20) / 4, cr = (1 << 20) / tr;                     /* detector: 0.1 ms rise, the release */
     int32_t a8 = ta <= 8 ? 1024 : (8 * 1024) / ta;                         /* attack on the reduction, per 8 samples, Q10 */
@@ -122,10 +125,10 @@ static void process(int pos, int16_t *l, int16_t *r, const int16_t *p)
             gt = exp2_q14(mk - grs);
         }
         g += (gt - g) >> 3;
-        int32_t a = sat16((l[i] * g) >> 14);
+        int32_t a = sat16((l[i] * (g >> 2)) >> 12);                        /* g up to 16x: split so 32 bits hold */
         l[i] = (int16_t)a;
         if (a < 0) a = -a;
-        if (r) { int32_t b = sat16((r[i] * g) >> 14); r[i] = (int16_t)b; if (b < 0) b = -b; if (b > a) a = b; }
+        if (r) { int32_t b = sat16((r[i] * (g >> 2)) >> 12); r[i] = (int16_t)b; if (b < 0) b = -b; if (b > a) a = b; }
         if (a > peak) peak = a;
     }
     s->env = env; s->g = g; s->lp = lp; s->hold = hold; s->grs = grs; s->gr = grmax;
@@ -299,7 +302,7 @@ static void ente_screen_update(void *scr, int dt)
         txt(r, TX_LAB, "thresh");
     }
     txt(r, TX_VAL, v);
-    if (op1_fx_page[pos][1]) { p = sq_cat(v, "+"); p = sq_num(p, (uint32_t)((word(wd, 6) * 12 + 16384) >> 15), 1); sq_cat(p, " db"); txt(r, TX_LAB + 1, "makeup"); }
+    if (op1_fx_page[pos][1]) { p = sq_cat(v, "+"); p = sq_num(p, (uint32_t)((word(wd, 6) * 24 + 16384) >> 15), 1); sq_cat(p, " db"); txt(r, TX_LAB + 1, "makeup"); }
     else {
         int32_t rq8 = 256 + ((((k[1] * k[1]) >> 15) * 19 * 256) >> 15), r10 = (rq8 * 10 + 128) >> 8;   /* as the DSP */
         if (k[1] >= 32000) sq_cat(v, "inf");

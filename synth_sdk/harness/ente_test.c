@@ -83,10 +83,17 @@ static void tests(void)
     ente_init(0); knobs(16384, 32767, 12000, srck(0, S_SELF), 0, 0, 0);
     pk = run_sine(0, 1000, 200, 0, 0);
     CHECK(abs(pk - 1000) < 30, "below threshold: %d (want 1000)", pk);
-    /* makeup +12 dB on a quiet signal */
+    /* makeup: word 32767 = +24 dB, half = +12 dB, on a quiet signal */
     ente_init(0); knobs(16384, 32767, 12000, srck(0, S_SELF), 0, 32767, 0);
     pk = run_sine(0, 1000, 200, 0, 0);
-    CHECK(fabs(db(pk) - db(1000) - 12) < 0.7, "makeup: %.1f dB over the input", db(pk) - db(1000));
+    CHECK(fabs(db(pk) - db(1000) - 24) < 0.9, "makeup max: %.1f dB over the input (want 24)", db(pk) - db(1000));
+    ente_init(0); knobs(16384, 32767, 12000, srck(0, S_SELF), 0, 16384, 0);
+    pk = run_sine(0, 1000, 200, 0, 0);
+    CHECK(fabs(db(pk) - db(1000) - 12) < 0.7, "makeup half: %.1f dB over the input (want 12)", db(pk) - db(1000));
+    /* +24 dB on a loud signal must clip, not wrap (16x gain; the multiply is split) */
+    ente_init(0); knobs(16384, 32767, 12000, srck(0, S_SELF), 0, 32767, 0);
+    pk = run_sine(0, 30000, 100, 0, 0);
+    CHECK(pk >= 32000, "makeup +24 on a loud sine clips, peak %d", pk);
 
     /* T1 ducks the instrument: loud track -> quiet output, silent track -> unity; the source asked for is T1 */
     ente_init(0); knobs(16384, 32767, 12000, srck(0, S_T1), 0, 0, 0);
@@ -110,7 +117,7 @@ static void tests(void)
         CHECK(ent_src[7] == S_INST && ent_src[8] == S_BEAT && div_of(8) == 0 && div_of(15) == 7, "list order");
         CHECK(!strcmp(div_name[5], "1/4t"), "lowercase triplets");
     }
-    {   /* defaults (thresh -36 dB, 8:1) at a real track level (peak 2900 = -21 dBFS, measured in op1emu): >= 10 dB duck */
+    {   /* the former defaults (thresh -36 dB, 8:1; plugin.json now starts at 0 dB) at a real track level (peak 2900 = -21 dBFS, measured in op1emu): >= 10 dB duck */
         ente_init(0); knobs(8192, 19840, 12000, srck(0, S_T1), 4000, 0, 9000);
         int pk = run_sine(0, 8000, 300, sc_buf[OP1_SC_T1], 2900);
         CHECK(db(8000) - db(pk) >= 10, "defaults, track at -21 dBFS: %.1f dB of ducking", db(8000) - db(pk));
@@ -204,6 +211,15 @@ static void tests(void)
         ntexts = 0; ente_screen_update(0, 16);
         CHECK(ntexts == 8 && !strcmp(texts[0]->s, "thresh") && !strcmp(texts[1]->s, "-24 db") && !strcmp(texts[7]->s, "self"),
               "bottom row: %d texts, %s / %s / %s", ntexts, ntexts ? texts[0]->s : "", ntexts > 1 ? texts[1]->s : "", ntexts > 7 ? texts[7]->s : "");
+        /* the plugin's defaults (thresh word 32767 = 0 dB) and makeup readout: max word = +24 db, half = +12 db */
+        knobs(32767, 19840, 12000, srck(0, S_SELF), 4000, 32767, 9000); memcpy(host_fx_knobs[0], P, sizeof P);
+        ntexts = 0; ente_screen_update(0, 16);
+        CHECK(ntexts == 8 && !strcmp(texts[1]->s, "0 db"), "default threshold readout: %s", ntexts > 1 ? texts[1]->s : "");
+        op1_fx_page[0][1] = 1; ntexts = 0; ente_screen_update(0, 16);
+        CHECK(ntexts == 8 && !strcmp(texts[3]->s, "+24 db"), "makeup max readout: %s", ntexts > 3 ? texts[3]->s : "");
+        P[6] = 16384; memcpy(host_fx_knobs[0], P, sizeof P); ntexts = 0; ente_screen_update(0, 16);
+        CHECK(!strcmp(texts[3]->s, "+12 db"), "makeup half readout: %s", texts[3]->s);
+        op1_fx_page[0][1] = 0;
     }
 }
 
