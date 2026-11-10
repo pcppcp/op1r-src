@@ -9,7 +9,7 @@
  *   - otherwise render (animated pages render every tick, as stock).
  * The hash covers: main-rasterizer points (draw_line / paths), every sweep (rasterizer object, cell count, box, colour:
  * SVG shapes keep their cells between frames), text draws (object, position / colour words, string, matrix), dims,
- * dotted lines. */
+ * dotted lines, fades (with their amount). */
 #include "../op1_synth.h"
 
 uint32_t gs_log[2][1024], gs_logn[2];          /* debug: the hashed values of the last render / record frame */
@@ -153,6 +153,9 @@ int gs_misc(int id, const int32_t *a)          /* dim_all (id 1) / dotted_hline 
 }
 
 int gs_misc_dim(void *raster) { (void)raster; return gs_misc(1, 0); }
+/* Raster::fade(raster, amount) 0x01A22F3C: the help screen's animated fade of everything under it (its update
+ * 0x019B3A0C, the only caller); the amount changes per frame, so it must be in the hash (else the fade froze) */
+int gs_misc_fade(void *raster, int32_t amount) { (void)raster; FNV(fh, amount); return gs_misc(3, 0); }
 int gs_misc_dot(int id, const int32_t *a, const uint8_t *c) { (void)id; int r = gs_misc(2, a); FNV(fh, c[0] | c[1] << 8 | c[2] << 16); return r; }
 static int slot_of(const uint32_t *b);
 

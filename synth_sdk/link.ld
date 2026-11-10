@@ -32,6 +32,7 @@ SECTIONS {
   .hook_gsframe 0x01A3BBE0 : { KEEP(*(.hook_gsframe)) }
   .hook_lzfind 0x01A3B580 : { KEEP(*(.hook_lzfind)) }
   .hook_gstext 0x01A6259C : { KEEP(*(.hook_gstext)) }
+  .hook_gsfade 0x01A22F3C : { KEEP(*(.hook_gsfade)) }
   .hook_gsdim 0x01A2357A : { KEEP(*(.hook_gsdim)) }
   .hook_gsdot 0x01A24CBC : { KEEP(*(.hook_gsdot)) }
   .hook_gssw1 0x01A24CA6 : { KEEP(*(.hook_gssw1)) }
@@ -47,6 +48,7 @@ SECTIONS {
   _find_node_body = 0x01A3B584;    /* Screen::find_node after its LINK 0 (lazy stock screens) */
   _txt_draw_body = 0x01A625A0;     /* Text::draw after its LINK 0x24 (guiskip) */
   _dot_body = 0x01A24CC0;          /* Raster::dotted_hline after its LINK 0x18 */
+  _fade_body = 0x01A22F40;         /* Raster::fade after P0 = R0; [--SP] = (R7:4, P5:5) */
   _dim_body = 0x01A2357E;          /* Raster::dim_all after P0 = R0; [--SP] = (R7:4, P5:5) */
   _bgs_queue_cont = 0x019411BC;    /* SaveSlotJob queue after its LINK 0 (bgsave.c) */
   _sp_adsr_cont = 0x0191212C;      /* Adsr_render after the two instructions the sampler+ hook replaces */

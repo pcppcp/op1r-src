@@ -611,6 +611,8 @@ _l1v_rs_probe:         JUMP.L _l1_rs_probe
 	jump.l _gs_text_stub;
 	.section .hook_gsdim,"ax"
 	jump.l _gs_dim_stub;
+	.section .hook_gsfade,"ax"
+	jump.l _gs_fade_stub;
 	.section .hook_gsdot,"ax"
 	jump.l _gs_dot_stub;
 	.section .hook_gssw1,"ax"
@@ -664,6 +666,12 @@ _gs_dim_stub:
 	P0 = R0;
 	[--SP] = (R7:4, P5:5);
 	jump.l _dim_body;
+_gs_fade_stub:				/* Raster::fade(R0 raster, R1 amount) */
+	GS_CALL _gs_misc_fade
+	IF !CC JUMP 1f;
+	P0 = R0;
+	[--SP] = (R7:4, P5:5);
+	jump.l _fade_body;
 _gs_sweep_stub:
 	[--SP] = RETS; [--SP] = R0; [--SP] = R1; [--SP] = R2;
 	SP += -12;

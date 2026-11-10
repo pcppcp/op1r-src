@@ -211,6 +211,7 @@ GUISKIP_HOOKS = {0x019149C4: ('hook_gsmove', bytes.fromhex('00e80000')),      # 
                  0x01A3B580: ('hook_lzfind', bytes.fromhex('00e80000')),      # Screen::find_node entry: lazy stock screens
                  0x01A6259C: ('hook_gstext', bytes.fromhex('00e80900')),      # Text::draw entry (LINK 0x24)
                  0x01A2357A: ('hook_gsdim', bytes.fromhex('0032e505')),       # Raster::dim_all entry
+                 0x01A22F3C: ('hook_gsfade', bytes.fromhex('0032e505')),      # Raster::fade entry (help's animated fade)
                  0x01A24CBC: ('hook_gsdot', bytes.fromhex('00e80600')),       # Raster::dotted_hline entry (LINK 0x18)
                  0x01A24CA6: ('hook_gssw1', _SW), 0x01A254DC: ('hook_gssw2', _SW), 0x01A27316: ('hook_gssw3', _SW),
                  0x01A2749A: ('hook_gssw4', _SW), 0x01A274FE: ('hook_gssw5', _SW)}
