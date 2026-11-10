@@ -9,7 +9,8 @@ SECTIONS {
   __image_end = .;
   /* zero-initialised data right after the image, as an LDR FILL block (no bytes in the image) */
   .bss ALIGN(4) (NOLOAD) : { __bss_start = .; *(.bss*) *(COMMON) . = ALIGN(4); __bss_end = .; }
-  .l1eq 0xFFA030F0 : { KEEP(*(.l1eq.0)) KEEP(*(.l1eq.1)) }   /* dsp/eq_l1.c + fir_l1.S: in place of master_eq (docs/81) */
+  .l1eq 0xFFA030F0 : { KEEP(*(.l1eq.0)) KEEP(*(.l1eq.1)) KEEP(*(.l1eq.2)) }   /* dsp/eq_l1.c + fir_l1.S: in place of master_eq (docs/81) */
+  .l1mix 0xFFA00E58 : { KEEP(*(.l1mix)) }                                /* dsp/mix_l1.S: in place of Core_mix_master's mix loops (docs/81) */
   .l1out 0xFFA04280 : { KEEP(*(.l1out.0)) KEEP(*(.l1out.1)) }           /* dsp/outstage_l1.c: in place of master_output_stage (docs/81) */
   .l1tramp 0xFFA0BFB4 : { KEEP(*(.l1tramp)) }    /* free end of L1 instruction SRAM (image ends 0xFFA0BFB4) */
   .hook_namecmp 0x019B975C : { KEEP(*(.hook_namecmp)) }
@@ -47,6 +48,8 @@ SECTIONS {
   _vc_up_body = 0x01A85844;        /* VoiceCtl key_up after its LINK 0x20 */
   _rs_move_body = 0x019149C8;      /* rasterizer move_to after its LINK 0 (guiskip) */
   _rs_line_body = 0x01914908;      /* rasterizer line_to after its LINK 0 */
+  _mix_ret = 0xFFA00FDC;          /* Core_mix_master after its mix loops (docs/81) */
+  _core_mix_master = 0xFFA00E50;   /* R246's master section (docs/81) */
   _find_node_body = 0x01A3B584;    /* Screen::find_node after its LINK 0 (lazy stock screens) */
   _txt_draw_body = 0x01A625A0;     /* Text::draw after its LINK 0x24 (guiskip) */
   _dot_body = 0x01A24CC0;          /* Raster::dotted_hline after its LINK 0x18 */

@@ -714,3 +714,22 @@ _lz_find_stub:
 	R2 = [SP++]; R1 = [SP++]; R0 = [SP++]; RETS = [SP++];
 	LINK 0;
 	jump.l _find_node_body;
+
+/* OP1R_MIX=check (docs/81): the two calls of Core_mix_master (0xFFA02116, 0xFFA02DB2) -> mix_pre (dsp/mix.c), then
+ * the original (R0 kept; its 12-byte argument area reserved). In the free end of our L1 EQ (.l1eq.2). */
+	.section .l1eq.2,"ax"
+	.global _l1_tramp_mix
+	.align 2
+_l1_tramp_mix:
+	[--SP] = RETS;
+	[--SP] = R0;
+	SP += -12;
+	P1.L = _mix_pre; P1.H = _mix_pre;
+	call (P1);
+	SP += 12;
+	R0 = [SP++];
+	SP += -12;
+	call _core_mix_master;
+	SP += 12;
+	RETS = [SP++];
+	rts;

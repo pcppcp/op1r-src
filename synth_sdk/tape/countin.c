@@ -74,6 +74,7 @@ extern void tool_service(void);                            /* screens/overlay.c:
 extern void inst_fade_block(void);
 void ci_metro_render(void)
 {
+    { extern void mix_post(void); mix_post(); }                     /* docs/81: instrument-into-master check */
     { extern void fr_capture(void); fr_capture(); }               /* master FX source: instrument part (docs/54) */
     pu_block();                                                   /* punch: marker crossings (audio thread) */
     { extern void pc_block(void); pc_block(); }                   /* pulse clock in: edges on the input (midi/pclk.c) */
