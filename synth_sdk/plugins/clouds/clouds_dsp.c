@@ -62,7 +62,7 @@ static inline int32_t soft_limit(int32_t x)
     int32_t i = (x + 8 * Q15) >> 7, f = (x + 8 * Q15) & 127;          /* 1/256 steps = 128 Q15 units */
     return cl_soft_limit[i] + (((cl_soft_limit[i + 1] - cl_soft_limit[i]) * f) >> 7);   /* Q15 step * 0..127: 32 bit */
 }
-static inline int16_t soft_convert(int32_t x) { return (int16_t)clip16(soft_limit(x >> 1)); }
+static inline int16_t soft_convert(int32_t x) { return (int16_t)clip16(soft_limit(x)); }
 
 /* Interpolate(table, x, size): x Q15 (0..1), table of size+1 Q15 points */
 static inline int32_t interp_q15(const int16_t *t, int32_t x, int size_log2)
@@ -729,8 +729,11 @@ void clouds_process(clouds_t *c, const clouds_params_t *p, const int16_t *input,
     int32_t dw = c->dry_wet_q15, inc = (p->dry_wet - dw) / n;
     for (int i = 0; i < n; i++) {
         dw += inc;
-        int32_t fin = interp_q15(cl_lut_xfade_in, dw, 4), fout = interp_q15(cl_lut_xfade_out, dw, 4);
-        int32_t x = mul16(input[i], fout) + mulq15(mulq15(out[i], 39322), fin);        /* post gain 1.2 */
+        /* both ends x sqrt 2 on the equal-power curves (the sum used to be halved before the limiter, so the old gains were
+         * 1 / 2.83 of these): dry is unity at mix 0, wet post gain 1.2 x sqrt 2; the balance across MIX is as it was */
+        int32_t fin = interp_q15(cl_lut_xfade_in, dw, 4), fout = mulq15(interp_q15(cl_lut_xfade_out, dw, 4), 46341);
+        if (fout > 32767) fout = 32767;
+        int32_t x = mul16(input[i], fout) + mulq15(mulq15(out[i], 55609), fin);        /* post gain 1.2 x sqrt 2 */
         output[i] = soft_convert(x);
     }
     c->dry_wet_q15 = p->dry_wet;

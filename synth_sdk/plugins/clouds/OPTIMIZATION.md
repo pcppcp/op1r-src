@@ -70,9 +70,17 @@ them; it compares the patched tree with the base revision directly.
 
 | Configuration | Scenario | Bytes | SHA-256 |
 |---|---|---:|---|
-| op1 | dynamic | 790680 | `b6181e7578bd0f1865c665ac0a4c82c62afa2e5930eb3d28f9d275db248c4452` |
-| op1 | rails | 3072000 | `f9b8bcf561c2b35754a6bef72cbd2b053c882f5ef5e9349b16da66d8690bbc8f` |
+| op1 | dynamic | 790680 | `13870aa389605aa45d6388dbd32266257b8a6b0bf8e2469560990e6bc9208940` |
+| op1 | rails | 3072000 | `66a49d757e0a636468631bd97aa79dab708a799e97667c59b7815144dc25be4d` |
 | op1 | edge | 13200 | `784e6df1b4ff4afa9b57407c74c03b14c523a3b92c2fe6b3b542b7f126dc0555` |
-| reference | dynamic | 790680 | `3f83b142b6a36036783f465d00849a560def7f399a87ef1c9d09530fc414069b` |
-| reference | rails | 3072000 | `3d01158fec803fbbed8ed771ec78d6f60468bc6ea651dde1864fbe654ba590fb` |
+| reference | dynamic | 790680 | `56408c2b161be3fd0b30930e6e444bd11a5b413de5a587858eaf2c841c485766` |
+| reference | rails | 3072000 | `e189679dfcc57e20f439a4af8abada1e24efa93cc1c50cbb31da72a161e1f542` |
 | reference | edge | 13200 | `784e6df1b4ff4afa9b57407c74c03b14c523a3b92c2fe6b3b542b7f126dc0555` |
+
+## Dry end (2026-11-10)
+
+The final mix used to halve the sum before the soft limiter, and the dry gain was the bare equal-power curve (0.707 at
+mix 0), so switching Clouds on with MIX fully dry dropped the level by about 9 dB. The dry gain is now the curve x sqrt 2
+(unity at mix 0), the wet gain is 1.2 x sqrt 2 (55609 in Q15, was 39322), and the sum goes to the limiter unhalved. Both
+ends are 2.83 x the old gains, so the balance across MIX is as before. The hashes above are for this version, and
+`clouds_exact_verify.py` no longer matches its base revision in the dry / wet stage on purpose.
