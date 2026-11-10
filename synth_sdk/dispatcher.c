@@ -1382,7 +1382,10 @@ void knob_event_hook(int knob, int16_t *delta)
     if (knob == 0 && sm_on == 2 && CUR_MODE_ID == 0x0C) { usbout_turn(*delta); return; }   /* usb out: blue */
     if (knob == 1 && sm_on == 2 && CUR_MODE_ID == 0x0C) { usbout_seq_turn(*delta); return; }   /* sequencer on / off: green */
     if (knob >= 0 && knob < 4 && sm_on == 3 && CUR_MODE_ID == 0x0C) { settings_turn(knob, *delta); return; }
-    if (knob >= 0 && knob < 4 && pcp_on && CUR_MODE_ID == 4 && SCREEN_TABLE[TEMPO_SCREEN_ID] == (void *)pcp_scr) { pcp_turn(knob, *delta); return; }   /* pulse sync page */
+    if (knob >= 0 && knob < 8 && pcp_on && CUR_MODE_ID == 4 && SCREEN_TABLE[TEMPO_SCREEN_ID] == (void *)pcp_scr) {   /* pulse sync page */
+        int k = knob & 3, sh = knob > 3 || *(volatile uint8_t *)0x01DD7F78;
+        pcp_turn(sh ? (k == 3 ? 7 : -1) : k, *delta); return;   /* Shift + red: channel; other Shift turns: nothing */
+    }
     if (knob >= 0 && knob < 4 && sm_on == 4 && CUR_MODE_ID == 0x0C) { scale_turn(knob, *delta); return; }
     if (knob >= 0 && knob < 4 && fr_on && CUR_MODE_ID == 0x0D) { fxroute_turn(knob, *delta); return; }
     if (knob >= 0 && knob < 4 && ml_view && CUR_MODE_ID == 0x0D) { ml_turn(knob, *delta, *(volatile uint8_t *)0x01DD7F78); return; }

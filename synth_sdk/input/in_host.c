@@ -50,7 +50,8 @@ void in_clock(uint32_t now)                                  /* audio callback s
 extern void in_highpass_stock(void);                         /* hook.S: the stock prologue, then 0x019674FE */
 void in_bus(uint32_t *monitor, uint32_t caller)              /* hook.S in_highpass_entry (audio thread) */
 {
-    extern int pc_mute(void);                                  /* pulse clock on the input follows (midi/pclk.c) */
+    extern int pc_mute(void), pc_split(void);                  /* pulse clock on the input follows (midi/pclk.c) */
+    pc_split();                                                /* one clock channel: the input = the other channel */
     int mute = (caller == 0xFFA02896u || caller == 0xFFA02464u || caller == 0xFFA01EC2u) && pc_mute();
     int n = caller == 0xFFA02896u ? current() : 0;
     if (!n) { in_highpass_stock(); if (mute) *monitor = 0; return; }

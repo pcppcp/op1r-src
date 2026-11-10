@@ -9,6 +9,7 @@
 #include "../screens/op1r_settings.h"
 
 int16_t host_pc_in[64];
+int32_t host_pc_raw[128];                                    /* codec block: L, R (high half) */
 int32_t host_sync_mode = 2, host_ticks, host_ctrl;
 int32_t host_input_source = 1, host_line_jack;          /* line in */
 uint32_t host_ms;
@@ -164,6 +165,25 @@ int main(void)
         host_sync_mode = 2; pc_src = 0; assert(!pc_mute());                                 /* MIDI clock */
         host_input_source = 1; pc_src = 3;
         printf("pclk: input gating ok\n");
+    }
+    {   /* one channel (Shift + red): the clock from it, the other channel stays the input's audio */
+        extern volatile uint8_t pc_chan; extern int pc_split(void), pc_mute(void); extern void pc_block(void);
+        extern volatile uint32_t pc_pulses; extern void pc_poll(void);
+        host_sync_mode = 2; pc_src = 3; host_input_source = 1;
+        for (int i = 0; i < 64; i++) { host_pc_raw[2 * i] = (i >= 32 ? 20000 : 0) << 16; host_pc_raw[2 * i + 1] = (int32_t)(i * 100) << 16; }
+        pc_chan = 0; assert(pc_mute() && !pc_split());                                   /* both: muted, untouched */
+        pc_chan = 1; assert(!pc_mute() && pc_split());                                   /* left clock: right = audio */
+        for (int i = 0; i < 64; i++) assert(host_pc_in[i] == i * 100);
+        pc_chan = 2; assert(pc_split());
+        for (int i = 0; i < 64; i++) assert(host_pc_in[i] == (i >= 32 ? 20000 : 0));
+        pc_chan = 1; memset(host_pc_in, 0, sizeof host_pc_in);                           /* the edge on the left only */
+        uint32_t p0 = pc_pulses; pc_block(); pc_poll(); assert(pc_pulses == p0 + 1);
+        pc_chan = 2; for (int i = 0; i < 64; i++) host_pc_raw[2 * i] = 0;                /* right: a slow ramp, no edge */
+        for (int k = 0; k < 4; k++) pc_block();
+        pc_poll(); assert(pc_pulses == p0 + 1);
+        host_sync_mode = 1; assert(!pc_split());                                         /* not following: stereo sum */
+        pc_chan = 0; host_sync_mode = 2;
+        printf("pclk: channel ok\n");
     }
     return 0;
 }

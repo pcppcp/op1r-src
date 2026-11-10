@@ -20,7 +20,8 @@ void *host_text_ctor(void *o, int32_t x, int32_t y, int32_t sz, const uint8_t *c
 void host_text_set(void *o, const char *s) { snprintf(((txt_t *)o)->s, 32, "%s", s); }
 void host_text_draw(void *o, void *r, const int32_t *m) { (void)r; (void)m; if (nt < 32) drawn[nt++] = o; }
 /* the pulse clock state the page shows (midi/pclk.c) */
-volatile uint8_t pc_src = 3, pc_manual, pc_fall, pc_level;
+volatile uint8_t pc_src = 3, pc_manual, pc_fall, pc_level, pc_chan;
+int host_shift;
 volatile int32_t pc_show_jump, pc_show_trig = 2400;
 volatile uint32_t pc_pulses;
 uint8_t pc_running; uint32_t pc_period, pc_count;
@@ -53,6 +54,7 @@ int main(void)
     pc_pulses = 2; frame("following, between pulses");
     pc_running = 0; pc_show_jump = 300; frame("waiting for pulses");
     pc_src = 4; pc_manual = 1; pc_fall = 1; pc_level = 3; pc_show_trig = 3200; frame("24 ppq, manual start, falling edge, level 3");
+    pc_chan = 2; frame("channel right"); host_shift = 1; frame("Shift held: the red column is the channel"); host_shift = 0; pc_chan = 0;
     pc_src = 3; pc_manual = 0; pc_fall = 0; pc_level = 0; pc_show_trig = 2400;
     host_sync_mode = 1; frame("sync not on follow");
     host_sync_mode = 2; in_ok = 0; frame("mic or radio selected");

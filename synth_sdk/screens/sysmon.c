@@ -44,6 +44,7 @@ void sm_audio_cb(void *a, void *b, void *c)                  /* replaces the cal
     extern void l1_begin(void), l1_end(void);
     extern void in_clock(uint32_t), in_end(void);
     in_clock(t0);                                            /* input engines: the block rate (input/in_host.c) */
+    { extern const int32_t *volatile pc_in_b, *volatile pc_in_c; pc_in_b = (const int32_t *)b; pc_in_c = (const int32_t *)c; }   /* pulse sync: codec input (midi/pclk.c) */
     l1_begin();                                              /* L1 pool: leases move only inside the callback */
     AUDIO_CB(a, b, c);
     l1_end();

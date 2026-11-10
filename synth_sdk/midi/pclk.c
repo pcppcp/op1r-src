@@ -27,6 +27,14 @@ volatile uint8_t pc_src;                    /* index into pc_ppq */
 /* T2 page settings (screens/pcpage.c): start auto (FA on the first pulse, FC after a gap) / manual (no FA / FC),
  * edge rise / fall (inverted clocks), level 0 auto (adaptive) / 1..6 fixed trigger on the 2-sample jump */
 volatile uint8_t pc_manual, pc_fall, pc_level;
+/* channel (Shift + red on the page, op1rsettings clkch): 0 both (the stock mono sum L + R, muted while following),
+ * 1 left / 2 right: the clock from that channel only, the other channel stays the input's audio */
+volatile uint8_t pc_chan;
+/* the codec's input of this block (sysmon sm_audio_cb: the audio callback's 2nd / 3rd argument): 64 frames of L, R
+ * as 32-bit words (sample in the high half). The stock fill of 0xFF800CB4 (core_block_process 0xFFA01A08): source 3
+ * (USB) reads the 3rd argument, else the 2nd; source 0 without the flag 0x01BA15DC scales each channel by
+ * sat(x << 2) * 0x65C28F5C / 2^31 (path 0xFFA01A30), else plain (0xFFA030D0); then L + R, high half. */
+const int32_t *volatile pc_in_b, *volatile pc_in_c;
 const int16_t pc_level_val[7] = { 0, 800, 1600, 3200, 6400, 12800, 25600 };
 /* for the page: the largest jump of the last blocks (decaying) and the trigger level now */
 volatile int32_t pc_show_jump, pc_show_trig;
@@ -38,6 +46,8 @@ extern uint32_t host_ms;
 extern void host_bpm_clock(uint32_t lo, uint32_t hi);
 extern void host_rx_inject(uint8_t b);
 #define IN_BLOCK    host_pc_in
+extern int32_t host_pc_raw[128];
+#define IN_FLAG     0
 #define SYNC_MODE   host_sync_mode
 extern int32_t host_input_source, host_line_jack;
 #define INPUT_SOURCE host_input_source
@@ -52,6 +62,7 @@ static uint32_t irq_off(void) { return 0; }
 static void irq_on(uint32_t m) { (void)m; }
 #else
 #define IN_BLOCK    ((volatile int16_t *)0xFF800CB4)                  /* mono input, 64 x int16 */
+#define IN_FLAG     (*(volatile uint8_t *)0x01BA15DC)                 /* stock fill: plain path for source 0 */
 #define SYNC_MODE   (*(volatile int32_t *)0x018C1870)                 /* tempo sync mode 0..4 */
 #define INPUT_SOURCE (*(volatile uint32_t *)0xFF8010B4)              /* selected input: 0 mic, 1 line, 2 radio, 3 USB */
 #define LINE_JACK   (*(volatile uint8_t *)0x018B621C)                 /* a cable in the line jack (kennel kn_input.c) */
@@ -100,7 +111,43 @@ int pc_input_ok(void)
 }
 /* while the jack clock follows, the input is kept out of the dry monitor and the tape (input/in_host.c in_bus clears the
  * block's has-input flag, after kennel's line clock): the clicks are neither heard nor recorded */
-int pc_mute(void) { return pc_active() && pc_input_ok(); }
+int pc_mute(void) { return pc_active() && pc_input_ok() && !pc_chan; }
+
+static const int32_t *raw_block(int *scaled)                /* this block's codec input as the stock fill reads it */
+{
+#ifdef OP1_HOST
+    *scaled = 0; return host_pc_raw;
+#else
+    uint32_t s = INPUT_SOURCE;
+    *scaled = s == 0 && !IN_FLAG;
+    return s == 3 ? pc_in_c : pc_in_b;
+#endif
+}
+static inline int32_t raw_sample(const int32_t *raw, int i, int ch, int scaled)   /* one channel, as the mono fill */
+{
+    int32_t v = raw[2 * i + ch];
+    if (scaled) {
+        v = v > 0x1FFFFFFF ? 0x7FFFFFFF : v < -0x20000000 ? (int32_t)0x80000000 : v << 2;
+        v = (int32_t)(((int64_t)v * 0x65C28F5C) >> 31);
+    }
+    return v >> 16;
+}
+/* while following with one channel: the input block becomes the other channel (input/in_host.c in_bus, before the
+ * input is used); 1 = done */
+int pc_split(void)
+{
+    if (!pc_chan || !pc_active() || !pc_input_ok()) return 0;
+    int scaled; const int32_t *raw = raw_block(&scaled);
+    if (!raw) return 0;
+    int ch = pc_chan == 1 ? 1 : 0;                          /* the audio: the channel the clock is not on */
+#ifdef OP1_HOST
+    int16_t *o = host_pc_in;
+#else
+    volatile int16_t *o = (volatile int16_t *)0xFF800CB4;
+#endif
+    for (int i = 0; i < 64; i++) o[i] = (int16_t)raw_sample(raw, i, ch, scaled);
+    return 1;
+}
 
 /* jack input (hardware, docs/59): the analog couplings swing back after each gate edge, so on the level the falling
  * edge of a 5..20 ms gate counted as a second pulse. A rising edge is a near-vertical jump, the swing back is slow:
@@ -118,8 +165,10 @@ void pc_block(void)
     uint32_t gap = (uint32_t)(SR * 60 / 300 / 2) / pc_ppq[pc_src];   /* 1: 100 ms .. 48: 2.1 ms */
     if (gap < PC_GAP) gap = PC_GAP;
     int32_t a = x1, b = x2;
+    int scaled = 0; const int32_t *raw = pc_chan ? raw_block(&scaled) : 0;   /* one channel: from the codec block */
+    if (pc_chan && !raw) { armed = 1; return; }
     for (int i = 0; i < 64; i++) {
-        int32_t x = IN_BLOCK[i], d = (x - b) * sgn;
+        int32_t x = raw ? raw_sample(raw, i, pc_chan - 1, scaled) : IN_BLOCK[i], d = (x - b) * sgn;
         if (d > jmax) jmax = d;
         b = a; a = x;
         uint32_t t = t0 + (uint32_t)i;
