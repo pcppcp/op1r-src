@@ -308,6 +308,8 @@ def build(engs, fxs):
     flags = {}                                       # plugin.json "source_cflags": e.g. -O3 after the default -O2
     for e in engs + fxs:
         flags.update(plugins.source_flags(e, [e['source']] + e.get('extra_sources', [])))
+    if os.environ.get('OP1R_OUTSTAGE') in ('check', 'stress'):                # docs/81: output stage model vs original, per block
+        flags['dsp/outstage.c'] = flags.get('dsp/outstage.c', []) + ['-DOUTSTAGE_CHECK'] + (['-DOUTSTAGE_STRESS'] if os.environ['OP1R_OUTSTAGE'] == 'stress' else [])
     if L1_RUNTIME:                                                            # docs/56: L1 patches at boot by DTEST
         flags['boottime.c'] = flags.get('boottime.c', []) + ['-DL1RUNTIME']
     if os.environ.get('OP1R_L1READ'):                                         # diagnostic: L1 code checksum by DTEST (docs/56)

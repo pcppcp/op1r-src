@@ -382,7 +382,11 @@ static void sm_update(void *scr, int dt)
         extern volatile uint32_t bt_split[8];
         extern volatile uint32_t l1rd[4], l1rt[4];
         static const char hx[] = "0123456789abcdef";
-        if (sm_page == PG_BOOTD && l1rt[3] && l1rt[1]) {     /* L1 patches at boot: shown only if one failed, "9/10 l1p 8/9 1" */
+        extern volatile uint32_t os_check[8] __attribute__((weak));   /* dsp/outstage.c check builds (docs/81) */
+        if (sm_page == PG_BOOTD && &os_check && os_check[0]) {   /* "9/10 os 91274 0 12866 13732": blocks, differing, cycles */
+            q = put_u(put_s(q, "os "), os_check[0]); q = put_u(put_s(q, " "), os_check[1]);
+            q = put_u(put_s(q, " "), os_check[6]); q = put_u(put_s(q, " "), os_check[7]);
+        } else if (sm_page == PG_BOOTD && l1rt[3] && l1rt[1]) {     /* L1 patches at boot: shown only if one failed, "9/10 l1p 8/9 1" */
             extern const unsigned l1_pokes_n;
             q = put_u(put_s(q, "l1p "), l1rt[0]); *q++ = '/'; q = put_u(q, l1_pokes_n);
             q = put_u(put_s(q, " "), l1rt[1]);
