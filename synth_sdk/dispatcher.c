@@ -549,7 +549,8 @@ static uint32_t *scr_alloc(void)
 }
 static uint32_t *eng_scr[MAX_ENG];
 #define eng_vt(e) (eng_scr[e] + 32)
-static uint8_t  eng_ready[MAX_ENG];
+static uint8_t  eng_ready[MAX_ENG];          /* built (lazy: the document is parsed when first shown) */
+extern const uint8_t gs_lazy, lz_bg;                 /* screens/guiskip.c: lazy plugin pages (frame-skip builds) */
 static void    *iter_screen;
 
 extern const op1_screen_t SCREEN_iterlab;                  /* stock iter: lab screen (screens/iterlab.c) */
@@ -583,6 +584,7 @@ static void engine_screens_load(void)
     for (int e = 0; e < op1_engine_count && e < MAX_ENG; e++) {
         const op1_screen_t *sc = e ? op1_engine_screens[e] : &SCREEN_iterlab;
         if (!sc || !eng_scr[e] || !eng_scr[e][2]) continue;
+        if (gs_lazy) { eng_ready[e] = 1; continue; }             /* parsed when first shown (lazy_screens_frame) */
         eng_scr[e][0] = (uint32_t)SVG_LOAD((void *)eng_scr[e][2]);
         if (eng_scr[e][0]) { sc->init(eng_scr[e]); eng_ready[e] = 1; }
     }
@@ -623,6 +625,7 @@ static void fx_screens_load(void)
 {
     for (int e = 1; e < op1_fx_count && e < MAX_ENG; e++) {
         if (!op1_fx_screens[e] || !fx_scr[e] || !fx_scr[e][2]) continue;
+        if (gs_lazy) { fx_ready[e] = 1; continue; }              /* parsed when first shown */
         fx_scr[e][0] = (uint32_t)SVG_LOAD((void *)fx_scr[e][2]);
         if (fx_scr[e][0]) { op1_fx_screens[e]->init(fx_scr[e]); fx_ready[e] = 1; }
     }
@@ -771,10 +774,77 @@ void *screens_ctor_hook(void)
 
 /* CALL @0x019F07D2 (boot: load every screen's SVG + init nodes) */
 extern void paul_boot(void) __attribute__((weak));        /* shelved/paulstretch/paulstretch.c: heap buffers */
+volatile uint32_t scr_load_us[0x44];          /* boot: each stock screen's load (svg + init), us (docs/79) */
+/* lazy stock screens (docs/79): the boot loop leaves every stock screen with an SVG unparsed; it is parsed (svg_load
+ * + its init, as the stock loop did) when a frame is about to show it, when code looks a node up in it
+ * (Screen::find_node hook, lz_guard), or in the background after boot, one per frame. lz_state: 0 none / done,
+ * 1 pending, 2 loading. */
+static uint32_t *lz_obj[0x44];
+static volatile uint8_t lz_state[0x44];
+volatile uint32_t lz_stat[5];
+volatile uint8_t lz_shown[16], lz_shown_slot[16];   /* debug: which object (boot slot) / table slot was parsed for a frame */                 /* shown, guarded, background, slowest (us), last guarded slot */
+static int lz_load(int i)                     /* any thread; 1 = parsed now */
+{
+    uint32_t m; __asm__ volatile ("cli %0;" : "=d"(m));
+    int mine = lz_state[i] == 1;
+    if (mine) lz_state[i] = 2;
+    __asm__ volatile ("sti %0;" : : "d"(m));
+    if (!mine) return 0;
+    uint32_t *o = lz_obj[i], c0 = op1_cycles();
+    if (!o[0] && o[2]) o[0] = (uint32_t)SVG_LOAD((void *)o[2]);
+    const uint8_t *vt = (const uint8_t *)o[3];
+    ((void (*)(void *))*(const uint32_t *)(vt + 0x24))((uint8_t *)o + *(const int16_t *)(vt + 0x20));
+    uint32_t us = (op1_cycles() - c0) / 400u;
+    if (us > lz_stat[3]) lz_stat[3] = us;
+    lz_state[i] = 0;
+    return 1;
+}
+void lz_guard(uint32_t *o)                    /* Screen::find_node entry (hook.S): a node of an unparsed screen */
+{
+    for (int i = 0; i < 0x44; i++)
+        if (lz_obj[i] == o && lz_state[i] == 1) { if (lz_load(i)) { lz_stat[1]++; lz_stat[4] = (uint32_t)i; } return; }
+}
+static void lz_frame(void)                    /* Gfx, the start of a frame: what will be shown, else one in the background */
+{
+    static uint32_t frames;
+    int cur = *(volatile int *)0x018B65C8, did = 0;
+    for (int i = 0; i < 0x44; i++) {
+        if (lz_state[i] != 1) continue;
+        uint32_t *o = lz_obj[i];
+        int slot = -1;
+        for (int k = 0; k < 0x44; k++) if (SCREEN_TABLE[k] == (void *)o) { slot = k; break; }
+        if (slot < 0) continue;
+        const uint8_t *vt = (const uint8_t *)o[3];
+        int vis = ((int (*)(void *, int))*(const uint32_t *)(vt + 0x14))((uint8_t *)o + *(const int16_t *)(vt + 0x10), cur);
+        if (vis && lz_load(i)) { if (lz_stat[0] < 16) lz_shown[lz_stat[0]] = (uint8_t)(i | (slot << 0) * 0); lz_shown_slot[lz_stat[0] & 15] = (uint8_t)slot; lz_stat[0]++; did = 1; }
+    }
+    if (!lz_bg) return;                                      /* test build: only on show / guard */
+    if (did || ++frames < 30) return;                        /* the background starts half a second after the first frame */
+    static const uint8_t order[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C,
+        0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
+        0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x30, 0x31,
+        0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x26, 0x3E, 0x3F, 0x40, 0x41, 0x42, 0x43 };
+    for (unsigned j = 0; j < sizeof order; j++)
+        if (lz_state[order[j]] == 1) { if (lz_load(order[j])) lz_stat[2]++; return; }   /* one per frame */
+}
 void screens_load_hook(void *table)
 {
+    uint32_t t0 = op1_cycles(), stock;                          /* op1r's share of the screen stage (sysmon page 8) */
     if (paul_boot) paul_boot();
-    SCREENS_LOAD_ALL(table);
+    {   /* the stock load loop (Screen::load_all 0x01A3BA50), timed per screen (docs/79): svg_load if the loader has no
+         * document yet, then the screen's init (vt+0x24) */
+        uint32_t ts = op1_cycles();
+        uint32_t **t = (uint32_t **)table;
+        for (int i = 0; i < 0x44; i++) {
+            uint32_t *o = t[i], c0 = op1_cycles();
+            if (gs_lazy && !o[0] && o[2]) { lz_obj[i] = o; lz_state[i] = 1; continue; }   /* lazy: parsed when needed */
+            if (!o[0] && o[2]) o[0] = (uint32_t)SVG_LOAD((void *)o[2]);
+            const uint8_t *vt = (const uint8_t *)o[3];
+            ((void (*)(void *))*(const uint32_t *)(vt + 0x24))((uint8_t *)o + *(const int16_t *)(vt + 0x20));
+            scr_load_us[i] = (op1_cycles() - c0) / 400u;
+        }
+        stock = op1_cycles() - ts;
+    }
     fx_sanitize();
     filter_screen = SCREEN_TABLE[FILTER_SCREEN_ID];
     engine_screens_load();
@@ -848,6 +918,7 @@ void screens_load_hook(void *table)
     finger_screen = SCREEN_TABLE[EUCLID_SCREEN_ID];              /* sequencer plugin screens (swapped into 0x2D) */
     for (int k = 0; k < op1_seq_count; k++) {
         if (!seq_scr[k][2]) continue;
+        if (gs_lazy) { seq_scr_ready[k] = 1; continue; }         /* parsed when first shown */
         seq_scr[k][0] = (uint32_t)SVG_LOAD((void *)seq_scr[k][2]);
         if (seq_scr[k][0]) { op1_seq_screens[k]->init(seq_scr[k]); seq_scr_ready[k] = 1; }
     }
@@ -856,6 +927,7 @@ void screens_load_hook(void *table)
         fxscr[0] = (uint32_t)SVG_LOAD((void *)fxscr[2]);
         if (fxscr[0]) { ITER_INIT_NODES(fxscr); fxscr_ready = 1; }
     }
+    { extern volatile uint32_t op1r_boot_ms[2]; op1r_boot_ms[1] = (op1_cycles() - t0 - stock) / 400000u; }
 }
 
 static int current_fx(void)                 /* custom FX index of the shown FX, 0 = built-in */
@@ -1460,6 +1532,47 @@ static int quad_lfo_page(void)
 {
     return CURRENT_SCREEN == MIDI_LFO_SCREEN_ID && ((ql_scr_ready && SCREEN_TABLE[MIDI_LFO_SCREEN_ID] == (void *)ql_scr)
                                                   || (pond_scr_ready && SCREEN_TABLE[MIDI_LFO_SCREEN_ID] == (void *)pond_scr));
+}
+
+/* Lazy plugin pages (docs/79, after kennel's kn_screens.c / docs/svg-lazy.md): engine, FX and sequencer pages are
+ * built at boot but their SVG is parsed here, on the Gfx thread at the start of a frame (gs_frame, before any screen
+ * draws), the first time the slot holds them; then the plugin's init. A document that does not parse puts the stock
+ * page back (iter / generic FX or filter / finger) and the page stays off until reboot. Documents are kept (no
+ * eviction): memory at most as with parsing at boot. */
+volatile uint32_t lazy_stat[3];               /* pages parsed, failed, cycles of the slowest */
+static int lazy_parse(uint32_t *scr, const op1_screen_t *sc)
+{
+    if (scr[0]) return 1;
+    if (!scr[2]) return 0;
+    uint32_t t = op1_cycles();
+    scr[0] = (uint32_t)SVG_LOAD((void *)scr[2]);
+    if (!scr[0]) { lazy_stat[1]++; return 0; }
+    sc->init(scr);
+    t = op1_cycles() - t; lazy_stat[0]++; if (t > lazy_stat[2]) lazy_stat[2] = t;
+    return 1;
+}
+void lazy_screens_frame(void)
+{
+    if (!gs_lazy) return;
+    lz_frame();                                              /* stock screens (lazy) */
+    void *s = SCREEN_TABLE[ITER_SCREEN_ID];
+    for (int e = 0; e < MAX_ENG; e++)
+        if (s == (void *)eng_scr[e] && eng_scr[e] && !eng_scr[e][0]) {
+            if (!lazy_parse(eng_scr[e], e ? op1_engine_screens[e] : &SCREEN_iterlab)) { eng_ready[e] = 0; SCREEN_TABLE[ITER_SCREEN_ID] = iter_screen; }
+            break;
+        }
+    s = SCREEN_TABLE[FILTER_SCREEN_ID];
+    for (int e = 1; e < MAX_ENG; e++)
+        if (s == (void *)fx_scr[e] && fx_scr[e] && !fx_scr[e][0]) {
+            if (!lazy_parse(fx_scr[e], op1_fx_screens[e])) { fx_ready[e] = 0; SCREEN_TABLE[FILTER_SCREEN_ID] = fxscr_ready ? (void *)fxscr : filter_screen; }
+            break;
+        }
+    s = SCREEN_TABLE[EUCLID_SCREEN_ID];
+    for (int k = 0; k < op1_seq_count; k++)
+        if (s == (void *)seq_scr[k] && !seq_scr[k][0]) {
+            if (!lazy_parse(seq_scr[k], op1_seq_screens[k])) { seq_scr_ready[k] = 0; SCREEN_TABLE[EUCLID_SCREEN_ID] = finger_screen; }
+            break;
+        }
 }
 
 /* ScreenId::for_fx case 5 (filter) -> asm stub fx_screen_case5 -> here; returns the screen id */

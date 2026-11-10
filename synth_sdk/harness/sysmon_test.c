@@ -27,7 +27,7 @@ void host_text_draw(void *o, void *r, const int32_t *m) { (void)r; (void)m; draw
 void *host_raster(void) { return (void *)1; }
 void host_screen_draw(void *s, int dt) { (void)s; (void)dt; }
 
-/* run frames with a given load: per frame `wall` cycles, idle share, audio busy share (per block of 1/8 frame) */
+/* run frames with a given load: per frame `wall` cycles, idle share, audio busy share (per block of 1/10 frame) */
 static void run(int frames, uint32_t wall, int idle_pct, int aud_pct, int aud_peak_pct)
 {
     for (int f = 0; f < frames; f++) {
@@ -63,6 +63,8 @@ static void dump(const char *label)
 static const char *val(int row) { return ((txt_t *)txt_mem[2 * row + 1])->s; }
 
 void in_clock(uint32_t t) { (void)t; } void in_end(void) {}   /* input engines (input/in_host.c): none on the host */
+volatile uint32_t op1r_boot_ms[2] = { 1140, 420 };
+volatile uint32_t bt_split[8] = { 400, 520, 90, 1200, 640, 410, 330, 120 };          /* boot timers (plugload.c / dispatcher.c) */
 int main(int argc, char **argv)
 {
     int render = argc > 1 && !strcmp(argv[1], "render");
@@ -78,15 +80,19 @@ int main(int argc, char **argv)
     run(64, 4000000, 36, 55, 71);                            /* busy */
     assert(!strcmp(val(SM_CPU), "64%")); assert(pk_pct[SM_DSP] >= 70);
     if (render) dump("busy (6 voices, 3 FX, MIDI clock): audio split, page 1/4"); else printf("busy: cpu %s dsp %s pk %d midi %s\n", val(0), val(1), pk_pct[SM_DSP], val(4));
-    { char want[48]; snprintf(want, sizeof want, "1/6 inst 25 env 3 fx 15 rest 14");
+    { char want[48]; snprintf(want, sizeof want, "1/10 inst 25 env 3 fx 15 rest 14");
       if (strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, want)) { printf("got [%s]\n", ((txt_t *)txt_mem[2 * SM_ROWS + 2])->s); return 1; } }
     for (int p = 1; p < PG_N; p++) {                         /* BLUE turn: the other helper metrics */
         sm_turn(1024); run(8, 4000000, 36, 55, 71);
-        static const char *const lab[] = { "", "page 2/6: voices", "page 3/6: plugins", "page 4/6: system", "page 5/6: stock stages", "page 6/6: other records" };
+        static const char *const lab[] = { "", "page 2/8: voices", "page 3/8: plugins", "page 4/8: system", "page 5/8: stock stages", "page 6/8: other records", "page 7/8: boot stages", "page 8/8: op1r boot share" };
         if (render) dump(lab[p]); else printf("page %d: %s\n", p + 1, ((txt_t *)txt_mem[2 * SM_ROWS + 2])->s);
-        if (p == PG_STAGES && strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "5/6 blk 18 eq 6 out 7 dec 3 tp 1")) fprintf(stderr, "stages: [%s]\n", ((txt_t *)txt_mem[2 * SM_ROWS + 2])->s);
-        if (p == PG_RAW) assert(!strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "6/6 1:0 3:0 5:0 6:0 8:0 10:0 o1"));
-        if (p == PG_STAGES) assert(!strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "5/6 blk 18 eq 6 out 7 dec 3 tp 1"));
+        if (p == PG_STAGES && strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "5/10 blk 18 eq 6 out 7 dec 3 tp 1")) fprintf(stderr, "stages: [%s]\n", ((txt_t *)txt_mem[2 * SM_ROWS + 2])->s);
+        if (p == PG_RAW) assert(!strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "6/10 1:0 3:0 5:0 6:0 8:0 10:0 o1"));
+        if (p == PG_STAGES) assert(!strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "5/10 blk 18 eq 6 out 7 dec 3 tp 1"));
+        if (p == PG_BOOT) assert(!strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "7/10 boot 0.0 mnt 0.0 db 0.0 snd 0.0"));
+        if (p == PG_BOOTD) assert(!strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "9/10 open 0.4 clips 0.5 fat 0.1"));
+        if (p == PG_BOOTS) assert(!strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "10/10 pre 1.2 0.6 slot 0.4 0.3 smp 0.1"));
+        if (p == PG_BOOTR) assert(!strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "8/10 scr 0.0 op1r plg 1.1 scr 0.4"));
     }
     sm_turn(1024); assert(sm_page == PG_AUDIO);              /* wraps */
     memset(split, 0, sizeof split);

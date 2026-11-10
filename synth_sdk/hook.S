@@ -42,6 +42,13 @@ _fx_screen_case5:
 	.section .hook_plugboot,"ax"
 	call _plug_boot_hook;
 
+	.section .hook_btopen,"ax"
+	call _bt_db_open;
+	.section .hook_btfat,"ax"
+	call _bt_fat_init;
+	.section .hook_btsnd,"ax"
+	call _bt_sounds;
+
 	.section .hook_masterload,"ax"
 	call _plug_master_load;
 	.section .hook_pbxf1,"ax"
@@ -563,6 +570,18 @@ __hook_usbiso3:
 	.global __hook_usbbuf1
 __hook_usbbuf1:
 	R2 = 0x33c (X);
+	.section .hook_lpsyn1,"ax"
+	call _lp_set_synth;
+	.section .hook_lpsyn2,"ax"
+	call _lp_set_synth;
+	.section .hook_lpdrm1,"ax"
+	call _lp_set_drum;
+	.section .hook_lpdrm2,"ax"
+	call _lp_set_drum;
+	.section .hook_lpgrow,"ax"		/* db2::load_presets: new capacity = cap + (cap << 5) (stock: cap >> 1), docs/79 */
+	.global __hook_lpgrow
+__hook_lpgrow:
+	R4 = R3 << 0x5;
 	.section .hook_usbbuf2,"ax"
 	.global __hook_usbbuf2
 __hook_usbbuf2:
@@ -657,3 +676,18 @@ _gs_sweep_stub:
 	P1.L = 0x55b4; P1.H = 0xffa0;
 	jump (P1);
 1:	RTS;
+
+/* lazy stock screens (dispatcher.c lz_guard, docs/79): Screen::find_node 0x01A3B580 entry (LINK 0) -> parse an
+ * unparsed screen first (R0 = the screen object, R1 = the node id), then the original LINK and on */
+	.section .hook_lzfind,"ax"
+	jump.l _lz_find_stub;
+	.text
+	.align 2
+_lz_find_stub:
+	[--SP] = RETS; [--SP] = R0; [--SP] = R1; [--SP] = R2;
+	SP += -12;
+	call _lz_guard;
+	SP += 12;
+	R2 = [SP++]; R1 = [SP++]; R0 = [SP++]; RETS = [SP++];
+	LINK 0;
+	jump.l _find_node_body;

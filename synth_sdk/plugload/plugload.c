@@ -621,10 +621,13 @@ void plug_master_load(void)                               /* CALL @0x019F054A (b
 }
 
 /* CALL @0x019F02EE (Clips::load(clips) in R0, return value unused) */
+volatile uint32_t op1r_boot_ms[2];          /* boot: the plugin loader, op1r's screen work (ms; resource monitor page 8) */
 void plug_boot_hook(void *clips)
 {
-    CLIPS_LOAD(clips);
+    { extern volatile uint32_t bt_split[8]; uint32_t c = op1_cycles(); CLIPS_LOAD(clips); bt_split[1] = (op1_cycles() - c) / 400000u; }
+    uint32_t t = op1_cycles();
     plug_boot();
+    op1r_boot_ms[0] = (op1_cycles() - t) / 400000u;
 }
 
 /* main loop (ci_service): remove the crash marker once the UI has run 2 CYCLES2 periods (2^32 cycles each, ~7-10 s) */

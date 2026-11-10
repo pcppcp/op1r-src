@@ -61,6 +61,9 @@ HOOKS = {0x019B975C: ('hook_namecmp', bytes.fromhex('18300b32')),      # instr_t
          0x019B9EF8: ('hook_iterread', bytes.fromhex('03e38c71')),     # iter screen: read knobs
          0x01A3BD58: ('hook_screenctor', bytes.fromhex('fbe3d0f2')),   # screen ctor list
          0x019F02EE: ('hook_plugboot', bytes.fromhex('fbe3cd65')),     # boot: CALL Clips::load -> + plugin loader (docs/37)
+         0x019F02E0: ('hook_btopen', bytes.fromhex('fbe319fb')),       # boot: CALL db2::open -> timed (docs/79)
+         0x019F02F4: ('hook_btfat', bytes.fromhex('fde35e37')),        # boot: CALL fat_manager::init -> timed
+         0x019F0456: ('hook_btsnd', bytes.fromhex('00e3bdaa')),        # boot: CALL load patches -> each call timed
          0x019F054A: ('hook_masterload', bytes.fromhex('ffe3393a')),   # boot: CALL MasterController::load -> + name lookup
          0x01A16936: ('hook_pbxf1', bytes.fromhex('fee311a2')),        # PresetBrowser cursor: CALL node_set_matrix -> FX list layout (docs/73)
          0x01A16D7C: ('hook_pbxf2', bytes.fromhex('fee3ee9f')),        # PresetBrowser type thumb: CALL node_set_matrix
@@ -129,7 +132,12 @@ HOOKS = {0x019B975C: ('hook_namecmp', bytes.fromhex('18300b32')),      # instr_t
          0x019411B8: ('hook_bgsqueue', bytes.fromhex('00e80000')),       # queue SaveSlotJob(is_drum, slot): LINK -> bgs_queue_slot (delayed, bgsave.c)
          0x01912128: ('hook_spadsr', bytes.fromhex('e3052a32')),         # Adsr_render entry -> sp_adsr (sampler+ envelope, docs/46)
          0x01A69730: ('hook_usbbuf1', bytes.fromhex('22e11401')),        # EP 0x86 transfer buffer 0x114 -> 828
-         0x01A69740: ('hook_usbbuf2', bytes.fromhex('22e11401'))}        # .. second buffer
+         0x01A69740: ('hook_usbbuf2', bytes.fromhex('22e11401')),
+         0x01A05766: ('hook_lpsyn1', bytes.fromhex('ffe3bbfd')),       # load_synth_presets: CALL set_synth_patch -> swap (docs/79)
+         0x01A058D4: ('hook_lpsyn2', bytes.fromhex('ffe304fd')),       # .. user presets
+         0x01A050A2: ('hook_lpdrm1', bytes.fromhex('ffe3d3fd')),       # load_drum_presets: CALL set_drum_patch -> swap
+         0x01A05184: ('hook_lpdrm2', bytes.fromhex('ffe362fd')),       # .. user presets
+         0x0197008E: ('hook_lpgrow', bytes.fromhex('82c6fb89'))}       # db2::load_presets row vector: grow x33, not x1.5 (fewer JSON deep copies, docs/79)        # .. second buffer
 # data words: address -> (symbol, expected original value)
 DATA_PATCHES = {0x018F7FF8: ('fx_screen_case5', 0x01A3BF26),          # ScreenId::for_fx case 5
                 # stock master FX stereo render slots (vt+0x14) -> FX2 routing wrappers (screens/fxroute.c, docs/54)
@@ -200,6 +208,7 @@ _SW = bytes.fromhex('09e1b45549e1a0ff')                                       # 
 GUISKIP_HOOKS = {0x019149C4: ('hook_gsmove', bytes.fromhex('00e80000')),      # rasterizer move_to entry (LINK 0)
                  0x01914904: ('hook_gsline', bytes.fromhex('00e80000')),      # rasterizer line_to entry (LINK 0)
                  0x01A3BBE0: ('hook_gsframe', bytes.fromhex('ffe3433c')),     # Screen::frame: CALL Raster::clear
+                 0x01A3B580: ('hook_lzfind', bytes.fromhex('00e80000')),      # Screen::find_node entry: lazy stock screens
                  0x01A6259C: ('hook_gstext', bytes.fromhex('00e80900')),      # Text::draw entry (LINK 0x24)
                  0x01A2357A: ('hook_gsdim', bytes.fromhex('0032e505')),       # Raster::dim_all entry
                  0x01A24CBC: ('hook_gsdot', bytes.fromhex('00e80600')),       # Raster::dotted_hline entry (LINK 0x18)
@@ -290,7 +299,7 @@ def gen_table(engs, fxs):
 def build(engs, fxs):
     os.makedirs(os.path.join(HERE, 'build'), exist_ok=True)
     gen_table(engs, fxs)
-    srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'seq/tombola.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/pcpage.c', 'screens/usbtrack.c', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'plugload/op1p_load.c', 'screens/settings.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/mixdrop.c', 'crash.c', 'patchjob.c', 'l1pool.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxgroups.c', 'screens/guiskip.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c', 'input/in_host.c'] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
+    srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'seq/tombola.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/pcpage.c', 'screens/usbtrack.c', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'boottime.c', 'plugload/op1p_load.c', 'screens/settings.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/mixdrop.c', 'crash.c', 'patchjob.c', 'l1pool.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxgroups.c', 'screens/guiskip.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c', 'input/in_host.c'] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
     objs = []
     cmds = []
     flags = {}                                       # plugin.json "source_cflags": e.g. -O3 after the default -O2
@@ -300,7 +309,9 @@ def build(engs, fxs):
         flags['screens/guiskip.c'] = ['-DGS_ON'] + (['-DGS_VERIFY'] if os.environ.get('OP1R_GUISKIP_VERIFY') else []) \
             + (['-DGS_NOREG'] if os.environ.get('OP1R_GUISKIP_NOREG') else []) \
             + (['-DGS_TILESTAT'] if os.environ.get('OP1R_GUISKIP_TILESTAT') else []) \
-            + (['-DGS_NOCACHE'] if os.environ.get('OP1R_GUISKIP_NOCACHE') else [])
+            + (['-DGS_NOCACHE'] if os.environ.get('OP1R_GUISKIP_NOCACHE') else []) \
+            + (['-DGS_EAGER'] if os.environ.get('OP1R_EAGER_SCREENS') else []) \
+            + (['-DLZ_NOBG'] if os.environ.get('OP1R_LZ_NOBG') else [])   # docs/79: eager screens / test without background parsing
     for s in srcs:
         o = 'build/' + os.path.splitext(s.replace('/', '_'))[0] + '.o'; objs.append(o)
         cmds.append(f'bfin-elf-gcc -O2 -mcpu=bf524 -ffreestanding -fno-builtin -nostdlib -fno-common '

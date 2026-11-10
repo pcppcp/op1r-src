@@ -29,6 +29,16 @@ static uint8_t scratch[400 * 512 + 1024] __attribute__((aligned(32)));   /* rast
 #else
 static uint8_t scratch[4];
 #endif
+#if defined(GS_ON) && !defined(GS_EAGER)
+const uint8_t gs_lazy = 1;                      /* dispatcher.c: plugin pages parsed when first shown (needs gs_frame) */
+#else
+const uint8_t gs_lazy = 0;
+#endif
+#ifdef LZ_NOBG
+const uint8_t lz_bg = 0;                        /* test: lazy stock screens only on show / find_node */
+#else
+const uint8_t lz_bg = 1;
+#endif
 struct { uint32_t ticks, renders, records, changes, skipped_pts, skipped_sweeps, skipped_text, skipped_misc,
          verified, stale, stale_bytes, stale_first; } gs_stat;
 /* self-check (GS_VERIFY builds): every 16th record tick renders in full into the scratch buffer instead; if its hash
@@ -321,6 +331,7 @@ void op1_screen_draw_cached_fn(void *scr, int dt, void *first_live)
 static int slot_of(const uint32_t *b) { if (buf_id[0] == b) return 0; if (buf_id[1] == b) return 1; return -1; }
 void gs_frame(void *raster)                    /* CALL Raster::clear in Screen::frame (0x01A3BBE0): a new frame */
 {
+    { extern void lazy_screens_frame(void); lazy_screens_frame(); }   /* plugin pages parsed when first shown (dispatcher.c) */
     dc_raster = raster;
     {   const uint32_t *r = raster;
         g_ok = r[2] == 512 && r[3] >= 64 && r[3] <= 400 && r[1] >= 32 && r[1] <= 256;

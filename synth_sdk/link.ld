@@ -16,6 +16,9 @@ SECTIONS {
   .hook_iterread 0x019B9EF8 : { KEEP(*(.hook_iterread)) }
   .hook_screenctor 0x01A3BD58 : { KEEP(*(.hook_screenctor)) }
   .hook_plugboot 0x019F02EE : { KEEP(*(.hook_plugboot)) }
+  .hook_btopen 0x019F02E0 : { KEEP(*(.hook_btopen)) }
+  .hook_btfat 0x019F02F4 : { KEEP(*(.hook_btfat)) }
+  .hook_btsnd 0x019F0456 : { KEEP(*(.hook_btsnd)) }
   .hook_masterload 0x019F054A : { KEEP(*(.hook_masterload)) }
   .hook_pbxf1 0x01A16936 : { KEEP(*(.hook_pbxf1)) }
   .hook_pbxf2 0x01A16D7C : { KEEP(*(.hook_pbxf2)) }
@@ -27,6 +30,7 @@ SECTIONS {
   .hook_gsmove 0x019149C4 : { KEEP(*(.hook_gsmove)) }
   .hook_gsline 0x01914904 : { KEEP(*(.hook_gsline)) }
   .hook_gsframe 0x01A3BBE0 : { KEEP(*(.hook_gsframe)) }
+  .hook_lzfind 0x01A3B580 : { KEEP(*(.hook_lzfind)) }
   .hook_gstext 0x01A6259C : { KEEP(*(.hook_gstext)) }
   .hook_gsdim 0x01A2357A : { KEEP(*(.hook_gsdim)) }
   .hook_gsdot 0x01A24CBC : { KEEP(*(.hook_gsdot)) }
@@ -40,6 +44,7 @@ SECTIONS {
   _vc_up_body = 0x01A85844;        /* VoiceCtl key_up after its LINK 0x20 */
   _rs_move_body = 0x019149C8;      /* rasterizer move_to after its LINK 0 (guiskip) */
   _rs_line_body = 0x01914908;      /* rasterizer line_to after its LINK 0 */
+  _find_node_body = 0x01A3B584;    /* Screen::find_node after its LINK 0 (lazy stock screens) */
   _txt_draw_body = 0x01A625A0;     /* Text::draw after its LINK 0x24 (guiskip) */
   _dot_body = 0x01A24CC0;          /* Raster::dotted_hline after its LINK 0x18 */
   _dim_body = 0x01A2357E;          /* Raster::dim_all after P0 = R0; [--SP] = (R7:4, P5:5) */
@@ -104,6 +109,11 @@ SECTIONS {
   .hook_dpload 0x01A04BC0 : { KEEP(*(.hook_dpload)) }
   .hook_dpbrowse 0x01977900 : { KEEP(*(.hook_dpbrowse)) }
   .hook_usbbuf1 0x01A69730 : { KEEP(*(.hook_usbbuf1)) }
+  .hook_lpsyn1 0x01A05766 : { KEEP(*(.hook_lpsyn1)) }
+  .hook_lpsyn2 0x01A058D4 : { KEEP(*(.hook_lpsyn2)) }
+  .hook_lpdrm1 0x01A050A2 : { KEEP(*(.hook_lpdrm1)) }
+  .hook_lpdrm2 0x01A05184 : { KEEP(*(.hook_lpdrm2)) }
+  .hook_lpgrow 0x0197008E : { KEEP(*(.hook_lpgrow)) }
   .hook_usbbuf2 0x01A69740 : { KEEP(*(.hook_usbbuf2)) }
   .hook_opzget 0x019E0CFC : { KEEP(*(.hook_opzget)) }
   .hook_recA 0x019AC8B4 : { KEEP(*(.hook_recA)) }

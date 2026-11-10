@@ -81,7 +81,7 @@ volatile uint32_t sm_cy[SMC_N];
 static uint32_t cy_last[SMC_N];
 static int32_t cy_pct[SMC_N];
 /* the bottom line: helper metrics, BLUE turn steps through them (sm_turn) */
-enum { PG_AUDIO, PG_VOICES, PG_PLUGINS, PG_SYSTEM, PG_STAGES, PG_RAW, PG_N };
+enum { PG_AUDIO, PG_VOICES, PG_PLUGINS, PG_SYSTEM, PG_STAGES, PG_RAW, PG_BOOT, PG_BOOTR, PG_BOOTD, PG_BOOTS, PG_N };
 /* stock audio stage timers (docs/32): 12 records x 0x2C at 0x01BA2618, run by Core_render_block; mapping checked
  * against the emulator profile: 0 whole block, 4 decimator + DC blocker, 7 tape, 9 master EQ, 11 output stage */
 #define ST_N 12
@@ -188,6 +188,8 @@ static char *put_u(char *p, uint32_t v)                     /* decimal, no libc 
     return p;
 }
 static char *put_s(char *p, const char *s) { while (*s) *p++ = *s++; return p; }
+static char *put_sec(char *p, uint32_t ms)                    /* "9.1": seconds with one decimal */
+{ ms = (ms + 50) / 100; p = put_u(p, ms / 10); *p++ = '.'; *p++ = (char)('0' + ms % 10); return p; }
 static char *put_mb(char *p, uint32_t bytes, int dec)       /* firmware font: no uppercase glyphs (they render as symbols); "13.1" (dec) or "171" MB, 1 MB = 2^20 */
 {
     uint32_t t = (bytes >> 10) * 10 / 1024;                  /* tenths of MB */
@@ -328,7 +330,7 @@ static void sm_update(void *scr, int dt)
     }
     extern int32_t op1_db_last_err __attribute__((weak));
     char t[48], *q = t;
-    *q++ = (char)('1' + sm_page); *q++ = '/'; *q++ = (char)('0' + PG_N); *q++ = ' ';
+    q = put_u(q, (uint32_t)sm_page + 1); *q++ = '/'; q = put_u(q, PG_N); *q++ = ' ';
     if (ps_prof) {                                           /* "paul 41 f12 m5 s9 b1 i12 o2" (% of the audio time) */
         static const char tag[7] = { 'g', 'f', 'm', 's', 'b', 'i', 'o' };
         int32_t sum = 0;
@@ -351,6 +353,40 @@ static void sm_update(void *scr, int dt)
         q = put_u(put_s(q, "blk "), (uint32_t)st_pct[0]); q = put_u(put_s(q, " eq "), (uint32_t)st_pct[9]);
         q = put_u(put_s(q, " out "), (uint32_t)st_pct[11]); q = put_u(put_s(q, " dec "), (uint32_t)st_pct[4]);
         q = put_u(put_s(q, " tp "), (uint32_t)st_pct[7]);
+    } else if (sm_page == PG_BOOT || sm_page == PG_BOOTR) {
+        /* boot (docs/79): the firmware's own stage timers (OP_Main 0x019EFEEC: 25 x ms at 0x01AB3030; +0x10 mount +
+         * display, +0x18 db / clips / FAT with op1r's plugin loader, +0x28 sounds, +0x50 screens with op1r's screens),
+         * "7/8 boot 9.1 mnt 4.2 db 1.2 snd 2.0"; page 8: the screens and op1r's own share, "8/8 scr 1.5 op1r plg 1.1 scr 0.4" */
+        extern volatile uint32_t op1r_boot_ms[2];
+        static const uint8_t slot[4] = { 0x10, 0x18, 0x28, 0x50 };
+        static const char *const tag[4] = { " mnt ", " db ", " snd ", " scr " };
+#ifdef OP1_HOST
+        static const int32_t bt[25];
+#else
+        const volatile int32_t *bt = (const volatile int32_t *)0x01AB3030;
+#endif
+        if (sm_page == PG_BOOT) {                            /* "7/8 boot 9.1 mnt 4.2 db 1.2 snd 2.0" */
+            uint32_t tot = 0;
+            for (int i = 0; i < 25; i++) tot += bt[i] > 0 ? (uint32_t)bt[i] : 0u;
+            q = put_sec(put_s(q, "boot "), tot);
+            for (int i = 0; i < 3; i++) q = put_sec(put_s(q, tag[i]), (uint32_t)(bt[slot[i] / 4] > 0 ? bt[slot[i] / 4] : 0));
+        } else {                                             /* "8/8 scr 1.5 op1r plg 1.1 scr 0.4" */
+            q = put_sec(put_s(q, "scr "), (uint32_t)(bt[slot[3] / 4] > 0 ? bt[slot[3] / 4] : 0));
+            q = put_sec(put_s(q, " op1r plg "), op1r_boot_ms[0]);
+            q = put_sec(put_s(q, " scr "), op1r_boot_ms[1]);
+        }
+    } else if (sm_page == PG_BOOTD || sm_page == PG_BOOTS) {
+        /* the db and snd boot stages split (docs/79, boottime.c): "9/10 open 0.4 clips 0.5 fat 0.1",
+         * "10/10 pre 1.2 0.6 slot 0.4 0.3 smp 0.1" (synth / drum) */
+        extern volatile uint32_t bt_split[8];
+        if (sm_page == PG_BOOTD) {
+            q = put_sec(put_s(q, "open "), bt_split[0]); q = put_sec(put_s(q, " clips "), bt_split[1]);
+            q = put_sec(put_s(q, " fat "), bt_split[2]);
+        } else {
+            q = put_sec(put_s(q, "pre "), bt_split[3]); q = put_sec(put_s(q, " "), bt_split[4]);
+            q = put_sec(put_s(q, " slot "), bt_split[5]); q = put_sec(put_s(q, " "), bt_split[6]);
+            q = put_sec(put_s(q, " smp "), bt_split[7]);
+        }
     } else if (sm_page == PG_RAW) {                          /* "6/6 1:0 3:0 5:0 6:0 8:0 10:0 o12": other records, o = blk - all */
         static const uint8_t rec[6] = { 1, 3, 5, 6, 8, 10 };
         int32_t oth = st_pct[0];
