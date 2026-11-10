@@ -1,7 +1,7 @@
 /* Host test of the quad LFO (lfo/quadlfo.c) with the firmware calls mocked.
  *   cc -DOP1_HOST -I.. -Iharness quadlfo_test.c -lm -o build/quadlfo_test && build/quadlfo_test [render]
  * Checks: frequency range, routing per pass (synth knobs pass 0, envelope pass 1, FX in apply_fx),
- * amount 0 = no call, modulation depth, quad detection vs. midi LFO defaults, encoder editing.
+ * amount 0 = no call, modulation depth, quad detection vs. midi LFO defaults, encoder editing, per-LFO mute.
  * With "render": prints JSON frames (screen states) for harness/render_quadlfo.py. */
 #include "../screens/op1r_settings.c"
 #include "../lfo/quadlfo.c"
@@ -56,7 +56,7 @@ static int16_t ct(int type, int tgt, int amt) { return (int16_t)(type << 11 | tg
  * 128-bit layout through ql_enc */
 static void pk(int16_t *w)
 {
-    ql_lfo o[4]; int16_t out[8] = { 0 };
+    ql_lfo o[4] = { { 0 } }; int16_t out[8] = { 0 };
     for (int i = 0; i < 4; i++) {
         int f = (uint16_t)w[i], c = (uint16_t)w[4 + i];
         o[i].rate = f & 63; o[i].sync = (f >> 12) & 1; o[i].wave = (f >> 13) & 7; o[i].smooth = (f >> 9) & 7; o[i].off = (f >> 6) & 7;
@@ -424,6 +424,86 @@ int main(int argc, char **argv)
         }
         ml_view = 0;
     }
+    /* per-LFO mute (Shift + push, the marker byte's bits 6 / 3 / 2 / 0): saved with the words, old words unmuted, fade, no leak */
+    {
+        int16_t m[8] = { fq(40,0,0,0,0), fq(31,0,0,0,0), fq(42,0,0,0,0), fq(54,0,0,0,0),
+                         ct(QT_FREE, 0, 31), ct(QT_FREE, 12 + 3 * 1 + 0, 20), ct(QT_VOICE, 2, 20), ct(QT_GATE, 3, 20) }; pk(m);
+        int ok = ((uint16_t)m[7] >> 8) == 0xA5;
+        for (int i = 0; i < 4; i++) ok &= !D(m, i).mute;
+        CHECK(ok, "an unmuted set keeps marker 0xA5 (%04X)", (uint16_t)m[7]);
+        int16_t base[8]; memcpy(base, m, 16);
+        int all = 1, seen[256] = { 0 };
+        for (int mask = 0; mask < 16; mask++) {                   /* every combination: still quad, never pond, each bit its own LFO */
+            int16_t w[8]; memcpy(w, base, 16);
+            for (int i = 0; i < 4; i++) if (mask >> i & 1) ql_turn(w, 0, i, 0, 2);
+            for (int i = 0; i < 4; i++) all &= D(w, i).mute == (mask >> i & 1);
+            unsigned hi = (uint16_t)w[7] >> 8;
+            all &= ql_is_quad(w) && !ql_is_pond(w) && !ql_is_fox(w) && !ql_is_old(w) && ql_mark_quad(hi) && !seen[hi]++;
+            for (int k = 0; k < 7; k++) all &= w[k] == base[k] || k == 6 ? 1 : 0;
+            ql_lfo a = D(w, 2), b = D(base, 2);                    /* the other fields are untouched */
+            all &= a.rate == b.rate && a.tgt == b.tgt && a.amt == b.amt && a.type == b.type;
+            for (int i = 0; i < 4; i++) if (mask >> i & 1) ql_turn(w, 0, i, 0, 2);
+            all &= !memcmp(w, base, 16);                           /* a second push undoes it exactly */
+        }
+        CHECK(all, "mute bits: 16 combinations, each LFO its own bit, toggling back restores the words");
+        { int16_t w[8]; memcpy(w, base, 16); ql_turn(w, 0, 1, 0, 2); ql_lfo o = D(w, 1); o.rate++; ql_enc(&o, w, 1);
+          CHECK(D(w, 1).mute && !D(w, 0).mute && D(w, 1).rate == o.rate, "an edit of a muted LFO keeps its mute and the others'");
+          ql_turn(w, 0, 3, 1024, 1); CHECK(D(w, 1).mute, "a turn keeps the mutes"); }
+        { int16_t pw[8] = { 0 }, c[8]; for (int k = 0; k < 8; k++) pw[k] = (int16_t)(0x1234 * (k + 1)); pw[7] = (int16_t)(0xA700 | 0x11);
+          memcpy(c, pw, 16); ql_turn(c, 0, 1, 0, 2); CHECK(!memcmp(c, pw, 16) && ql_is_pond(c), "pond words: Shift + push changes nothing"); }
+        { int16_t old2[8] = { 16384, 16384, 16384, 16384, 0x4000 | 255, 0x5000 | 128, 0x6000 | 63, 0x4000 | 128 };
+          ql_turn(old2, 0, 2, 0, 2); CHECK(!ql_is_old(old2) && D(old2, 2).mute && !D(old2, 0).mute && D(old2, 3).rate == 54,
+                                           "an old set converts on the first mute"); }
+
+        /* fade: LFO 1 (shared, FREE, knob blue, full amount): muting takes 32 blocks (46 ms) to reach 0, no jump, the phase keeps running */
+        host_tempo_rate = 1662149u * 120;
+        int16_t f[8] = { fq(40,0,0,0,0), fq(31,0,0,0,0), fq(42,0,0,0,0), fq(54,0,0,0,0),
+                         ct(QT_FREE, 0, 31), ct(QT_FREE, 1, 0), ct(QT_VOICE, 2, 0), ct(QT_GATE, 3, 0) }; pk(f);
+        memcpy(host_lfo_words, f, 16);
+        n_synth = 0; blocks(300, host_lfo_words, 0);
+        int moved = 0, prev = last_mod; max_mod = 0;
+        for (int b = 0; b < 200; b++) { blocks(1, host_lfo_words, 0); if (abs(last_mod) > 2000) moved = 1; }
+        CHECK(moved && max_mod > 20000, "unmuted LFO 1 moves its knob (max %d)", max_mod);
+        ql_turn(host_lfo_words, 0, 0, 0, 2);                       /* mute LFO 1 */
+        prev = last_mod;
+        uint32_t ph0 = sh_st[0][0].ph; int worst = 0, n0 = 0;
+        for (int b = 0; b < 80; b++) {
+            blocks(1, host_lfo_words, 0);
+            int d = abs(last_mod - prev); if (d > worst) worst = d; prev = last_mod;
+            if (sh_st[0][0].mc == 32768 && !n0) n0 = b + 1;
+        }
+        CHECK(worst < 6000, "mute fade: largest step between calls %d (no click)", worst);
+        CHECK(n0 >= 31 && n0 <= 34, "mute fade reaches 0 after %d blocks (32 = 46 ms)", n0);
+        printf("mute: fade step %d (a full-scale knob jump would be %d), unmuted max mod %d\n", worst, max_mod, max_mod);
+        CHECK(sh_st[0][0].mc == 32768 && sh_st[0][0].val == 0 && last_mod == 0, "muted LFO contributes 0 (mc %u, val %d, mod %d)", sh_st[0][0].mc, sh_st[0][0].val, last_mod);
+        CHECK(sh_st[0][0].ph != ph0, "the muted LFO keeps its phase running");
+        {                                                          /* LFO 1 aims at LFO 2's frequency: no effect once muted */
+          int16_t g[8] = { fq(40,0,0,0,0), fq(31,0,0,0,0), fq(42,0,0,0,0), fq(54,0,0,0,0),
+                           ct(QT_FREE, 12 + 3 * 1 + 0, 31), ct(QT_FREE, 1, 20), ct(QT_VOICE, 2, 0), ct(QT_GATE, 3, 0) }; pk(g);
+          ql_lfo Lb[4]; ql_lfo g2 = D(g, 1); int steers = 0, still = 1;
+          for (int b = 0; b < 300; b++) { blocks(1, g, 0); const ql_lfo *Lp = ql_params(g, 0, -1, Lb); if (Lp[1].inc != g2.inc) steers = 1; }
+          ql_turn(g, 0, 0, 0, 2);
+          for (int b = 0; b < 80; b++) { blocks(1, g, 0); const ql_lfo *Lp = ql_params(g, 0, -1, Lb); if (b > 40 && Lp[1].inc != g2.inc) still = 0; }
+          CHECK(steers && still, "a muted LFO steers nothing (steers before %d, after the fade %d)", steers, still); }
+        ql_turn(host_lfo_words, 0, 0, 0, 2);                       /* unmute: back to moving, smoothly */
+        blocks(1, host_lfo_words, 0); moved = 0; max_mod = 0; worst = 0; prev = last_mod;
+        for (int b = 0; b < 300; b++) { blocks(1, host_lfo_words, 0); int d = abs(last_mod - prev); if (d > worst) worst = d; prev = last_mod; if (abs(last_mod) > 20000) moved = 1; }
+        CHECK(moved && !sh_st[0][0].mc && worst < 6000, "unmuted again: moves, gain back to 1, step %d", worst);
+    }
+    /* a voice LFO (VOIC, knob green = LFO 3) muted: a new note starts muted (no 46 ms leak), the others still run */
+    {
+        int16_t m[8] = { fq(40,0,0,0,0), fq(40,0,0,0,0), fq(45,0,0,0,0), fq(54,0,0,0,0),
+                         ct(QT_FREE, 0, 31), ct(QT_FREE, 1, 31), ct(QT_VOICE, 2, 31), ct(QT_GATE, 3, 31) }; pk(m);
+        ql_turn(m, 0, 2, 0, 2); ql_turn(m, 0, 3, 0, 2);            /* LFO 3 (VOIC) and 4 (GATE) muted, 1 and 2 not */
+        memcpy(host_lfo_words, m, 16);
+        v_st[2][2].mc = 0; v_st[2][3].mc = 0;
+        ql_trig_synth(host_lfo_obj[2], host_lfo_words);
+        CHECK(v_st[2][2].mc == 32768 && v_st[2][3].mc == 32768 && v_st[2][0].mc == 0, "a voice starts at its LFOs' mute state");
+        int a = 0, b2 = 0; max_mod = 0;
+        for (int k = 0; k < 400; k++) { blocks(1, host_lfo_words, 2); a |= abs(sh_st[0][0].val) > 20000; b2 |= abs(sh_st[0][1].val) > 20000; }
+        CHECK(a && b2 && v_st[2][2].val == 0 && v_st[2][3].val == 0, "muted voice LFOs stay at 0, the others move");
+    }
+
     if (!render) { printf(fails ? "%d FAILED\n" : "OK: all quad LFO checks pass\n", fails); return fails != 0; }
 
     /* screen frames */

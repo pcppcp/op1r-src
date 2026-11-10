@@ -444,7 +444,8 @@ void *read_lfo_param_safe(int slot, int pos)
 /* patch loading validates the 8 LFO words one by one against the LFO type's ranges (parse_patch_json, CALL
  * 0x01A1DF9C at 0x01A042A2, each word in one temporary, words 0..7 in order, stops at the first failure). A failure
  * ends in the assert patch.cpp:390 "Invalid synth patch ... error 27" = the OP-1 locks at boot, so quad words must
- * always pass. quad runs as the midi type (4). Current quad words: marker 0xA5 in the high byte of word 7; op1r <= 15
+ * always pass. quad runs as the midi type (4). Current quad words: marker 0xA5 in the high byte of word 7 (or a per-LFO
+ * mute variant of it, (b & 0xB2) == 0xA0, lfo/quadlfo.c); op1r <= 15
  * quad words: 0x4000 / 0x6000 marker in words 4..7 (lfo/quadlfo.c reads them as defaults). For type 4 words that fail
  * the midi ranges are accepted provisionally; word 7 decides: a quad set -> ok, otherwise the stock result. */
 #define LFO_RANGE_OK ((int (*)(int, int, const int16_t *))0x01A1DF9C)
@@ -459,6 +460,7 @@ int lfo_range_ok(int type, int i, const int16_t *v)
     if (!ok) bad = 1;
     if (i < 7) return 1;
     if (((uint16_t)*v >> 8) >= 0xA5 && ((uint16_t)*v >> 8) <= 0xA7) return 1;   /* quad / fox / pond words */
+    if ((((uint16_t)*v >> 8) & 0xB2) == 0xA0) return 1;          /* quad words with muted LFOs */
     if (oldq) return 1;                                           /* old quad words */
     return !bad;
 }
@@ -1178,6 +1180,15 @@ void key_event_hook(int code, int pressed)
     }
     if (sb_key(custom_engine_page(), code, pressed)) return;     /* engine sample browser (screens/sbrowse.c) */
     if (code >= 0x3B && code <= 0x3E && quad_lfo_page()) {      /* quad LFO: press selects LFO 1..4 */
+        if (pressed && *(volatile uint8_t *)0x01DD7F78) {        /* Shift + push: mute / unmute that LFO */
+            int pos = lfo_page_pos();
+            int16_t *w = (int16_t *)lfo_words(pos, lfo_page_slot(pos));
+            int16_t before[8];
+            for (int i = 0; i < 8; i++) before[i] = w[i];
+            ql_turn(w, pos, press_knob[code - 0x3B], 0, 2);
+            for (int i = 0; i < 8; i++) if (w[i] != before[i]) { PATCH_SET_LFO(PATCH_OBJ(pos, lfo_page_slot(pos)), w); break; }
+            return;
+        }
         if (pressed) ql_press(lfo_page_pos(), press_knob[code - 0x3B]);
         return;
     }

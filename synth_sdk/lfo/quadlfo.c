@@ -18,7 +18,8 @@
  *                 by the white encoder, ignored if stored - a self target alone would reach no knob)
  *                 24..26: engine page 2 blue / green / white, 27..29: FX page 2 blue / green / white (plugin engines
  *                 / FX only: words 5..7 of the knob words, 0..32767; engine page 2 is synth only, none on drums)
- *   bits 120..127 marker 0xA5 (w[7] = 0xA5xx, negative: never a stock MIDI LFO word)
+ *   bits 120..127 marker 0xA5 (w[7] = 0xA5xx, negative: never a stock MIDI LFO word) = no LFO muted. Shift + push mutes one
+ *                 LFO: its bit in the marker flips (family (b & 0xB2) == 0xA0, bits 6 / 3 / 2 / 0 = LFO 4 / 3 / 2 / 1)
  * Older quad formats (op1r <= 15, per-word markers) are not read any more.
  * LFO targets (modulation from the modulator's value of the previous block, so order and feedback are harmless):
  *   frequency  x 2^(+-2 octaves) at full amount;  amount  x (0 .. 2);  phase offset  +-1/2 cycle.
@@ -36,6 +37,7 @@
  * Controls on the LFO page (encoder press blue..red selects LFO 1..4; turns edit the selected one):
  *   blue frequency / division, green amount, white target (21: own F / A / O skipped, wraps), red type (6, wraps)
  *   Shift held (table of all four): blue phase offset, green smoothing, white waveform, red sync on / off
+ *   Shift + push of an encoder: mute / unmute that LFO (a 46 ms gain fade, the phase keeps running; the row goes grey)
  *
  * Firmware calls (fw 246, docs/10):
  *   synth knobs   Ranges::knob_range_synth(knob, &mod, engine, 0xFF801724)   (apply pass 0)
@@ -127,11 +129,18 @@ static const char *const ql_type_name[QT_N] = { "VOIC", "FREE", "GATE", "MONO", 
 #define QL_NTGT 30                                           /* 12 knob / env / fx, 4 LFOs x 3, 3 + 3 page 2 */
 #define QL_P2   24                                           /* first page-2 target (engine 24..26, FX 27..29) */
 #define QL_MARK 0xA5
+/* The marker byte (bits 120..127) is also the per-LFO mute: the quad family is (b & 0xB2) == 0xA0 (bits 7 and 5 set, 4 and
+ * 1 clear; fox 0xA6 and pond 0xA7 have bit 1 set, so they stay outside), and bits 6, 3, 2, 0 are the mutes of LFO 4, 3,
+ * 2, 1: an LFO is muted when its bit differs from QL_MARK's (0xA5 = no LFO muted, so every earlier save reads as before). */
+static const uint8_t ql_mute_bit[4] = { 0x01, 0x04, 0x08, 0x40 };
+static inline int ql_mark_quad(unsigned hi) { return (hi & 0xB2) == 0xA0; }
 #define FOX_MARK 0xA6                                        /* the dropped "fox" LFO (docs/63): its words still load, as silent quad */
 #define POND_MARK 0xA7                                       /* "pond" LFO (docs/64): four competing species */
 
-typedef struct { uint8_t wave, sync, smooth, off, rate, type, tgt, tl, tk; int8_t amt; int16_t a128; uint32_t inc, phoff; uint8_t bloom; } ql_lfo;   /* bloom: the pond's chaos */
-typedef struct { uint32_t ph, cnt; int16_t val, rnd; uint8_t done; int32_t lx, ly, lz, d1, d2; } ql_st;   /* lx..lz: Lorenz (lz 0 = start); pond: lx..d1 populations, d2 started */
+typedef struct { uint8_t wave, sync, smooth, off, rate, type, tgt, tl, tk; int8_t amt; int16_t a128; uint32_t inc, phoff; uint8_t bloom, mute; } ql_lfo;   /* bloom: the pond's chaos */
+/* sv: the slewed waveform value; val: what everything reads = sv scaled by the mute gain (1 - mc / 32768; mc 0 = not
+ * muted, so val == sv and a state at rest is unmuted); mc moves towards 32768 (muted) or 0 in ql_step */
+typedef struct { uint32_t ph, cnt; int16_t val, rnd, sv; uint16_t mc; uint8_t done; int32_t lx, ly, lz, d1, d2; } ql_st;   /* lx..lz: Lorenz (lz 0 = start); pond: lx..d1 populations, d2 started */
 static inline int ql_is_lfo(const ql_lfo *o) { return o->tgt >= 12 && o->tgt < QL_P2; }   /* LFO -> LFO target */
 static inline int ql_p2(const ql_lfo *o) { return o->tgt >= QL_P2; }                      /* page-2 word 5 + k */
 /* page-2 word (5..7) of a plugin engine / FX: + mod, 0..32767 (engine words: 0 = unset = 8192, kept >= 1) */
@@ -163,12 +172,12 @@ volatile uint8_t ql_sel[3];                                   /* selected LFO pe
 static inline int ql_old_ctrl(int16_t c) { uint16_t m = (uint16_t)c & 0xE000; return m == 0x4000 || m == 0x6000; }
 static int ql_is_old(const int16_t *w)
 {
-    return ((uint16_t)w[7] >> 8) != QL_MARK && ((uint16_t)w[7] >> 8) != FOX_MARK && ((uint16_t)w[7] >> 8) != POND_MARK && ql_old_ctrl(w[4]) && ql_old_ctrl(w[5]) && ql_old_ctrl(w[6]) && ql_old_ctrl(w[7]);
+    return !ql_mark_quad((uint16_t)w[7] >> 8) && ((uint16_t)w[7] >> 8) != FOX_MARK && ((uint16_t)w[7] >> 8) != POND_MARK && ql_old_ctrl(w[4]) && ql_old_ctrl(w[5]) && ql_old_ctrl(w[6]) && ql_old_ctrl(w[7]);
 }
 static int ql_is_fox(const int16_t *w) { return ((uint16_t)w[7] >> 8) == FOX_MARK; }   /* dropped: read as an old set */
 int ql_is_pond(const int16_t *w) { return ((uint16_t)w[7] >> 8) == POND_MARK; }
 /* every hook (apply / trigger stubs, range check, read, screen, keys): quad, pond, old and dropped fox words */
-int ql_is_quad(const int16_t *w) { return ((uint16_t)w[7] >> 8) == QL_MARK || ql_is_fox(w) || ql_is_pond(w) || ql_is_old(w); }
+int ql_is_quad(const int16_t *w) { return ql_mark_quad((uint16_t)w[7] >> 8) || ql_is_fox(w) || ql_is_pond(w) || ql_is_old(w); }
 /* bit stream over the 8 words */
 static uint32_t ql_get(const int16_t *w, int pos, int n)
 {
@@ -272,10 +281,11 @@ static void ql_dec(const int16_t *w, int i, ql_lfo *o)
     if (ql_is_pond(w)) { pond_dec(w, i, o); return; }
     if (ql_is_old(w) || ql_is_fox(w)) {                           /* old format / dropped fox: defaults, amount 0 */
         o->rate = ql_def_rate[i]; o->sync = 0; o->wave = 0; o->smooth = 0; o->off = 0; o->type = QT_VOICE;
-        o->tgt = (uint8_t)i; o->tl = o->tk = 0; o->amt = 0; o->a128 = 0; o->inc = ql_inc((o->rate << 9) | 0x100); o->phoff = 0;
+        o->tgt = (uint8_t)i; o->tl = o->tk = 0; o->amt = 0; o->a128 = 0; o->mute = 0; o->inc = ql_inc((o->rate << 9) | 0x100); o->phoff = 0;
         return;
     }
     int b = 30 * i;
+    { unsigned hi = (uint16_t)w[7] >> 8; o->mute = (uint8_t)(ql_mark_quad(hi) && ((hi ^ QL_MARK) & ql_mute_bit[i & 3]) != 0); }
     o->rate = (uint8_t)ql_get(w, b, 6); o->sync = (uint8_t)ql_get(w, b + 6, 1);
     o->wave = (uint8_t)ql_get(w, b + 7, 3); o->smooth = (uint8_t)ql_get(w, b + 10, 3);
     o->off = (uint8_t)ql_get(w, b + 13, 3); o->type = (uint8_t)clampq((int)ql_get(w, b + 16, 3), 0, QT_N - 1);
@@ -292,7 +302,18 @@ static void ql_enc(const ql_lfo *o, int16_t *w, int i)
     int b = 30 * i;
     ql_put(w, b, 6, o->rate); ql_put(w, b + 6, 1, o->sync); ql_put(w, b + 7, 3, o->wave); ql_put(w, b + 10, 3, o->smooth);
     ql_put(w, b + 13, 3, o->off); ql_put(w, b + 16, 3, o->type); ql_put(w, b + 19, 5, o->tgt);
-    ql_put(w, b + 24, 6, (uint32_t)(o->amt + 32)); ql_put(w, 120, 8, QL_MARK);
+    ql_put(w, b + 24, 6, (uint32_t)(o->amt + 32));
+    unsigned hi = ql_get(w, 120, 8), bit = ql_mute_bit[i & 3];     /* the marker keeps the other LFOs' mutes */
+    if (!ql_mark_quad(hi)) hi = QL_MARK;
+    hi = (hi & ~bit) | ((QL_MARK & bit) ^ (o->mute ? bit : 0));
+    ql_put(w, 120, 8, hi);
+}
+/* Shift + push: toggle LFO i's mute in the words (only the marker's bit flips: the LFO's own fields stay as stored) */
+static void ql_toggle_mute(int16_t *w, int i)
+{
+    unsigned hi = ql_get(w, 120, 8);
+    if (!ql_mark_quad(hi)) hi = QL_MARK;
+    ql_put(w, 120, 8, hi ^ ql_mute_bit[i & 3]);
 }
 /* LFO -> LFO modulation: src[i] = LFO i's value (before amount) in this context, from the previous block */
 static void ql_mod(ql_lfo *L, const int16_t *src)
@@ -336,7 +357,14 @@ static void ql_step(ql_st *s, const ql_lfo *o, uint32_t k, int i)
         x = o->wave >= 10 ? pond_lv(s, o, adv, i) :
             o->wave >= 6 ? ql_lorenz(s, adv, o->off, o->wave == 7, o->type == QT_RAND) : ql_shape(o->wave, s->ph + o->phoff, s->cnt, i);
     }
-    s->val = ql_slew(s->val, x, o->smooth, k);
+    s->sv = ql_slew(s->sv, x, o->smooth, k);
+    if (o->mute || s->mc) {                                          /* the mute gain: 46 ms (32 blocks) from end to end */
+        uint32_t d = k >> 6;
+        if (d > 32768u) d = 32768u;
+        if (!d) d = 1;
+        s->mc = (uint16_t)(o->mute ? (s->mc + d > 32768u ? 32768u : s->mc + d) : (s->mc > d ? s->mc - d : 0));
+    }
+    s->val = s->mc ? (int16_t)(((int32_t)s->sv * (int32_t)(32768 - s->mc)) >> 15) : s->sv;
 }
 static void ql_restart(ql_st *s)
 {
@@ -505,6 +533,7 @@ static void ql_trigger(int pos, int v, const int16_t *w)
 {
     for (int i = 0; i < 4; i++) {
         ql_lfo o; ql_dec(w, i, &o);
+        if (v >= 0 && !ql_shared(pos, &o)) v_st[v][i].mc = o.mute ? 32768 : 0;   /* a voice starts at its LFO's mute state */
         if (o.type == QT_VOICE || o.type == QT_FREE) continue;
         if (ql_shared(pos, &o)) ql_restart(&sh_st[pos][i]);
         else if (v >= 0) ql_restart(&v_st[v][i]);
@@ -538,6 +567,17 @@ static int ql_tgt_ok(int pos, int t) { return pos != 2 || (t >= 8 && t < QL_P2) 
 static void pond_turn(int16_t *w, int pos, int knob, int st, int shift);   /* lfo/ql_pond.h */
 void ql_turn(int16_t *w, int pos, int knob, int delta, int shift)
 {
+    if (shift == 2 && !delta) {                                   /* Shift + push of encoder `knob` (dispatcher.c) */
+        if (pos == 2 || ql_is_pond(w) || knob < 0 || knob > 3) return;   /* master LFO / pond: no per-LFO mute */
+        if (ql_is_old(w) || ql_is_fox(w)) {
+            ql_lfo d[4];
+            for (int k = 0; k < 4; k++) ql_dec(w, k, &d[k]);
+            for (int k = 0; k < 8; k++) w[k] = 0;
+            for (int k = 0; k < 4; k++) ql_enc(&d[k], w, k);
+        }
+        ql_toggle_mute(w, knob);
+        return;
+    }
     int i = ql_sel[pos > 2 ? 0 : pos] & 3, st = ql_steps(knob, delta);
     if (!st) return;
     if (ql_is_pond(w)) { pond_turn(w, pos, knob, st, shift); return; }
@@ -642,11 +682,13 @@ static void ql_table(void *r, const int16_t *w, int sel)
             qline(r, OP1_Q10(QL_DOT_X - 7), y + OP1_Q10(10), OP1_Q10(QL_DOT_X + 7), y + OP1_Q10(10), 0x600, ql_col[i]);
         if (o.wave >= 6) { t[0] = 'R'; ql_num(t + 1, 28 - 2 * o.off); }   /* Lorenz: chaos rho */
         else ql_num(t, o.off * 45);
-        sf_text(r, OP1_Q10(QT_OFF_X), ty, OP1_Q10(2), t, 0x400, ql_col[0]);
+        const uint8_t *c0 = o.mute ? ql_dim : ql_col[0], *c1 = o.mute ? ql_dim : ql_col[1], *c2 = o.mute ? ql_dim : ql_col[2];
+        sf_text(r, OP1_Q10(QT_OFF_X), ty, OP1_Q10(2), t, 0x400, c0);
         ql_num(t, o.smooth);
-        sf_text(r, OP1_Q10(QT_SMOOTH_X), ty, OP1_Q10(2), t, 0x400, ql_col[1]);
-        ql_wave_glyph(r, o.wave, OP1_Q10(QT_WAVE_X), y, ql_col[2]);
-        sf_text(r, OP1_Q10(QT_SYNC_X), ty, OP1_Q10(2), o.sync ? "SYNC" : "FREE", 0x400, o.sync ? ql_col[3] : ql_dim);
+        sf_text(r, OP1_Q10(QT_SMOOTH_X), ty, OP1_Q10(2), t, 0x400, c1);
+        ql_wave_glyph(r, o.wave, OP1_Q10(QT_WAVE_X), y, c2);
+        sf_text(r, OP1_Q10(QT_SYNC_X), ty, OP1_Q10(2), o.mute ? "MUTE" : o.sync ? "SYNC" : "FREE", 0x400,
+                o.mute ? ql_dim : o.sync ? ql_col[3] : ql_dim);
     }
 }
 
@@ -703,10 +745,10 @@ static void ql_screen_update(void *scr, int dt)
     for (int i = 0; i < 4; i++) {
         const ql_lfo *o = &L[i];
         int32_t y = OP1_Q10(ql_lane_y[i]), ty = y - OP1_Q10(6);
-        int on = i == sel;
-        const uint8_t *tc = on ? 0 : ql_lilac;
+        int on = i == sel, muted = o->mute;                              /* muted: grey text, no span, tick at the centre, MUTE for the amount */
+        const uint8_t *tc = muted ? ql_dim : on ? 0 : ql_lilac;
         /* amount span: centre +- |amount| (dim lane colour), output tick */
-        int a = Lm[i].a128 < 0 ? -Lm[i].a128 : Lm[i].a128;
+        int a = muted ? 0 : Lm[i].a128 < 0 ? -Lm[i].a128 : Lm[i].a128;
         int32_t span = (int32_t)(((int64_t)a * OP1_Q10(QL_LANE_HALF)) >> 7);
         if (span) {
             uint8_t dc[4];
@@ -714,7 +756,7 @@ static void ql_screen_update(void *scr, int dt)
             dc[3] = 0xFF;
             qline(r, OP1_Q10(QL_LANE_MID) - span, y, OP1_Q10(QL_LANE_MID) + span, y, QL_SPAN_W, dc);
         }
-        int16_t out = lfo_on ? ql_out(ql_shared(pos, o) ? sh_st[pos][i].val : disp_all[pos][i], Lm[i].a128) : 0;
+        int16_t out = lfo_on && !muted ? ql_out(ql_shared(pos, o) ? sh_st[pos][i].val : disp_all[pos][i], Lm[i].a128) : 0;
         int32_t x = OP1_Q10(QL_LANE_MID) + (int32_t)(((int64_t)out * OP1_Q10(QL_LANE_HALF)) >> 15);
         qline(r, x, y - OP1_Q10(QL_TICK_H), x, y + OP1_Q10(QL_TICK_H), 0x800, ql_col[i]);
         if (on) qline(r, OP1_Q10(QL_DOT_X - 7), y + OP1_Q10(10), OP1_Q10(QL_DOT_X + 7), y + OP1_Q10(10), 0x600, ql_col[i]);
@@ -726,6 +768,7 @@ static void ql_screen_update(void *scr, int dt)
         int pc = o->amt * 100 / 31; char *p = t;
         if (pc < 0) { *p++ = '-'; pc = -pc; }
         ql_num(p, pc);
+        if (muted) { t[0] = 'M'; t[1] = 'U'; t[2] = 'T'; t[3] = 'E'; t[4] = 0; }
         sf_text(r, OP1_Q10(QL_AMT_X), ty, OP1_Q10(2), t, 0x400, tc ? tc : ql_col[1]);
         /* target: glyph + dot in the knob / stage colour; LFO targets: F / A / O + dot in the target LFO's colour */
         int dcol = ql_dest(o);

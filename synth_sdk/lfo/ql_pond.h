@@ -25,7 +25,7 @@ static void pond_dec(const int16_t *w, int i, ql_lfo *o)
 {
     pond_set f; pond_get(w, &f);
     o->rate = f.rate; o->sync = f.sync; o->smooth = 0; o->off = 0; o->tl = o->tk = 0; o->phoff = 0;
-    o->type = f.retrig ? QT_MONO : QT_FREE; o->bloom = f.chaos;
+    o->type = f.retrig ? QT_MONO : QT_FREE; o->bloom = f.chaos; o->mute = 0;
     o->inc = o->sync ? ql_div_inc(o->rate) : ql_inc((o->rate << 9) | 0x100);
     o->wave = (uint8_t)(10 + i); o->tgt = f.tgt[i]; o->amt = f.amt[i];
     o->a128 = (int16_t)(o->amt * 127 / 31);
