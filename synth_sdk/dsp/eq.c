@@ -18,10 +18,29 @@
 typedef struct { const int16_t *h; int16_t *d; int16_t *p; int32_t k; } fir_st;
 #endif
 #if defined(__bfin__)
-void eq_fir(fir_st *s, const volatile int16_t *x, int16_t *y);   /* dsp/fir.S */
+void eq_fir(fir_st *s, const volatile int16_t *x, int16_t *y, const int32_t *hp);   /* dsp/fir.S */
 #define EQ_FIR eq_fir
+void eq_mid(volatile int16_t *x, volatile int16_t *dly, int32_t *di);
+int32_t eq_onepole(int16_t *b, int32_t c, int32_t s);
+void eq_mix(volatile int16_t *x, int32_t ab, int32_t c);
+#define EQ_MID eq_mid
+#define EQ_OP eq_onepole
+#define EQ_MIX eq_mix
 #endif
 #include "eq_model.h"
+
+/* the FIR's coefficient pairs (dsp/fir.S): hp[m] = (h[m] low, h[m + 1] high), the last high half 0; R246's two filters
+ * have fixed coefficients in L1 (lo 0xFF800004, hi 0xFF80006C, 51 taps), so the tables are built once (boot) */
+int32_t eq_hp[2][52] __attribute__((aligned(4)));
+void eq_fir_pairs(void)
+{
+    for (int f = 0; f < 2; f++) {
+        const volatile int16_t *h = (const volatile int16_t *)(f ? 0xFF80006C : 0xFF800004);
+        for (int m = 0; m < 51; m++)
+            eq_hp[f][m] = (int32_t)(uint16_t)h[m] | (int32_t)(m < 50 ? (uint32_t)(uint16_t)h[m + 1] << 16 : 0);
+        eq_hp[f][51] = 0;
+    }
+}
 
 static int32_t *eq_arg;
 static void eq_mod(void) { eq_model(eq_arg); }
@@ -39,6 +58,7 @@ volatile uint32_t eq_selftest[4];
 static void eq_l1_call(void) { void (*volatile f)(void *) = MASTER_EQ; f(eq_arg); }
 void eq_stage_selftest(void)
 {
+    eq_fir_pairs();                                           /* production: the L1 copy uses them from the first block */
 #ifndef EQ_CHECK
     static int16_t dl[4][51];
     static int32_t fst[6];
@@ -106,6 +126,7 @@ static void eq_stress(void)
 #endif
 void eq_stage(int32_t *st)
 {
+    if (!eq_hp[0][0] && !eq_hp[0][1]) eq_fir_pairs();      /* check builds: before the first block */
 #ifdef EQ_STRESS
     eq_stress();
 #endif

@@ -9,22 +9,23 @@
 #ifndef EQ_HELPER
 #define EQ_HELPER static
 #endif
+extern int32_t eq_hp[2][52];                         /* (h[m], h[m+1]) pairs of the lo / hi FIR (dsp/eq.c) */
 #if defined(__bfin__)                                  /* the DSP instructions (GCC builtins): the same results */
-static inline int32_t sat32(int64_t v) { return v > 0x7FFFFFFFLL ? 0x7FFFFFFF : v < -0x80000000LL ? (int32_t)0x80000000 : (int32_t)v; }
-static inline int16_t sat16(int32_t v) { return (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v); }
-static inline int64_t frac16(int16_t a, int16_t b) { return __builtin_bfin_mult_fr1x32(a, b); }
-static inline int32_t adds(int32_t a, int32_t b) { return __builtin_bfin_add_fr1x32(a, b); }
-static inline int32_t shls1(int32_t a) { return __builtin_bfin_shl_fr1x32(a, 1); }
-static inline int32_t mul32(int32_t a, int32_t b) { return __builtin_bfin_mult_fr1x32x32(a, b); }
+static inline __attribute__((always_inline)) int32_t sat32(int64_t v) { return v > 0x7FFFFFFFLL ? 0x7FFFFFFF : v < -0x80000000LL ? (int32_t)0x80000000 : (int32_t)v; }
+static inline __attribute__((always_inline)) int16_t sat16(int32_t v) { return (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v); }
+static inline __attribute__((always_inline)) int64_t frac16(int16_t a, int16_t b) { return __builtin_bfin_mult_fr1x32(a, b); }
+static inline __attribute__((always_inline)) int32_t adds(int32_t a, int32_t b) { return __builtin_bfin_add_fr1x32(a, b); }
+static inline __attribute__((always_inline)) int32_t shls1(int32_t a) { return __builtin_bfin_shl_fr1x32(a, 1); }
+static inline __attribute__((always_inline)) int32_t mul32(int32_t a, int32_t b) { return __builtin_bfin_mult_fr1x32x32(a, b); }
 #define ACC_ADD(a, p) __builtin_bfin_add_fr1x32((a), (int32_t)(p))
 #define ACC_SUB(a, p) __builtin_bfin_sub_fr1x32((a), (int32_t)(p))
 #else
-static inline int32_t sat32(int64_t v) { return v > 0x7FFFFFFFLL ? 0x7FFFFFFF : v < -0x80000000LL ? (int32_t)0x80000000 : (int32_t)v; }
-static inline int16_t sat16(int32_t v) { return (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v); }
-static inline int64_t frac16(int16_t a, int16_t b) { return (a == -32768 && b == -32768) ? 0x7FFFFFFF : 2 * (int64_t)a * b; }
-static inline int32_t adds(int32_t a, int32_t b) { return sat32((int64_t)a + b); }
-static inline int32_t shls1(int32_t a) { return sat32((int64_t)a << 1); }
-static inline int32_t mul32(int32_t a, int32_t b)          /* libdsp mult_fr1x32x32 (as dsp/outstage_model.h) */
+static inline __attribute__((always_inline)) int32_t sat32(int64_t v) { return v > 0x7FFFFFFFLL ? 0x7FFFFFFF : v < -0x80000000LL ? (int32_t)0x80000000 : (int32_t)v; }
+static inline __attribute__((always_inline)) int16_t sat16(int32_t v) { return (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v); }
+static inline __attribute__((always_inline)) int64_t frac16(int16_t a, int16_t b) { return (a == -32768 && b == -32768) ? 0x7FFFFFFF : 2 * (int64_t)a * b; }
+static inline __attribute__((always_inline)) int32_t adds(int32_t a, int32_t b) { return sat32((int64_t)a + b); }
+static inline __attribute__((always_inline)) int32_t shls1(int32_t a) { return sat32((int64_t)a << 1); }
+static inline __attribute__((always_inline)) int32_t mul32(int32_t a, int32_t b)          /* libdsp mult_fr1x32x32 (as dsp/outstage_model.h) */
 {
     uint16_t al = (uint16_t)a, bl = (uint16_t)b;
     int16_t ah = (int16_t)(a >> 16), bh = (int16_t)(b >> 16);
@@ -38,17 +39,17 @@ static inline int32_t mul32(int32_t a, int32_t b)          /* libdsp mult_fr1x32
 #define ACC_ADD(a, p) sat32((int64_t)(a) + (p))
 #define ACC_SUB(a, p) sat32((int64_t)(a) - (p))
 #endif
-static inline int16_t hi16(int32_t v) { return (int16_t)(v >> 16); }
-static inline int16_t rnd16(int64_t acc)                    /* accumulator -> 16 bits: round to nearest, ties to even */
+static inline __attribute__((always_inline)) int16_t hi16(int32_t v) { return (int16_t)(v >> 16); }
+static inline __attribute__((always_inline)) int16_t rnd16(int64_t acc)                    /* accumulator -> 16 bits: round to nearest, ties to even */
 {
     int64_t q = acc >> 16, r = acc & 0xFFFF;
     if (r > 0x8000 || (r == 0x8000 && (q & 1))) q++;
     return (int16_t)(q > 32767 ? 32767 : q < -32768 ? -32768 : q);
 }
 
-static inline int16_t mulh16(int16_t a, int16_t b) { return rnd16(frac16(a, b)); }   /* ties to even, as the original (the GCC builtin differs at ties) */   /* R.L = a * b: the same rounding (ties to even: measured) */
+static inline __attribute__((always_inline)) int16_t mulh16(int16_t a, int16_t b) { return rnd16(frac16(a, b)); }   /* ties to even, as the original (the GCC builtin differs at ties) */   /* R.L = a * b: the same rounding (ties to even: measured) */
 #ifndef __bfin__
-static void fir_c(fir_st *s, const volatile int16_t *x, int16_t *y)
+static void fir_c(fir_st *s, const volatile int16_t *x, int16_t *y, const int32_t *hp)
 
 {
     const int k = s->k;
@@ -83,11 +84,23 @@ EQ_HELPER int32_t onepole(int16_t *b, int16_t c, int32_t s)    /* in place; retu
 #define MID   ((int16_t *)0x01AABC28)
 #define FIRS  ((fir_st *)0x01AABAD8)                       /* lo L, hi L, lo R, hi R (stride 0x14) */
 #define TAB   ((const volatile int16_t *)0x0106A5EC)
+#if defined(__bfin__)                                  /* dsp/fir.S: the per-sample loops in assembly */
+EQ_HELPER void channel(volatile int16_t *x, volatile int16_t *dly, int32_t *st, int ch, int16_t cl, int16_t cm,
+                       int32_t a, int32_t b, int32_t c)
+{
+    EQ_FIR((fir_st *)((uint8_t *)FIRS + 0x28 * ch), x, LO, eq_hp[0]);
+    EQ_FIR((fir_st *)((uint8_t *)FIRS + 0x28 * ch + 0x14), x, HI, eq_hp[1]);
+    EQ_MID(x, dly, &st[4 + ch]);
+    st[2 * ch] = EQ_OP(LO, cl, st[2 * ch]);
+    st[2 * ch + 1] = EQ_OP(MID, cm, st[2 * ch + 1]);
+    EQ_MIX(x, (int32_t)(uint16_t)(a >> 16) | (b & (int32_t)0xFFFF0000), (int32_t)(uint16_t)(c >> 16));
+}
+#else
 EQ_HELPER void channel(volatile int16_t *x, volatile int16_t *dly, int32_t *st, int ch, int16_t cl, int16_t cm,
                     int32_t a, int32_t b, int32_t c)
 {
-    EQ_FIR((fir_st *)((uint8_t *)FIRS + 0x28 * ch), x, LO);
-    EQ_FIR((fir_st *)((uint8_t *)FIRS + 0x28 * ch + 0x14), x, HI);
+    EQ_FIR((fir_st *)((uint8_t *)FIRS + 0x28 * ch), x, LO, eq_hp[0]);       /* pair tables: lo, hi (dsp/eq.c) */
+    EQ_FIR((fir_st *)((uint8_t *)FIRS + 0x28 * ch + 0x14), x, HI, eq_hp[1]);
     int32_t di = st[4 + ch];
     for (int i = 0; i < 64; i++) {
         MID[i] = sat16(sat16(dly[di] - LO[i]) - HI[i]);
@@ -111,6 +124,7 @@ EQ_HELPER void channel(volatile int16_t *x, volatile int16_t *dly, int32_t *st, 
     }
     PRM[2] = m0; PRM[3] = m1; PRM[4] = m2;
 }
+#endif
 EQ_ATTR void EQ_ENTRY(int32_t *st)
 {
     const int32_t w0 = PRM[0], w1 = PRM[1];

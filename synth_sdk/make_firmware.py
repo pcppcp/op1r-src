@@ -317,6 +317,7 @@ def build(engs, fxs):
     flags = {}                                       # plugin.json "source_cflags": e.g. -O3 after the default -O2
     for e in engs + fxs:
         flags.update(plugins.source_flags(e, [e['source']] + e.get('extra_sources', [])))
+    flags['dsp/eq_l1.c'] = ['-Os']                                          # docs/81: the L1 room (1 204 bytes)
     if os.environ.get('OP1R_EQ') in ('check', 'stress'):                       # docs/81: master EQ model vs original, per block
         flags['dsp/eq.c'] = flags.get('dsp/eq.c', []) + ['-DEQ_CHECK', '-DSTAGE_DUMP'] + (['-DEQ_STRESS'] if os.environ['OP1R_EQ'] == 'stress' else [])
     if os.environ.get('OP1R_OUTSTAGE') in ('check', 'stress'):                # docs/81: output stage model vs original, per block
