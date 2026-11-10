@@ -77,8 +77,8 @@ OS_HELPER void channel(const volatile int16_t *in, volatile int32_t *out, int32_
     const int32_t one_c1 = subs(ONE, c1), one_c2 = subs(ONE, c2);
     int16_t peak = *pk;
     for (int i = 0; i < 64; i++) {
-        int32_t e4 = shls(e, 4);
-        int32_t g = subs(ONE, mul32(e4, e4));
+        int32_t g = ONE;                                   /* fast path (docs/81): e = 0 -> g = 1 - 0 exactly */
+        if (e) { int32_t e4 = shls(e, 4); g = subs(ONE, mul32(e4, e4)); }
         int32_t y = adds(mul32((int32_t)in[i] << 16, gain), mul32(DITH[i], gain));
         y = mul32(mul32(y, g), outg);
         int32_t o = shls(y, 4);
@@ -89,6 +89,7 @@ OS_HELPER void channel(const volatile int16_t *in, volatile int32_t *out, int32_
         int32_t over = adds(ab, (int32_t)0xC0000000);    /* |out| - 0.5 */
         if (over < 0) over = 0;
         over = shls(over, 1);
+        if (!e && !over) { s = mul32(s, c1); continue; }  /* at rest: att = rel = 0, e stays 0, only the state decays */
         int32_t att = adds(mul32(e, c2), mul32(over, one_c2));
         int32_t k = adds(c1, mul32(s, one_c1));
         int32_t s2 = mul32(s, c1);
