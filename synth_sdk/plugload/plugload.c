@@ -138,6 +138,7 @@ static const struct { const char *name; void *addr; } exports[] = {
     /* static / dynamic screen regions (screens/guiskip.c, docs/75) */
     { "op1_screen_regions", (void *)op1_screen_regions }, { "op1_screen_static", (void *)op1_screen_static },
     { "op1_screen_static_done", (void *)op1_screen_static_done }, { "op1_screen_static_dirty", (void *)op1_screen_static_dirty },
+    { "op1_screen_draw_cached_fn", (void *)op1_screen_draw_cached_fn },
     /* the sample browser (screens/sbrowse.c): sampler+ T1 */
     { "sb_open", (void *)sb_open }, { "sb_close", (void *)sb_close }, { "sb_is_open", (void *)sb_is_open },
     { "sb_turn", (void *)sb_turn }, { "sb_pick", (void *)sb_pick }, { "sb_page", (void *)sb_page },

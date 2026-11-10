@@ -21,6 +21,7 @@ static uint32_t fh = 0x811C9DC5u;               /* the frame being drawn */
 
 static uint32_t hash_buf[2], last;              /* what each display buffer shows; the newest frame */
 static uint32_t *cur_buf, *prev_buf, *buf_id[2];
+static void *tgt_buf;                           /* the raster's target this frame (display buffer, or scratch in check frames) */
 static uint8_t prev_rec, force;
 volatile uint8_t gs_off;             /* 1: never record (A/B in one build: poke it) */
 #ifdef GS_ON                                    /* frame-skip builds (OP1R_GUISKIP): else the code is linked but unused */
@@ -47,6 +48,52 @@ static uint32_t *vbuf;
 #define BUF_COLS      ((int)BUF_ROWS / 2)                  /* its short side: 200 / 188 / 160 visible of each 256-pixel row */
 
 static int main_ras(const void *ras) { return ras == RASTER + 0x30; }
+#ifdef GS_TILESTAT
+/* measurement (docs/77): per rendered frame, the cells of all shapes and of the shapes touching a 16 px tile that
+ * changed since the same buffer's previous rendered frame = what region drawing would still redraw */
+#define TS_MAX 2048
+#define TW 16
+#define TH 26
+static struct { uint32_t h, cells; int16_t x0, y0, x1, y1; } ts_sh[TS_MAX];
+static int ts_n;
+static uint32_t ts_prev[2][TW * TH], ts_now[TW * TH];
+static uint8_t ts_dirty[TW * TH];
+struct { uint32_t frames, cells, cells_replay, tiles_dirty, shapes; } gs_ts;
+static void ts_shape(const uint8_t *ras, const uint8_t *bgra)
+{
+    const int16_t *b = (const int16_t *)(ras + 0x30);
+    if (b[0] > b[2] || b[1] > b[3] || ts_n >= TS_MAX) return;
+    uint32_t h = 0x811C9DC5u, c = *(const uint32_t *)(ras + 0xC);
+    const uint32_t *cv = *(const uint32_t *const *)(ras + 0x10);   /* not used: the box + count + colour stand for it */
+    (void)cv;
+    h = (h ^ (uint32_t)(uintptr_t)ras) * 0x01000193u; h = (h ^ c) * 0x01000193u;
+    h = (h ^ *(const uint32_t *)(ras + 0x30)) * 0x01000193u; h = (h ^ *(const uint32_t *)(ras + 0x34)) * 0x01000193u;
+    h = (h ^ (bgra[0] | bgra[1] << 8 | bgra[2] << 16)) * 0x01000193u;
+    if (main_ras(ras)) h = (h ^ fh) * 0x01000193u;            /* code-drawn: their points (in the frame hash so far) */
+    ts_sh[ts_n].h = h; ts_sh[ts_n].cells = c;
+    ts_sh[ts_n].x0 = b[0]; ts_sh[ts_n].y0 = b[1]; ts_sh[ts_n].x1 = b[2]; ts_sh[ts_n].y1 = b[3]; ts_n++;
+}
+static int tcl(int v, int hi) { return v < 0 ? 0 : v > hi ? hi : v; }
+static void ts_frame_end(int slot)
+{
+    if (slot < 0) { ts_n = 0; return; }
+    for (int t = 0; t < TW * TH; t++) ts_now[t] = 0x811C9DC5u;
+    for (int i = 0; i < ts_n; i++)
+        for (int ty = tcl(ts_sh[i].y0 >> 4, TH - 1); ty <= tcl(ts_sh[i].y1 >> 4, TH - 1); ty++)
+            for (int tx = tcl(ts_sh[i].x0 >> 4, TW - 1); tx <= tcl(ts_sh[i].x1 >> 4, TW - 1); tx++)
+                ts_now[ty * TW + tx] = (ts_now[ty * TW + tx] ^ ts_sh[i].h) * 0x01000193u;
+    int nd = 0;
+    for (int t = 0; t < TW * TH; t++) { ts_dirty[t] = ts_now[t] != ts_prev[slot][t]; nd += ts_dirty[t]; ts_prev[slot][t] = ts_now[t]; }
+    for (int i = 0; i < ts_n; i++) {
+        int hit = 0;
+        for (int ty = tcl(ts_sh[i].y0 >> 4, TH - 1); ty <= tcl(ts_sh[i].y1 >> 4, TH - 1) && !hit; ty++)
+            for (int tx = tcl(ts_sh[i].x0 >> 4, TW - 1); tx <= tcl(ts_sh[i].x1 >> 4, TW - 1) && !hit; tx++) hit = ts_dirty[ty * TW + tx];
+        gs_ts.cells += ts_sh[i].cells; if (hit) gs_ts.cells_replay += ts_sh[i].cells;
+    }
+    gs_ts.frames++; gs_ts.tiles_dirty += (uint32_t)nd; gs_ts.shapes += (uint32_t)ts_n;
+    ts_n = 0;
+}
+#endif
 
 /* move_to / line_to entries: 1 = skip the body (record frame, main rasterizer) */
 uint32_t gs_caller;                             /* the stub stores the caller's return address here */
@@ -58,6 +105,9 @@ int gs_point(void *ras, int x, int y)
 }
 int gs_sweep(const uint8_t *ras, const uint8_t *bgra)   /* the 5 sweep sites: 1 = skip */
 {
+#ifdef GS_TILESTAT
+    if (!recording) ts_shape(ras, bgra);
+#endif
     if (main_ras(ras)) FNV(fh, 0x5EE9);          /* its points are hashed already; no cells in record frames */
     else {                                       /* SVG shape: cells kept from an earlier frame */
         const int16_t *bx = (const int16_t *)(ras + 0x30);
@@ -104,6 +154,7 @@ static uint8_t cache[400 * 512] __attribute__((aligned(32)));
 #else
 static uint8_t cache[4];
 #endif
+static void *dc_scr;                             /* the screen whose static SVG prefix the cache holds (draw_cached) */
 static void *rg_scr;                             /* the screen that declared regions */
 static op1_rect_t rg_scr_rect[OP1_REGIONS_MAX];  /* its areas (screen units) */
 static int16_t rg_dev[OP1_REGIONS_MAX][4];       /* the same in device pixels (x0, y0, x1, y1), set per region frame */
@@ -185,7 +236,7 @@ static void render_start(void *raster)
         rg_active = 1; rg_raster = raster; gs_rg_stat.frames++;
         int sl = slot_of(cur_buf);
         if (cache_gen != gen) {                   /* static parts into the cache, then copied (static_done) */
-            rg_static = 1; gs_rg_stat.statics++;
+            rg_static = 1; gs_rg_stat.statics++; dc_scr = 0;
             RASTER_TARGET(raster, cache); RASTER_CLEAR(raster);
         } else if (buf_gen[sl] != gen) {          /* this buffer still holds an older picture */
             rg_static = 0; copy_rows((uint8_t *)cur_buf, cache, 0, (int)BUF_ROWS - 1, 0, BUF_COLS - 1); buf_gen[sl] = gen; gs_rg_stat.full_copies++;
@@ -201,11 +252,76 @@ static void render_start(void *raster)
     rg_prev_active = rg_active;
 }
 
+/* ---- kennel's static SVG prefix (op1_screen_draw_cached, docs/77) ----
+ * A screen's SVG tree: the screen's word 0 = the root node; a node: +0x44 / +0x48 its children (vector of node
+ * pointers), +0x50 visible, drawn in order (group draw 0x019EB818). The static part = the nodes before first_live in
+ * that order (first_live 0: all). It is drawn once into `cache` (visibility switched so only it shows), then each
+ * render frame copies the cache into the display buffer and draws the live nodes only. */
+#define SCREEN_DRAW ((void (*)(void *, int))0x01A3B4C8)
+static uint8_t *vis_node[256], vis_old[256];
+static int vis_n;
+static void vis_set(uint8_t *n, int on) { if (vis_n < 256) { vis_node[vis_n] = n; vis_old[vis_n++] = n[0x50]; } n[0x50] = (uint8_t)on; }
+static void vis_restore(void) { while (vis_n) { vis_n--; vis_node[vis_n][0x50] = vis_old[vis_n]; } }
+static int contains(uint8_t *n, const uint8_t *fl)
+{
+    if (n == fl) return 1;
+    for (uint8_t **c = *(uint8_t ***)(n + 0x44), **e = *(uint8_t ***)(n + 0x48); c < e; c++) if (contains(*c, fl)) return 1;
+    return 0;
+}
+static void hide_live(uint8_t *n, const uint8_t *fl, int *reached)   /* static pass: hide fl and all after it */
+{
+    if (*reached || n == fl) { *reached = 1; vis_set(n, 0); return; }
+    for (uint8_t **c = *(uint8_t ***)(n + 0x44), **e = *(uint8_t ***)(n + 0x48); c < e; c++) hide_live(*c, fl, reached);
+}
+static void hide_static(uint8_t *n, const uint8_t *fl)               /* live pass: hide whatever lies before fl */
+{
+    for (uint8_t **c = *(uint8_t ***)(n + 0x44), **e = *(uint8_t ***)(n + 0x48); c < e; c++) {
+        if (*c == fl) return;                    /* fl and everything after it stay */
+        if (contains(*c, fl)) { hide_static(*c, fl); return; }
+        vis_set(*c, 0);
+    }
+}
+static void *dc_fl, *dc_raster;
+static uint32_t dc_gen;
+struct { uint32_t calls, builds, copies; } gs_dc_stat;
+void op1_screen_draw_cached_fn(void *scr, int dt, void *first_live)
+{
+    uint8_t *root = scr ? *(uint8_t **)scr : 0;
+#if defined(GS_ON) && !defined(GS_NOCACHE)
+    if (root && !rg_active && dc_raster && tgt_buf && BUF_ROWS <= 400) {
+        gs_dc_stat.calls++;
+        if (!recording) {
+            if (dc_scr != scr || dc_fl != first_live || dc_gen != gen) {   /* the static picture into the cache */
+                int reached = 0;
+                if (first_live) hide_live(root, first_live, &reached);
+                no_hash = 1;
+                RASTER_TARGET(dc_raster, cache); RASTER_CLEAR(dc_raster);
+                SCREEN_DRAW(scr, dt);
+                RASTER_TARGET(dc_raster, tgt_buf);
+                no_hash = 0;
+                vis_restore();
+                dc_scr = scr; dc_fl = first_live; dc_gen = gen; cache_gen = 0;   /* the regions' cache is gone */
+                gs_dc_stat.builds++;
+            }
+            copy_rows((uint8_t *)tgt_buf, cache, 0, (int)BUF_ROWS - 1, 0, BUF_COLS - 1);
+            gs_dc_stat.copies++;
+        }
+        if (first_live) { hide_static(root, first_live); SCREEN_DRAW(scr, dt); vis_restore(); }   /* the live nodes */
+        return;
+    }
+#endif
+    SCREEN_DRAW(scr, dt);
+}
+
 static int slot_of(const uint32_t *b) { if (buf_id[0] == b) return 0; if (buf_id[1] == b) return 1; return -1; }
 void gs_frame(void *raster)                    /* CALL Raster::clear in Screen::frame (0x01A3BBE0): a new frame */
 {
+    dc_raster = raster;
     /* the frame just drawn */
     uint32_t h = fh; fh = 0x811C9DC5u; no_hash = 0;
+#ifdef GS_TILESTAT
+    ts_frame_end(prev_buf && !prev_rec ? slot_of(prev_buf) : -1);
+#endif
 #ifdef GS_VERIFY
     if (verifying) {                            /* the check render: compare with the shown buffer */
         verifying = 0; prev_buf = 0;            /* not a display frame */
@@ -239,11 +355,11 @@ void gs_frame(void *raster)                    /* CALL Raster::clear in Screen::
 #ifdef GS_VERIFY
     if (rec && !(++vcount & 15)) {              /* render this frame in full into scratch, then compare */
         verifying = 1; vbuf = cur_buf; recording = 0; prev_rec = 0; rg_active = 0;
-        RASTER_TARGET(raster, scratch); RASTER_CLEAR(raster);
+        RASTER_TARGET(raster, scratch); RASTER_CLEAR(raster); tgt_buf = scratch;
         return;
     }
 #endif
-    if (rec) { gs_stat.records++; rg_active = 0; rg_prev_active = rg_prev_active && 1; RASTER_TARGET(raster, scratch); }
-    else { gs_stat.renders++; render_start(raster); }
+    if (rec) { gs_stat.records++; rg_active = 0; rg_prev_active = rg_prev_active && 1; RASTER_TARGET(raster, scratch); tgt_buf = scratch; }
+    else { gs_stat.renders++; tgt_buf = slot_of(cur_buf) >= 0 ? cur_buf : 0; render_start(raster); }
 }
 #endif

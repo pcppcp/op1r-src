@@ -200,8 +200,14 @@ typedef struct {
     void (*render_stereo)(int pos, int16_t *l, int16_t *r, const int16_t *params);
 } op1_fx_stereo_t;
 _Static_assert(sizeof(op1_fx_stereo_t) == sizeof(op1_fx_t), "op1_fx_stereo_t layout");
-/* kennel's cached static SVG prefix: op1r draws the whole screen */
+/* kennel's cached static SVG prefix (docs/77): the SVG's nodes before first_live (0: all of it) never change; op1r 61
+ * keeps them as a picture and draws only the live nodes each frame. Older cores / host: the whole screen. */
+#ifdef OP1_HOST
 #define op1_screen_draw_cached(scr, dt, first_live) ((void)(first_live), op1_screen_draw((scr), (dt)))
+#else
+void op1_screen_draw_cached_fn(void *scr, int dt, void *first_live);
+#define op1_screen_draw_cached(scr, dt, first_live) op1_screen_draw_cached_fn((scr), (dt), (void *)(first_live))
+#endif
 /* Encoder presses on a custom FX page (dispatcher.c hooks the KeyHandler dispatch):
  *  OP1_PRESS_PAGE : press toggles the knob between its normal parameter (params[k]) and a second
  *                   parameter in params[5 + k] (k = 0..2 only: words 5..7, 0..32767, saved with the patch)

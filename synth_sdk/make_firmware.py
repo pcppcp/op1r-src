@@ -298,7 +298,9 @@ def build(engs, fxs):
         flags.update(plugins.source_flags(e, [e['source']] + e.get('extra_sources', [])))
     if GUISKIP:                                                               # docs/74: frame skip (+ self-check)
         flags['screens/guiskip.c'] = ['-DGS_ON'] + (['-DGS_VERIFY'] if os.environ.get('OP1R_GUISKIP_VERIFY') else []) \
-            + (['-DGS_NOREG'] if os.environ.get('OP1R_GUISKIP_NOREG') else [])
+            + (['-DGS_NOREG'] if os.environ.get('OP1R_GUISKIP_NOREG') else []) \
+            + (['-DGS_TILESTAT'] if os.environ.get('OP1R_GUISKIP_TILESTAT') else []) \
+            + (['-DGS_NOCACHE'] if os.environ.get('OP1R_GUISKIP_NOCACHE') else [])
     for s in srcs:
         o = 'build/' + os.path.splitext(s.replace('/', '_'))[0] + '.o'; objs.append(o)
         cmds.append(f'bfin-elf-gcc -O2 -mcpu=bf524 -ffreestanding -fno-builtin -nostdlib -fno-common '
