@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 int16_t host_fx_knobs[3][8];volatile uint32_t father_blocks[3];volatile int16_t father_gate[3]={32767,32767,32767};
+volatile uint8_t op1_fx_page[3][4];
 int father_test_enabled=1;static int capture,first,sets;
 static int32_t person_transform[9];
 typedef struct{int x,y,size;uint8_t color[4];char str[32];} txt;
@@ -24,7 +25,20 @@ void host_raster_line(void*r,const void*aa,const void*bb,int32_t w,const uint8_t
  if(capture){printf("%s[\"line\",%d,%d,%d,%d,%d,[%u,%u,%u,%u]]",first?"":",",a->x,a->y,b->x,b->y,w,c[0],c[1],c[2],c[3]);first=0;}
 }
 #include "father_screen.c"
+/* white's push flips CLASSIC (word 7) and leaves page 2 at once; a turn that reached word 7 first changes nothing */
+static void press_test(void){
+ SCREEN_father.init(0);host_fx_knobs[0][7]=0;SCREEN_father.update(0,25);
+ const int pos=op1_fx_screen_pos();
+ op1_fx_page[pos][2]=1;host_fx_knobs[pos][7]=(int16_t)(host_fx_knobs[pos][7]+700);SCREEN_father.update(0,25);
+ assert(!op1_fx_page[pos][2]&&host_fx_knobs[pos][7]==24576);
+ SCREEN_father.update(0,25);assert(host_fx_knobs[pos][7]==24576);
+ op1_fx_page[pos][2]=1;host_fx_knobs[pos][7]=8192;SCREEN_father.update(0,25);
+ assert(!op1_fx_page[pos][2]&&host_fx_knobs[pos][7]==8192);
+ op1_fx_page[pos][2]=1;SCREEN_father.update(0,25);assert(host_fx_knobs[pos][7]==24576);
+ puts("father press: ok");
+}
 int main(int argc,char**argv){
+ if(argc>1&&!strcmp(argv[1],"press")){press_test();return 0;}
  int distance=argc>1?atoi(argv[1]):49,off=argc>2?atoi(argv[2]):0;
  host_fx_knobs[0][0]=(int16_t)((distance*32767+49)/99);host_fx_knobs[0][3]=(int16_t)(argc>3?atoi(argv[3]):9830);
  host_fx_knobs[0][1]=(int16_t)(argc>4?atoi(argv[4]):8192);

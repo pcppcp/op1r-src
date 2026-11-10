@@ -2,7 +2,8 @@
  * Shift + mixer (signal flow, mode 0x0D, screen 0x30): T4 shows its page, T4 again switches it on / off, Shift + T4
  * opens the type list (as the stock LFO list: blue moves, T4 shows the chosen type's page). Types: QUAD, POND.
  * Runs as LFO page 2 of the quad code (0 synth, 1 drum): the quad / pond words, DSP, controls and screens, with the
- * targets limited to the master FX knobs (page 1 / 2) and LFO targets, every LFO shared (FREE).
+ * targets limited to the master FX knobs (page 1 / 2) and LFO targets, every LFO shared (FREE). Red: the polarity
+ * +- / + / - (after kennel 3.2.3; kept in the type field, quadlfo.c ql_pol).
  * Audio: fr_route (screens/fxroute.c) runs every master FX render; ml_params() hands the FX a copy of its knob words
  * with the modulation, through the firmware's FX knob range function (FX_KNOB_MOD + the master type's range row, as
  * quad's FX targets: values stay inside the range asserts). The live words (saved, shown) keep the set values.
@@ -73,7 +74,7 @@ const int16_t *ml_params(const int16_t *params)
     for (int k = 0; k < 8; k++) ml_copy[k] = params[k];
     for (int i = 0; i < 4; i++) {
         if (!L[i].a128 || ql_is_lfo(&L[i]) || ql_group(&L[i]) != QL_FX) continue;
-        int16_t mod = ql_out(sh_st[2][i].val, L[i].a128);
+        int16_t mod = ql_out(ql_polar(sh_st[2][i].val, ql_pol(2, &L[i])), L[i].a128);   /* polarity (red) */
         int k = ql_dest(&L[i]);
         if (ql_p2(&L[i])) {                                  /* page 2: plugin master FX only */
             if (!FX_PLUGIN(ml_copy[4])) continue;

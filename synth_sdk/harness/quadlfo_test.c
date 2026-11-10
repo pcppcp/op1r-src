@@ -394,7 +394,16 @@ int main(int argc, char **argv)
         for (int k = 0; k < 40; k++) { ml_turn(2, 1024, 0); ql_dec(ml_words(), 0, &o); seen[o.tgt] = 1; bad |= o.tgt < 8 || (o.tgt >= QL_P2 && o.tgt < QL_P2 + 3) || (o.tgt >= 12 && o.tgt < 15); }
         CHECK(!bad && seen[9] && seen[QL_P2 + 3] && seen[15], "master targets: FX knobs, FX page 2, other LFOs only");
         while (o.tgt != 8) { ml_turn(2, 1024, 0); ql_dec(ml_words(), 0, &o); }
-        ml_turn(3, 1024 * 3, 0); ql_dec(ml_words(), 0, &o); CHECK(o.type == QT_FREE, "master: red keeps FREE");
+        ml_turn(3, 1024 * 3, 0); ql_dec(ml_words(), 0, &o); CHECK(o.type == QT_GATE && ql_pol(2, &o) == 1, "master: red right = + (clamped)");
+        ml_turn(3, -1024, 0); ql_dec(ml_words(), 0, &o); CHECK(o.type == QT_FREE && ql_pol(2, &o) == 0, "master: red back = +-");
+        ml_turn(3, -1024 * 4, 0); ql_dec(ml_words(), 0, &o); CHECK(o.type == QT_MONO && ql_pol(2, &o) == -1, "master: red left = - (clamped)");
+        CHECK(ql_polar(32767, 1) == 32767 && ql_polar(-32767, 1) == 0 && ql_polar(32767, -1) == -32767 && ql_polar(-32767, -1) == 0 && ql_polar(-5, 0) == -5, "polarity: unipolar ranges");
+        {   /* a - LFO only moves the knob down: every copy value <= the set value */
+            int hi = 0, lo = 0;
+            for (int b = 0; b < 400; b++) { host_cycles += cpb; const int16_t *q = ml_params(live); if (q[0] > 1000) hi = 1; if (q[0] < 1000) lo = 1; }
+            CHECK(!hi && lo, "master -: knob only below its value (hi %d lo %d)", hi, lo);
+        }
+        ml_turn(3, 1024, 0);                                   /* back to +- */
         CHECK(ml_t4(1) == 2 && ml_cur == 0, "Shift + T4: type list at the current type");
         ml_turn(1, 1024, 0); CHECK(ml_cur == 0, "type list: only blue moves");
         ml_turn(0, 1024 * 5, 0); CHECK(ml_cur == ML_NTYPES - 1, "type list: blue, clamped");
@@ -487,6 +496,10 @@ int main(int argc, char **argv)
         ql_sel[2] = 1;
         for (int b = 0; b < 300; b++) { host_cycles += cpb; ml_params(live); }
         ql_screen_update(&mq, 16); frame_json("MASTER QUAD: on; LFO1..3 -> master FX b g w, LFO4 -> LFO1 frequency; LFO2 selected");
+        ql_dec(w, 0, &o); o.type = QT_GATE; ql_enc(&o, w, 0); ql_dec(w, 1, &o); o.type = QT_MONO; ql_enc(&o, w, 1);
+        for (int b = 0; b < 60; b++) { host_cycles += cpb; ml_params(live); }
+        ql_screen_update(&mq, 16); frame_json("MASTER QUAD: polarity (red) LFO1 +, LFO2 -, LFO3/4 +-");
+        ql_dec(w, 0, &o); o.type = QT_FREE; ql_enc(&o, w, 0); ql_dec(w, 1, &o); o.type = QT_FREE; ql_enc(&o, w, 1);
         ml_t4(0); ql_screen_update(&mq, 16); frame_json("MASTER QUAD: off (T4 on the page)");
         ml_t4(0); ml_t4(1); ml_turn(0, 1024, 0); ml_t4(0);    /* on again, type list, pond */
         pond_set f; pond_get(ml_words(), &f); f.amt[0] = 25; f.amt[1] = -20; f.amt[2] = 10; f.amt[3] = 31; f.chaos = 23; pond_put(&f, ml_words());

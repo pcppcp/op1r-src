@@ -35,9 +35,8 @@ def main(out=None):
         for x1, y1, x2, y2, w, c in fr['lines']:
             ctx.set_source_rgba(*(v / 255 for v in c)); ctx.set_line_width(w / 1024); ctx.set_line_cap(cairo.LINE_CAP_BUTT)
             ctx.move_to(x1 / 1024, y1 / 1024); ctx.line_to(x2 / 1024, y2 / 1024); ctx.stroke()
-        ctx.select_font_face('DejaVu Sans', 0, 0); ctx.set_font_size(9)
-        for x, y, c, s in fr['text']:
-            ctx.set_source_rgb(*(v / 255 for v in c)); ctx.move_to(x / 1024, y + 9); ctx.show_text(s)
+        for x, y, c, s in fr['text']:                 # stock font on the device: Iosevka here
+            ctx.set_source_rgb(*(v / 255 for v in c)); ctx.move_to(x / 1024, y + 9); R.iosevka.show(ctx, s.upper(), 9)
         ctx.restore()
     out = out or os.path.join(SDK, 'display', 'sysmon_preview.png')
     surf.write_to_png(out); print('->', out)

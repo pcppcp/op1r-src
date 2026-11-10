@@ -9,6 +9,7 @@ output=Path(sys.argv[1] if len(sys.argv)>1 else '/tmp/father-screen');output.mkd
 with tempfile.TemporaryDirectory(prefix='father-screen-') as d:
     exe=Path(d)/'screen'
     subprocess.run(['cc','-O1','-g','-Wall','-Wextra','-fsanitize=address,undefined','-fno-sanitize-recover=undefined',f'-I{SDK}',str(HERE/'screen_test.c'),'-o',str(exe)],check=True)
+    subprocess.run([str(exe),'press'],check=True)
     cases=[(distance,off,9830) for distance in (0,25,49,80,99) for off in (0,1)]
     cases += [(distance,off,mix) for distance in (0,99) for off in (0,1) for mix in (0,32767)]
     for distance,off,mix in cases:

@@ -317,6 +317,16 @@ static void ql_mod(ql_lfo *L, const int16_t *src)
 static inline int ql_group(const ql_lfo *o) { return o->tgt < 12 ? o->tgt >> 2 : o->tgt >= QL_P2 + 3 ? QL_FX : QL_SYNTH; }   /* (LFO targets: callers skip them) */
 static inline int ql_dest(const ql_lfo *o)  { return o->tgt < 12 ? o->tgt & 3 : (o->tgt - QL_P2) % 3; }
 /* shared state (no per-voice phase): drums, FX targets, FREE and MONO */
+/* master LFO polarity (after Hundekraft kennel 3.2.3 screens/mlfo.c): the master steps every LFO as FREE, so its type
+ * field holds the polarity: FREE (and anything else) +-, GATE +, MONO - (both step exactly like FREE). Unipolar:
+ * (v + 32767) / 2, negated for -, for the FX knob targets and the LFO-to-LFO targets alike. */
+static inline int ql_pol(int pos, const ql_lfo *o) { return pos != 2 ? 0 : o->type == QT_GATE ? 1 : o->type == QT_MONO ? -1 : 0; }
+static inline int16_t ql_polar(int16_t v, int pol)
+{
+    if (!pol) return v;
+    int32_t u = ((int32_t)v + 32767) >> 1;
+    return (int16_t)(pol > 0 ? u : -u);
+}
 static inline int ql_shared(int pos, const ql_lfo *o) { return pos || ql_group(o) == QL_FX || o->type == QT_FREE || o->type == QT_MONO; }
 
 static int32_t pond_lv(ql_st *s, const ql_lfo *o, uint32_t adv, int i);   /* lfo/ql_pond.h */
@@ -401,6 +411,7 @@ static const ql_lfo *ql_params(const int16_t *w, int pos, int v, ql_lfo *buf)
     for (int i = 0; i < 4; i++) {
         buf[i] = C[i];
         src[i] = ql_shared(pos, &C[i]) ? sh_st[pos][i].val : (v >= 0 ? v_st[v][i].val : disp_all[pos][i]);
+        src[i] = ql_polar(src[i], ql_pol(pos, &C[i]));            /* master: unipolar LFOs */
     }
     ql_mod(buf, src);
     return buf;
@@ -565,7 +576,10 @@ void ql_turn(int16_t *w, int pos, int knob, int delta, int shift)
             o.tgt = order[p];
             break;
         }
-        default: if (pos != 2) o.type = (uint8_t)wrapq(o.type + st, QT_N); break;   /* master: always FREE */
+        default:
+            if (pos != 2) o.type = (uint8_t)wrapq(o.type + st, QT_N);
+            else { int p = clampq(ql_pol(2, &o) + st, -1, 1); o.type = (uint8_t)(p > 0 ? QT_GATE : p < 0 ? QT_MONO : QT_FREE); }   /* master: polarity - +- + */
+            break;
     } else switch (knob) {
         case 0: o.off = (uint8_t)wrapq(o.off + st, 8); break;
         case 1: o.smooth = (uint8_t)clampq(o.smooth + st, 0, 7); break;
@@ -712,9 +726,10 @@ static void ql_screen_update(void *scr, int dt)
             uint8_t dc[4];
             for (int k = 0; k < 3; k++) dc[k] = (uint8_t)(ql_col[i][k] * 3 / 8);
             dc[3] = 0xFF;
-            qline(r, OP1_Q10(QL_LANE_MID) - span, y, OP1_Q10(QL_LANE_MID) + span, y, QL_SPAN_W, dc);
+            const int side = ql_pol(pos, o) * (Lm[i].a128 < 0 ? -1 : 1);   /* master unipolar: one side of the set value */
+            qline(r, OP1_Q10(QL_LANE_MID) - (side > 0 ? 0 : span), y, OP1_Q10(QL_LANE_MID) + (side < 0 ? 0 : span), y, QL_SPAN_W, dc);
         }
-        int16_t out = lfo_on ? ql_out(ql_shared(pos, o) ? sh_st[pos][i].val : disp_all[pos][i], Lm[i].a128) : 0;
+        int16_t out = lfo_on ? ql_out(ql_polar(ql_shared(pos, o) ? sh_st[pos][i].val : disp_all[pos][i], ql_pol(pos, o)), Lm[i].a128) : 0;
         int32_t x = OP1_Q10(QL_LANE_MID) + (int32_t)(((int64_t)out * OP1_Q10(QL_LANE_HALF)) >> 15);
         qline(r, x, y - OP1_Q10(QL_TICK_H), x, y + OP1_Q10(QL_TICK_H), 0x800, ql_col[i]);
         if (on) qline(r, OP1_Q10(QL_DOT_X - 7), y + OP1_Q10(10), OP1_Q10(QL_DOT_X + 7), y + OP1_Q10(10), 0x600, ql_col[i]);
@@ -745,7 +760,8 @@ static void ql_screen_update(void *scr, int dt)
             qline(r, dx - OP1_Q10(3), y, dx + OP1_Q10(3), y, OP1_Q10(4), ql_col[dcol]);
             qline(r, dx, y - OP1_Q10(3), dx, y + OP1_Q10(3), OP1_Q10(4), ql_col[dcol]);
         }
-        sf_text(r, OP1_Q10(QL_TYPE_X), ty, OP1_Q10(2), ql_type_name[o->type], 0x400, tc ? tc : ql_col[3]);
+        { static const char *const pn[3] = { "-", "+-", "+" };   /* master: the polarity where a sound's LFO has its type */
+          sf_text(r, OP1_Q10(QL_TYPE_X), ty, OP1_Q10(2), pos == 2 ? pn[ql_pol(2, o) + 1] : ql_type_name[o->type], 0x400, tc ? tc : ql_col[3]); }
     }
     ml_off_overlay(r, pos);
 }

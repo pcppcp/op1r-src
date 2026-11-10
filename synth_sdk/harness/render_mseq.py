@@ -7,32 +7,11 @@ HERE = os.path.dirname(os.path.abspath(__file__)); SDK = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import render as R
 sys.path.insert(0, os.path.join(SDK, 'display'))
-_OPF = next((p for p in (os.path.join(SDK, '..', 'op1_246', 'content', 'display', 'opfont.svg'),
-                         os.path.join(SDK, '..', '..', 'op1_246', 'content', 'display', 'opfont.svg')) if os.path.exists(p)), '')
-FONT = FONTW = None
-if _OPF and not os.environ.get('NO_OPFONT'):          # stock font strokes: local preview only (committed preview: NO_OPFONT=1)
-    import svgfont, gen_oblique as G
-    FONT = svgfont.load(_OPF); FONTW = G.widths(_OPF)
-
 def text(ctx, x, y, c, s, align):
-    """stock-font text as the firmware lays it out (oblique layout model): x Q10, y px top, align 0 / 1 / 2"""
-    ctx.set_source_rgb(*(v / 255 for v in c))
-    if not FONT:
-        ctx.select_font_face('DejaVu Sans', 0, 1); ctx.set_font_size(9)
-        w = ctx.text_extents(s)[4]; x0 = x / 1024 - (w / 2 if align == 1 else w if align == 2 else 0)
-        ctx.move_to(x0, y + 9); ctx.show_text(s); return
-    k = G.TEXT_H / G.CELL; xs = []; xx = 0.0
-    for ch in s: xs.append(xx); xx += (G.SPACE if ch == ' ' else FONTW.get(ch, G.SPACE)) + G.GAP
-    w = xx - G.GAP; x0 = x / 1024 - (w / 2 if align == 1 else w if align == 2 else 0)
-    ctx.set_line_width(1.5)
-    for ch, dx in zip(s, xs):
-        polys = FONT.get(ch) or []; pts = [p for poly in polys for p in poly]
-        if not pts: continue
-        gx0 = min(p[0] for p in pts); top = max(r for r in [-142.4, -57.4, 27.6, 112.7, 197.7, 282.8] if r <= min(p[1] for p in pts) + 1.0)
-        for poly in polys:
-            ctx.move_to(x0 + dx + (poly[0][0] - gx0) * k, y + (poly[0][1] - top) * k)
-            for px, py in poly[1:]: ctx.line_to(x0 + dx + (px - gx0) * k, y + (py - top) * k)
-            ctx.stroke()
+    """stock-font text (on the device; Iosevka here, capitals): x Q10, y px top, align 0 / 1 / 2"""
+    ctx.set_source_rgb(*(v / 255 for v in c)); s = s.upper()
+    w = R.iosevka.width(s, 9); x0 = x / 1024 - (w / 2 if align == 1 else w if align == 2 else 0)
+    ctx.move_to(x0, y + 9); R.iosevka.show(ctx, s, 9)
 
 def main(out=None):
     exe = os.path.join(HERE, 'build', 'mseq_render')

@@ -37,8 +37,8 @@ def main(out=None):
             ctx.set_line_cap(cairo.LINE_CAP_BUTT)
             ctx.move_to(x1 / 1024, y1 / 1024); ctx.line_to(x2 / 1024, y2 / 1024); ctx.stroke()
         for x, y, size, c, txt in fr.get('texts', []):           # stock font on the device: a stand-in here
-            ctx.set_source_rgb(*(v / 255 for v in c[:3])); ctx.select_font_face('DejaVu Sans', 0, 1)
-            ctx.set_font_size(size * 0.78); ctx.move_to(x / 1024, y + size * 0.72); ctx.show_text(txt)
+            ctx.set_source_rgb(*(v / 255 for v in c[:3])); ctx.move_to(x / 1024, y + size * 0.72)
+            render.iosevka.show(ctx, txt.upper(), size * 0.78)   # stock font on the device: Iosevka here
         ctx.restore()
     out = out or os.path.join(HERE, 'ente_preview.png')
     surf.write_to_png(out); print('->', out)

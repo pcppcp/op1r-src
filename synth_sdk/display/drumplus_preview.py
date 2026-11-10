@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """Host mock-up of the drum+ pages (docs/31) for approval: T1, T1 + Shift, T2, T2 + Shift.
-Usage: drumplus_preview.py <op1_246/content/display/opfont.svg> <out.png>
-The stock font is read at preview time only; the PNG shows stock glyphs: keep it local (build/), never commit."""
+Usage: drumplus_preview.py <out.png>   (text in Iosevka, harness/iosevka.py)"""
 import math, os, sys
 import cairocffi as cairo
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import svgfont
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'harness'))
+import iosevka                                      # preview font (Iosevka, OFL)
 
 BLUE, GREEN, WHITE, RED, GREY, LILAC, PALE = '#4D9EFF', '#00ED95', '#FFFFFF', '#FF3A5D', '#6F7173', '#DFD9FF', '#AEB1DC'
 W, H, S = 320, 160, 2
-G = None
 
 def rgb(h): return tuple(int(h[i:i + 2], 16) / 255 for i in (1, 3, 5))
 
@@ -22,24 +21,11 @@ def line(c, pts, col, w=1.0):
 def dot(c, x, y, col, r=1.5):                      # the rasteriser drops zero-length lines: two crossing segments
     line(c, [(x - r, y), (x + r, y)], col, 1.5); line(c, [(x, y - r), (x, y + r)], col, 1.5)
 
-ROWS = (-142.4, -57.4, 27.6, 112.7, 197.7, 282.8)    # glyph row tops in opfont.svg
 
-G = None                                            # stock font glyphs (svgfont.load); None: stand-in font (NO_OPFONT)
 
-def text(c, s, x, y, col, h=7.0):                  # y = baseline (cell height 56.7 units = h); lowercase only
-    if not G:                                       # committed previews: no stock font
-        c.set_source_rgb(*rgb(col)); c.select_font_face('DejaVu Sans', 0, 1); c.set_font_size(h * 1.25)
-        c.move_to(x, y); c.show_text(s); return x + c.text_extents(s)[4] + 2.2
-    k = h / 56.7
-    for ch in s:
-        if ch == ' ': x += 4; continue
-        pts = [p for poly in G.get(ch, []) for p in poly]
-        if not pts: x += 4; continue
-        gx0 = min(p[0] for p in pts); top = max(r for r in ROWS if r <= min(p[1] for p in pts) + 1.0)
-        for poly in G[ch]:
-            if len(poly) > 1: line(c, [(x + (px - gx0) * k, y - h + (py - top) * k) for px, py in poly], col, 1.0)
-        x += (max(p[0] for p in pts) - gx0) * k + 2.2
-    return x
+def text(c, s, x, y, col, h=7.0):                  # y = baseline, h = cap height; stock font on the device: Iosevka here (capitals)
+    s = s.upper(); em = h / 0.735
+    c.set_source_rgb(*rgb(col)); c.move_to(x, y); iosevka.show(c, s, em); return x + iosevka.width(s, em) + 2.2
 
 def wave(c, x0, x1, y, amp):                        # the pad's region (read-only): a decaying hit
     for i, x in enumerate(range(x0, x1, 2)):
@@ -104,9 +90,7 @@ def t2(c, shift):
     else:
         labels(c, [('vel>pitch', '+2', ''), ('human', '20', ''), ('reso', '60', ''), ('vel>cut', '+30', '')])
 
-def main(font, out):
-    global G
-    G = svgfont.load(font)
+def main(out):
     pad, lab = 12, 20
     surf = cairo.ImageSurface(cairo.FORMAT_RGB24, 2 * (W * S + pad) + pad, 2 * (H * S + pad + lab) + pad)
     c = cairo.Context(surf); c.set_source_rgb(0.25, 0.25, 0.27); c.paint()
@@ -119,4 +103,4 @@ def main(font, out):
     surf.write_to_png(out); print('->', out)
 
 if __name__ == '__main__':
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[-1])

@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """Host mock-up of the sampler+ pages (docs/46) for approval: T1, T1 + Shift, T2, T2 + Shift, sample browser.
-Usage: samplerplus_preview.py <op1_246/content/display/opfont.svg> <out.png>
-The stock font is read at preview time only: keep that PNG local; with NO_OPFONT=1 a stand-in font (committable)."""
+Usage: samplerplus_preview.py <out.png>   (text in Iosevka via drumplus_preview.text)"""
 import math, os, sys
 import cairocffi as cairo
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import svgfont
 from drumplus_preview import BLUE, GREEN, WHITE, RED, GREY, LILAC, PALE, W, H, S, rgb, line, dot
 import drumplus_preview as dpv
 
@@ -105,8 +103,7 @@ def browser(c, shift):
     line(c, [(180, 22), (180, 96)], GREY, 1); line(c, [(180, 44), (180, 58)], GREEN, 2)   # scroll bar
     labels(c, [('sample', '3/24', 'load'), ('', '', ''), ('', '', ''), ('', '', 'back')])
 
-def main(font, out):
-    dpv.G = None if os.environ.get('NO_OPFONT') else svgfont.load(font)
+def main(out):
     pad, lab = 12, 20
     views = [('t1 play', t1, False), ('t1 + shift', t1, True), ('t2 envelope and filter', t2, False),
              ('t2 + shift', t2, True), ('t1 white press: sample browser (sampler presets)', browser, False)]
@@ -121,4 +118,4 @@ def main(font, out):
     surf.write_to_png(out); print('->', out)
 
 if __name__ == '__main__':
-    main(sys.argv[1], sys.argv[2])
+    main(sys.argv[-1])

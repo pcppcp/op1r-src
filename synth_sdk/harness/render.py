@@ -8,6 +8,7 @@ Only the SVG subset used by the SDK screens is drawn: g, line, circle, ellipse, 
 polygon, path (absolute/relative M L H V C Q Z). Colours as #rrggbb.
 """
 import json, os, re, subprocess, sys, xml.etree.ElementTree as ET
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import iosevka                                                    # preview font (Iosevka, OFL)
 try:
     import cairo                                  # pycairo
 except ImportError:
@@ -235,9 +236,8 @@ def main(engine, out=None):
             ctx.set_source_rgba(*(v / 255 for v in c)); ctx.set_line_width(w / 1024)
             ctx.set_line_cap(cairo.LINE_CAP_BUTT)   # as the OP-1 rasteriser
             ctx.move_to(x1 / 1024, y1 / 1024); ctx.line_to(x2 / 1024, y2 / 1024); ctx.stroke()
-        for x, y, size, c, txt in fr.get('texts', []):     # stock font on the device: a stand-in here
-            ctx.set_source_rgb(*(v / 255 for v in c)); ctx.select_font_face('DejaVu Sans', 0, 1)
-            ctx.set_font_size(size * 0.78); ctx.move_to(x / 1024, y + size * 0.72); ctx.show_text(txt)
+        for x, y, size, c, txt in fr.get('texts', []):     # stock font on the device: Iosevka here (capitals, as the stock font)
+            ctx.set_source_rgb(*(v / 255 for v in c)); ctx.move_to(x / 1024, y + size * 0.72); iosevka.show(ctx, txt.upper(), size * 0.78)
         ctx.restore()
         print(f'{label:24s} nodes={len(fr["nodes"])} lines={len(fr["lines"])}')
     out = out or os.path.join(SDK, 'display', f'{engine}_preview.png')

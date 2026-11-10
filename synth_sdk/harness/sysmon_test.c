@@ -85,7 +85,7 @@ int main(int argc, char **argv)
       if (strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, want)) { printf("got [%s]\n", ((txt_t *)txt_mem[2 * SM_ROWS + 2])->s); return 1; } }
     for (int p = 1; p < PG_N; p++) {                         /* BLUE turn: the other helper metrics */
         sm_turn(1024); run(8, 4000000, 36, 55, 71);
-        static const char *const lab[] = { "", "page 2/8: voices", "page 3/8: plugins", "page 4/8: system", "page 5/8: stock stages", "page 6/8: other records", "page 7/8: boot stages", "page 8/8: op1r boot share" };
+        static const char *const lab[PG_N] = { "", "page 2/10: voices", "page 3/10: plugins", "page 4/10: system", "page 5/10: stock stages", "page 6/10: other records", "page 7/10: boot stages", "page 8/10: op1r boot share", "page 9/10: db split", "page 10/10: snd split" };
         if (render) dump(lab[p]); else printf("page %d: %s\n", p + 1, ((txt_t *)txt_mem[2 * SM_ROWS + 2])->s);
         if (p == PG_STAGES && strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "5/10 blk 18 eq 6 out 7 dec 3 tp 1")) fprintf(stderr, "stages: [%s]\n", ((txt_t *)txt_mem[2 * SM_ROWS + 2])->s);
         if (p == PG_RAW) assert(!strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "6/10 1:0 3:0 5:0 6:0 8:0 10:0 o1"));

@@ -44,3 +44,6 @@ THIRD-PARTY CODE (MIT License, compatible with the GPL; their notices are kept)
   (https://github.com/op1hacks/op1repacker).
 - svgfont.py and the Oblique Strategies idea: (c) 2026 Martin Mairinger, MIT License
   (https://github.com/ultralazr/op1-oblique-strategies).
+- Iosevka 34.9.0 glyph outlines for the host previews (synth_sdk/harness/fonts/iosevka_glyphs.json, from the
+  op1-design skill's bundled font): (c) 2015-2026 Renzhi Li, SIL Open Font License 1.1
+  (synth_sdk/harness/fonts/Iosevka-OFL.md, https://github.com/be5invis/Iosevka).

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Preview of the grids sequencer page (grids/gr_ui.c via harness/grids_render.c) -> display/grids_preview.png.
-Stand-in font (NO_OPFONT) as the other committed previews."""
+Text in Iosevka (harness/iosevka.py), as all previews."""
 import json, os, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); SDK = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
@@ -24,8 +24,8 @@ def main(out=None):
             ctx.set_source_rgba(*(v / 255 for v in c)); ctx.set_line_width(w / 1024); ctx.set_line_cap(cairo.LINE_CAP_BUTT)
             ctx.move_to(x1 / 1024, y1 / 1024); ctx.line_to(x2 / 1024, y2 / 1024); ctx.stroke()
         for x, y, c, s, al, sz in fr['text']:
-            ctx.set_source_rgb(*(v / 255 for v in c)); ctx.select_font_face('DejaVu Sans', 0, 1); ctx.set_font_size(sz * 0.78)
-            ctx.move_to(x / 1024, y + sz * 0.72); ctx.show_text(s.upper())   # the stock font shows capitals
+            ctx.set_source_rgb(*(v / 255 for v in c)); ctx.move_to(x / 1024, y + sz * 0.72)
+            R.iosevka.show(ctx, s.upper(), sz * 0.78)                 # the stock font shows capitals (preview: Iosevka)
         ctx.restore()
     out = out or os.path.join(SDK, 'display', 'grids_preview.png')
     os.makedirs(os.path.dirname(out), exist_ok=True)

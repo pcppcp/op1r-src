@@ -6,8 +6,8 @@ volatile uint32_t father_blocks[3];
 volatile int16_t father_live[3][4];
 volatile int32_t father_peak[3];
 volatile int16_t father_gate[3];
-/* CLASSIC (hundekraft 3.1.x's Father): white's page 2, word 7 in two steps (OP1_PRESS_PAGE_STEPS(2): step 1 from
-   16384); 0, a sound saved before it, is off */
+/* CLASSIC (hundekraft 3.1.x's Father): word 7 in two steps (step 1 from 16384); white's push flips it (father_screen.c
+   takes the core's page-2 press and writes the word); 0, a sound saved before it, is off */
 static int classic_word(const int16_t *params){return (params[7]<0?0:params[7])*2>>15;}
 static int16_t raw_params[3][4];
 static int32_t normalized[3][4];
