@@ -49,7 +49,9 @@ SLOTS = {'synth_render': (VT_ITER, 2, 0x019B99D4), 'synth_note_on': (VT_ITER, 3,
          'pj_patch_job_b': (0x0190F3A4, 2, 0x019407DC),                     # (patchjob.c, docs/66)
          'tombola_advance': (0x01911E04, 6, 0x01A65BBC)}                    # Tombola player advance: long frames in short steps (seq/tombola.c)
 FX_BUILTIN = {'delay','grid','punch','phone','spring','filter','nitro','cwo'}
-FILTER_ROW = (2, 'filter', '[7548, 0, 8272, 19572, 8000, 8000, 8000, 8000]')   # as op1repacker
+# FILTER defaults for a fresh pick: LP IV, FREQ fully open, RES 0, DRIVE 60 (op1repacker's [7548, 0, 8272, 19572] was
+# AP, DRIVE 45). Words 0..3 = FREQ, RES, type (0 = LP IV, 8192 = AP), DRIVE.
+FILTER_ROW = (2, 'filter', '[14528, 0, 0, 23280, 8000, 8000, 8000, 8000]')
 # Raw knob ranges of fx type 5 (filter), which every custom FX runs in: range table 0x01DE5C50 + 5*0x30,
 # filled at boot by 0x01A1E914 (docs/15). read_fx_param asserts "Instr fx param out of range" (and the OP-1
 # locks up, also at every boot while the value is stored) if a raw word lies outside. plugin.json FX
