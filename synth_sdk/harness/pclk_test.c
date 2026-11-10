@@ -10,6 +10,7 @@
 
 int16_t host_pc_in[64];
 int32_t host_sync_mode = 2, host_ticks, host_ctrl;
+int32_t host_input_source = 1, host_line_jack;          /* line in */
 uint32_t host_ms;
 static uint32_t ts[64]; static int nts;
 static uint8_t inj[16]; static int ninj;
@@ -132,7 +133,7 @@ int main(void)
     host_ticks = 0; ninj = 0; g_start = smp; for (int i = 0; i < 2000; i++) block(5512, smp + 100000); assert(host_ticks == 0 && ninj == 0);
     host_sync_mode = 2;
     /* selector: MIDI -> right = 4 PPQ, then 24, 48 (stops); left down to MIDI; saved */
-    pc_src = 0; pc_host_turn(1024); assert(pc_src == 0); pc_host_turn(1024); assert(pc_src == 3 && op1r_setting_get("clksrc", -1) == 3);
+    pc_src = 0; pc_host_turn(1024); assert(pc_src == 3 && op1r_setting_get("clksrc", -1) == 3);   /* one value per click (1024) */
     pc_host_turn(4096); assert(pc_src == 5); pc_host_turn(2048); assert(pc_src == 5);
     for (int i = 0; i < 6; i++) pc_host_turn(-2048); assert(pc_src == 0 && op1r_setting_get("clksrc", -1) == 0);
     /* jack input: ringing, level 0.15 .. 1, noise; every gate counted once (4 PPQ 120 bpm, 24 PPQ 120 bpm, 1 PPQ 40 bpm) */
@@ -152,5 +153,17 @@ int main(void)
         assert(c == an[i].n);
     }
     printf("pclk_test: ok\n");
+        {   /* the jack clock listens to line in / USB audio in only; pc_mute while it follows */
+        extern int pc_input_ok(void), pc_mute(void);
+        pc_src = 3; host_sync_mode = 2;
+        host_input_source = 0; host_line_jack = 0; assert(!pc_input_ok() && !pc_mute());   /* mic */
+        host_input_source = 2; host_line_jack = 1; assert(!pc_input_ok());                  /* radio */
+        host_input_source = 0; host_line_jack = 1; assert(pc_input_ok() && pc_mute());      /* a cable in the line jack */
+        host_input_source = 3; host_line_jack = 0; assert(pc_input_ok() && pc_mute());      /* USB audio in */
+        host_sync_mode = 1; assert(!pc_mute());                                              /* not following */
+        host_sync_mode = 2; pc_src = 0; assert(!pc_mute());                                 /* MIDI clock */
+        host_input_source = 1; pc_src = 3;
+        printf("pclk: input gating ok\n");
+    }
     return 0;
 }

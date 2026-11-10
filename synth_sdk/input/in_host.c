@@ -50,8 +50,10 @@ void in_clock(uint32_t now)                                  /* audio callback s
 extern void in_highpass_stock(void);                         /* hook.S: the stock prologue, then 0x019674FE */
 void in_bus(uint32_t *monitor, uint32_t caller)              /* hook.S in_highpass_entry (audio thread) */
 {
+    extern int pc_mute(void);                                  /* pulse clock on the input follows (midi/pclk.c) */
+    int mute = (caller == 0xFFA02896u || caller == 0xFFA02464u || caller == 0xFFA01EC2u) && pc_mute();
     int n = caller == 0xFFA02896u ? current() : 0;
-    if (!n) { in_highpass_stock(); return; }
+    if (!n) { in_highpass_stock(); if (mute) *monitor = 0; return; }
     const op1_input_engine_t *d = op1_input_engines[n];
     int slot = (int)SLOT;
     if (d != active || slot != active_slot || active_rate != rate || active_source != INPUT_SOURCE || active_mode != INPUT_MODE) {
@@ -63,7 +65,7 @@ void in_bus(uint32_t *monitor, uint32_t caller)              /* hook.S in_highpa
     int16_t words[8];
     for (int k = 0; k < 8; k++) words[k] = op1_synth_knobs(slot)[k];
     static const int16_t silence[64];
-    const int16_t *input = *monitor && INPUT_MODE == 0 ? (const int16_t *)0xFF800CB4 : silence;   /* resampling: silence */
+    const int16_t *input = *monitor && INPUT_MODE == 0 && !mute ? (const int16_t *)0xFF800CB4 : silence;   /* resampling / pulse clock: silence */
     static int16_t gained[64];
     const int db = gain_db[INPUT_SOURCE & 3];
     if (db && input != silence) { in_gain_apply(input, gained, 64, db); input = gained; }

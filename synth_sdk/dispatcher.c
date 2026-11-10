@@ -347,6 +347,13 @@ extern const op1_screen_t SCREEN_usbout;
 extern void usbout_turn(int delta), usbout_seq_turn(int delta);
 static uint32_t us_scr[32], us_vt[10];
 static int us_ready;
+/* pulse sync page (screens/pcpage.c, docs/78): the tempo slot 0x22 on T2 in tempo mode (4) */
+#define TEMPO_SCREEN_ID 0x22
+static uint32_t pcp_scr[32], pcp_vt[10];
+static void *pcp_base;                                 /* the stock tempo screen object */
+static int pcp_ready, pcp_on;
+extern const op1_screen_t SCREEN_pcpage;
+void pcp_turn(int knob, int delta), pcp_load(void);
 /* Oblique Strategies card (screens/oblique.c, docs/23): clock mode base view, Shift+help toggles card / clock */
 extern const op1_screen_t SCREEN_oblique;
 extern void ob_new_card(void);
@@ -668,6 +675,15 @@ void *screens_ctor_hook(void)
         us_vt[4 * 2 + 1] = (uint32_t)SCREEN_usbout.init;
         us_scr[3] = (uint32_t)us_vt;
     }
+    {                                                            /* pulse sync page object (tempo slot, T2) */
+        void *saved = SCREEN_TABLE[TEMPO_SCREEN_ID];
+        SCREEN_CTOR(pcp_scr, TEMPO_SCREEN_ID, "usbout.svg");     /* empty svg: drawn in code */
+        SCREEN_TABLE[TEMPO_SCREEN_ID] = saved;
+        for (int i = 0; i < 10; i++) pcp_vt[i] = ITER_SCREEN_VT[i];
+        pcp_vt[3 * 2 + 1] = (uint32_t)SCREEN_pcpage.update;
+        pcp_vt[4 * 2 + 1] = (uint32_t)SCREEN_pcpage.init;
+        pcp_scr[3] = (uint32_t)pcp_vt;
+    }
     {                                                            /* oblique card screen object (clock slot) */
         void *saved = SCREEN_TABLE[CLOCK_SCREEN_ID];
         SCREEN_CTOR(ob_scr, CLOCK_SCREEN_ID, "usbout.svg");      /* empty svg: drawn in code */
@@ -784,6 +800,10 @@ void screens_load_hook(void *table)
         du_scr[0] = (uint32_t)SVG_LOAD((void *)du_scr[2]);
         if (du_scr[0]) { SCREEN_duprompt.init(du_scr); du_prompt_obj = du_scr; }
     }
+    if (pcp_scr[2] && SCREEN_TABLE[TEMPO_SCREEN_ID]) {          /* pulse sync page (tempo slot on T2) */
+        pcp_scr[0] = (uint32_t)SVG_LOAD((void *)pcp_scr[2]);
+        if (pcp_scr[0]) { pcp_base = SCREEN_TABLE[TEMPO_SCREEN_ID]; SCREEN_pcpage.init(pcp_scr); pcp_ready = 1; }
+    }
     if (ob_scr[2] && clock_screen) {                             /* oblique card (clock slot base view) */
         ob_scr[0] = (uint32_t)SVG_LOAD((void *)ob_scr[2]);
         if (ob_scr[0]) { SCREEN_oblique.init(ob_scr); ob_ready = 1; }
@@ -821,6 +841,7 @@ void screens_load_hook(void *table)
         if (se_ready && sd_scr[0] && drum_screen) sd_ready = 1;  /* (texts shared, made once) */
     }
     { extern void pc_load(void); pc_load(); }                    /* pulse clock in: source setting (midi/pclk.c) */
+    pcp_load();                                                  /* pulse sync page settings (screens/pcpage.c) */
     { extern void cc_load(void); cc_load(); }                    /* CC channels / feedback (midi/ccmap.c) */
     dpu_ui_load();                                               /* drum+ plugin: load its pages, take the stock ones */
     spc_ui_load();                                               /* sampler+ plugin: the same for 6 / 0x16 */
@@ -1147,6 +1168,15 @@ void key_event_hook(int code, int pressed)
         }
         if ((fr_on || ml_view) && CUR_MODE_ID != 0x0D) { fr_on = 0; ml_leave(); SCREEN_TABLE[MIXOV_SCREEN_ID] = mixov_screen; }
     }
+    if (code == 0x07 && pcp_ready && CUR_MODE_ID == 4) {          /* metronome + T2: pulse sync page, again: back */
+        if (pressed) { pcp_on = !pcp_on; SCREEN_TABLE[TEMPO_SCREEN_ID] = pcp_on ? (void *)pcp_scr : pcp_base; }
+        return;
+    }
+    if (code == 0x06 && pcp_on && CUR_MODE_ID == 4) {            /* on the page, T1: back to the metronome */
+        if (pressed) { pcp_on = 0; SCREEN_TABLE[TEMPO_SCREEN_ID] = pcp_base; }
+        return;
+    }
+    if (code == 0x01 && pcp_on && pressed) { pcp_on = 0; SCREEN_TABLE[TEMPO_SCREEN_ID] = pcp_base; }   /* the metronome key opens the metronome */
     if (((code == 0x06 && sm_ready) || (code == 0x07 && us_ready) || (code == 0x08 && st_ready) || (code == 0x09 && sc_ready)) && CUR_MODE_ID == 0x0C) {  /* clock + T1 / T2 / T3 */
         if (pressed) {                                          /* monitor / usb out / settings page on, again: base view */
             int want = code - 0x05;
@@ -1280,6 +1310,7 @@ void knob_event_hook(int knob, int16_t *delta)
     if (knob == 0 && sm_on == 2 && CUR_MODE_ID == 0x0C) { usbout_turn(*delta); return; }   /* usb out: blue */
     if (knob == 1 && sm_on == 2 && CUR_MODE_ID == 0x0C) { usbout_seq_turn(*delta); return; }   /* sequencer on / off: green */
     if (knob >= 0 && knob < 4 && sm_on == 3 && CUR_MODE_ID == 0x0C) { settings_turn(knob, *delta); return; }
+    if (knob >= 0 && knob < 4 && pcp_on && CUR_MODE_ID == 4 && SCREEN_TABLE[TEMPO_SCREEN_ID] == (void *)pcp_scr) { pcp_turn(knob, *delta); return; }   /* pulse sync page */
     if (knob >= 0 && knob < 4 && sm_on == 4 && CUR_MODE_ID == 0x0C) { scale_turn(knob, *delta); return; }
     if (knob >= 0 && knob < 4 && fr_on && CUR_MODE_ID == 0x0D) { fxroute_turn(knob, *delta); return; }
     if (knob >= 0 && knob < 4 && ml_view && CUR_MODE_ID == 0x0D) { ml_turn(knob, *delta, *(volatile uint8_t *)0x01DD7F78); return; }

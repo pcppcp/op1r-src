@@ -9,7 +9,8 @@
  *   each pulse completes its share, so pulse k = tick k * N exactly. Every quarter-note pulse feeds the stock tempo
  *   averager as every 24th F8 does. First pulse after silence: FA, no pulse for 2 beats: FC (both through the RX ring,
  *   so the stock start / stop and op1r's start alignment apply). While JACK is on, MIDI F8 / FA / FB / FC are dropped.
- * - GUI: the tempo screen draws "ppq 4" centred over the sync box, a flash before it per pulse (pc_tempo_draw, draw slot 0x01911C08);
+ * - GUI: the tempo screen draws the clock source, "midi" or "ppq 4" (white), centred over the sync box while following
+ *   (pc_tempo_draw, draw slot 0x01911C08);
  *   pc_tempo_knob takes knob 6 (Shift + white) before the stock on_knob (slot 0x01911BD0). */
 #include "../op1_synth.h"
 #include "../screens/op1r_settings.h"
@@ -23,6 +24,12 @@
 
 static const uint8_t pc_ppq[6] = { 0, 1, 2, 4, 24, 48 };   /* index 0: MIDI (stock) */
 volatile uint8_t pc_src;                    /* index into pc_ppq */
+/* T2 page settings (screens/pcpage.c): start auto (FA on the first pulse, FC after a gap) / manual (no FA / FC),
+ * edge rise / fall (inverted clocks), level 0 auto (adaptive) / 1..6 fixed trigger on the 2-sample jump */
+volatile uint8_t pc_manual, pc_fall, pc_level;
+const int16_t pc_level_val[7] = { 0, 800, 1600, 3200, 6400, 12800, 25600 };
+/* for the page: the largest jump of the last blocks (decaying) and the trigger level now */
+volatile int32_t pc_show_jump, pc_show_trig;
 
 #ifdef OP1_HOST
 extern int16_t host_pc_in[64];
@@ -32,6 +39,9 @@ extern void host_bpm_clock(uint32_t lo, uint32_t hi);
 extern void host_rx_inject(uint8_t b);
 #define IN_BLOCK    host_pc_in
 #define SYNC_MODE   host_sync_mode
+extern int32_t host_input_source, host_line_jack;
+#define INPUT_SOURCE host_input_source
+#define LINE_JACK   host_line_jack
 #define TICKS       host_ticks
 #define CTRL_MODE   host_ctrl
 #define TIME_MS()   host_ms
@@ -43,6 +53,8 @@ static void irq_on(uint32_t m) { (void)m; }
 #else
 #define IN_BLOCK    ((volatile int16_t *)0xFF800CB4)                  /* mono input, 64 x int16 */
 #define SYNC_MODE   (*(volatile int32_t *)0x018C1870)                 /* tempo sync mode 0..4 */
+#define INPUT_SOURCE (*(volatile uint32_t *)0xFF8010B4)              /* selected input: 0 mic, 1 line, 2 radio, 3 USB */
+#define LINE_JACK   (*(volatile uint8_t *)0x018B621C)                 /* a cable in the line jack (kennel kn_input.c) */
 #define TICKS       (*(volatile int32_t *)0x018B6070)                 /* pending sequencer ticks (F8: += 4) */
 #define CTRL_MODE   (*(volatile uint8_t *)0x018B6074)                 /* COM CTRL mode: the parser ignores clock */
 #define TIME_MS()   (((uint32_t (*)(void))0x01A0DCE4)())
@@ -79,6 +91,16 @@ static int pc_active(void)
     int m = SYNC_MODE;
     return pc_src && (m == 2 || m == 4) && !CTRL_MODE;
 }
+/* the jack clock listens to line in or USB audio in, never the mic or the radio (line: the source, or a cable in the
+ * line jack while the source is not radio / USB, as kennel's line clock decides it) */
+int pc_input_ok(void)
+{
+    uint32_t s = INPUT_SOURCE;
+    return s == 1 || s == 3 || (LINE_JACK && s != 2);
+}
+/* while the jack clock follows, the input is kept out of the dry monitor and the tape (input/in_host.c in_bus clears the
+ * block's has-input flag, after kennel's line clock): the clicks are neither heard nor recorded */
+int pc_mute(void) { return pc_active() && pc_input_ok(); }
 
 /* jack input (hardware, docs/59): the analog couplings swing back after each gate edge, so on the level the falling
  * edge of a 5..20 ms gate counted as a second pulse. A rising edge is a near-vertical jump, the swing back is slow:
@@ -88,14 +110,17 @@ void pc_block(void)
 {
     uint32_t t0 = pc_samples;
     pc_samples = t0 + 64;
-    if (!pc_src) return;
+    if (!pc_src || !pc_input_ok()) { armed = 1; return; }
     int32_t hi = height >> 1, lo = height >> 2;
     if (hi < PC_FLOOR) hi = PC_FLOOR, lo = PC_FLOOR >> 1;
+    if (pc_level > 0 && pc_level <= 6) { hi = pc_level_val[pc_level]; lo = hi >> 2; }   /* fixed level */
+    int32_t jmax = 0, sgn = pc_fall ? -1 : 1;
     uint32_t gap = (uint32_t)(SR * 60 / 300 / 2) / pc_ppq[pc_src];   /* 1: 100 ms .. 48: 2.1 ms */
     if (gap < PC_GAP) gap = PC_GAP;
     int32_t a = x1, b = x2;
     for (int i = 0; i < 64; i++) {
-        int32_t x = IN_BLOCK[i], d = x - b;
+        int32_t x = IN_BLOCK[i], d = (x - b) * sgn;
+        if (d > jmax) jmax = d;
         b = a; a = x;
         uint32_t t = t0 + (uint32_t)i;
         if (peak_left) {                                     /* height of the jump just accepted (2 ms) */
@@ -110,14 +135,20 @@ void pc_block(void)
         } else if (d < lo) armed = 1;
     }
     x1 = a; x2 = b;
+    pc_show_jump = jmax > pc_show_jump ? jmax : pc_show_jump - (pc_show_jump >> 4);
+    pc_show_trig = hi;
     height -= height >> 9;                                   /* ~0.7 s: weaker pulses are found again */
     if (height < PC_FLOOR) height = PC_FLOOR;
 }
 
 /* ---- tick side (PlayerManager tick context) ---- */
 static uint32_t pc_r;
-static uint8_t running;
-static uint32_t last, period, pcount;
+uint8_t pc_running;
+#define running pc_running
+uint32_t pc_period, pc_count;
+#define period pc_period
+#define pcount pc_count
+static uint32_t last;
 static int32_t emitted;                     /* ticks given since the last pulse */
 static int run_n;                           /* ticks per pulse they were counted with */
 volatile uint32_t pc_pulses;                /* pulses seen (screen flash) */
@@ -134,7 +165,7 @@ static void pulse(uint32_t t, uint32_t now, int n, int ppq)
     pc_pulses++;
     if (!running) {                                          /* first pulse after silence: start, tick 0 */
         running = 1; pcount = 0; emitted = 0; period = 0; last = t; run_n = n;
-        RX_INJECT(0xFA);
+        if (!pc_manual) RX_INJECT(0xFA);
         quarter(t, now);
         return;
     }
@@ -160,7 +191,7 @@ void pc_poll(void)
     uint32_t since = now - last;
     uint32_t wait = period ? 2u * (uint32_t)ppq * period : PC_NOPERIOD;   /* 2 beats */
     if (wait > PC_MAXWAIT) wait = PC_MAXWAIT;
-    if (since > wait) { running = 0; RX_INJECT(0xFC); return; }
+    if (since > wait) { running = 0; if (!pc_manual) RX_INJECT(0xFC); return; }
     if (!period) return;
     int32_t due = (int32_t)((uint64_t)since * (uint32_t)n / period);
     if (due > n - 1) due = n - 1;                            /* the last one comes with the next pulse */
@@ -176,17 +207,46 @@ void pc_filter(volatile uint8_t *pk)
 }
 
 /* ---- GUI ---- */
-static void pc_turn(int delta)              /* KeyHandler: one value per detent; MIDI -> right goes to 4 PPQ */
+volatile uint32_t pc_show_until;            /* the tempo screen shows the source until this time_ms (after a change) */
+/* the stock "clock present" (0x019DE70C): the newest tempo timestamp [0xFF907CDC] in 0x01AADAF8 (us, 64-bit) is younger
+ * than [0x018E3FE4] (6 s); EXT on the tempo screen follows it. */
+#ifndef OP1_HOST
+static int clock_present(void)
+{
+    int idx = *(volatile int32_t *)0xFF907CDC;
+    if (idx < 0 || idx > 15) return 0;
+    uint32_t ts = ((volatile uint32_t *)0x01AADAF8)[idx * 2], now = TIME_MS() * 1000u;
+    return now - ts < *(volatile uint32_t *)0x018E3FE4;
+}
+static void forget_clock(void)              /* the jack's timestamps no longer count: EXT goes (a MIDI clock sets it again) */
+{
+    int idx = *(volatile int32_t *)0xFF907CDC;
+    if (idx < 0 || idx > 15) return;
+    ((volatile uint32_t *)0x01AADAF8)[idx * 2] = 0; ((volatile uint32_t *)0x01AADAF8)[idx * 2 + 1] = 0;
+}
+#else
+static int clock_present(void) { return 0; }
+static void forget_clock(void) {}
+#endif
+void pc_set_src(int v)                      /* rate setting (Shift + white, the T2 page) */
+{
+    if (v == pc_src) return;
+    if (pc_src && !v && running) forget_clock();             /* followed the jack, now MIDI: reset EXT */
+    pc_src = (uint8_t)v; op1r_setting_put("clksrc", v);
+    pc_show_until = TIME_MS() + 2000u;
+}
+static void pc_turn(int delta)              /* KeyHandler: one value per click; MIDI -> right goes to 4 PPQ */
 {
     static int32_t acc;
     if ((acc > 0 && delta < 0) || (acc < 0 && delta > 0)) acc = 0;
     acc += delta;
-    int st = acc / 2048; if (!st) return;                  /* a detent = 2 events of 1024 */
+    int st = acc / 1024; if (!st) return;                  /* one value per hardware click (1024; the emulator sends 2048) */
     acc = 0;
     int v = pc_src;
     if (v == 0 && st > 0) v = 3;                             /* default JACK 4 */
     else { v += st; v = v < 0 ? 0 : v > 5 ? 5 : v; }
-    if (v != pc_src) { pc_src = (uint8_t)v; op1r_setting_put("clksrc", v); }
+    if (v != pc_src) pc_set_src(v);
+    else pc_show_until = TIME_MS() + 2000u;                  /* (shown again even at an end) */
 }
 
 #ifndef OP1_HOST
@@ -199,7 +259,7 @@ void pc_tempo_knob(void *self, int knob, int16_t *delta)    /* TempoController v
 static uint32_t txt[1][OP1_TEXT_SIZE / 4];
 static uint8_t txt_ok, txt_src = 0xFF;
 static const int32_t ident[9] = { 1024, 0, 0, 0, 1024, 0, 0, 0, 1024 };
-static const uint8_t green[4] = { 0x00, 0xED, 0x95, 0xFF };
+static const uint8_t white[4] = { 0xFF, 0xFF, 0xFF, 0xFF };
 
 void pc_load(void)                          /* GUI thread, boot (screens_load_hook) */
 {
@@ -214,7 +274,7 @@ static char *put_u(char *p, unsigned v) { char d[4]; int n = 0; do d[n++] = (cha
 #define PC_TXT_H 10
 #define PC_BOX_X (OP1_Q10(144) + 1229)                      /* centre of the SYNC / PO SYNC box (screenshot 146..213 of 400),
                                                              * + 1.2 px: the centred stock text lands 1.2 px left (measured) */
-static int32_t text_w(const void *t)                        /* drawn width, Q10 logical px: the bounds / display factor (measured) */
+__attribute__((unused)) static int32_t text_w(const void *t)                        /* drawn width, Q10 logical px: the bounds / display factor (measured) */
 {
     int32_t f = *(volatile int32_t *)0x01DFB654;
     if (*(volatile uint8_t *)0xFF906A54 == 1 && !*(volatile uint8_t *)0xFF906A56)
@@ -227,28 +287,17 @@ void pc_tempo_draw(void *scr, int dt)        /* TempoScreen vtable draw: stock, 
 {
     ((void (*)(void *, int))0x01A5F64C)(scr, dt);
     int m = SYNC_MODE;
-    if (!pc_src || (m != 2 && m != 4)) return;
-    unsigned ppq = pc_ppq[pc_src];
-    static int32_t half_w;                                   /* half the text width, Q10 (for the dot) */
-    if (!txt_ok || txt_src != pc_src) {                     /* "ppq 4", centred on the SYNC box (x 144.0) */
+    if (m != 2 && m != 4) return;                            /* not following a clock */
+    int detected = pc_src ? running : clock_present();       /* the jack's pulses / a MIDI clock */
+    if (!detected && (int32_t)(TIME_MS() - pc_show_until) >= 0) return;   /* else only for 2 s after a change */
+    if (!txt_ok || txt_src != pc_src) {                     /* "midi" / "ppq 4", white, centred on the SYNC box (x 144.0) */
         txt_ok = 1; txt_src = pc_src;
-        char c[12] = "ppq ", *p = put_u(c + 4, ppq);
-        *p = 0;
-        ((void *(*)(void *, int32_t, int32_t, int32_t, const uint8_t *, int32_t))0x01A61904)(txt[0], PC_BOX_X, PC_TXT_Y, 10, green, 1);
+        char c[12] = "midi";
+        if (pc_src) { char *p = put_u(c + 4, pc_ppq[pc_src]); c[0] = 'p'; c[1] = 'p'; c[2] = 'q'; c[3] = ' '; *p = 0; }
+        ((void *(*)(void *, int32_t, int32_t, int32_t, const uint8_t *, int32_t))0x01A61904)(txt[0], PC_BOX_X, PC_TXT_Y, 10, white, 1);
         op1_text_set(txt[0], c);
-        half_w = text_w(txt[0]) / 2;
     }
-    void *r = op1_raster();
-    op1_text_draw(txt[0], r, ident);                         /* between the middle graphic and the box */
-    static uint32_t seen; static int flash;
-    if (pc_pulses != seen) { seen = pc_pulses; flash = 4; }  /* a few frames per pulse */
-    if (flash > 0) {
-        flash--;
-        int32_t x = PC_BOX_X - half_w - OP1_Q10(5) - 512, y = OP1_Q10(PC_TXT_Y) + OP1_Q10(PC_TXT_H) / 2;   /* text's centre line (measured) */
-        op1_pt a0 = { x - OP1_Q10(2), y }, a1 = { x + OP1_Q10(2), y }, b0 = { x, y - OP1_Q10(2) }, b1 = { x, y + OP1_Q10(2) };
-        op1_raster_line(r, &a0, &a1, 0x600, green);            /* a dot as two crossing segments (rasteriser) */
-        op1_raster_line(r, &b0, &b1, 0x600, green);
-    }
+    op1_text_draw(txt[0], op1_raster(), ident);              /* between the middle graphic and the box */
 }
 #else
 void pc_host_turn(int delta) { pc_turn(delta); }
