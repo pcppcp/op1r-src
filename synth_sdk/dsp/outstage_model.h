@@ -37,11 +37,11 @@ static inline int32_t mul32(int32_t a, int32_t b)
     return sat32(a0 + a1);
 }
 /* Dreg_lo = Dreg_x * Dreg_y (16-bit fractional result): 2ab rounded to the top 16 bits, saturated */
-static inline int16_t mulh16(int16_t a, int16_t b)
+static inline int16_t mulh16(int16_t a, int16_t b)      /* rounded to 16 bits, ties to even (the unit's RND_MOD) */
 {
-    int64_t p = frac16(a, b) + 0x8000;
-    p >>= 16;
-    return (int16_t)(p > 32767 ? 32767 : p < -32768 ? -32768 : p);
+    int64_t p = frac16(a, b), q = p >> 16, r = p & 0xFFFF;
+    if (r > 0x8000 || (r == 0x8000 && (q & 1))) q++;
+    return (int16_t)(q > 32767 ? 32767 : q < -32768 ? -32768 : q);
 }
 #endif
 static inline int16_t hi16(int32_t v) { return (int16_t)(v >> 16); }

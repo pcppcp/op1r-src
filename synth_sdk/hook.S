@@ -441,12 +441,17 @@ _l1_tramp_rev:
 	call (P1);
 	P1 = [SP++]; RETS = [SP++];
 	rts;
-	.global _l1_tramp_out
+	.global _l1_tramp_eq
 	.align 2
-_l1_tramp_out:					/* CALL master_output_stage (core_block_process 0xFFA017AE) -> out_stage (dsp/outstage.c) */
-	[--SP] = RETS;
-	SP += -12;				/* the callee's argument area: master_output_stage writes [SP + 0x3C] past its frame */
+_l1_tramp_eq:					/* CALL master_eq (0xFFA01118, R0 = its state) -> eq_stage (dsp/eq.c) */
+	P1.L = _eq_stage; P1.H = _eq_stage;
+	jump.s _l1_tramp_call;
+	.global _l1_tramp_out
+_l1_tramp_out:					/* CALL master_output_stage (0xFFA017AE) -> out_stage (dsp/outstage.c) */
 	P1.L = _out_stage; P1.H = _out_stage;
+_l1_tramp_call:					/* both originals write 12 bytes past their frame (the caller's argument area): reserved */
+	[--SP] = RETS;
+	SP += -12;
 	call (P1);
 	SP += 12;
 	RETS = [SP++];

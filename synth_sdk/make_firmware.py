@@ -179,7 +179,8 @@ L1_CALLS = {0xFFA0619A: ('l1v_rs_probe', bytes.fromhex('09e1dc2949e180ff0ae15421
 # pc-relative CALLs in L1 to the trampolines in the free end of L1 (.l1tramp, plain LDR block at L1_TRAMP)
 L1_PCCALLS = {0xFFA0709C: ('l1_tramp_fwd', bytes.fromhex('06c41000')),   # mix loop 1: R0 = MAX (R2, R0) (V)
               0xFFA0712C: ('l1_tramp_rev', bytes.fromhex('06c40100')),   # mix loop 2: R0 = MAX (R0, R1) (V)
-              0xFFA017AE: ('l1_tramp_out', bytes.fromhex('00e36915'))}   # core_block_process: CALL master_output_stage -> out_stage (dsp/outstage.c)
+              0xFFA017AE: ('l1_tramp_out', bytes.fromhex('00e36915')),   # core_block_process: CALL master_output_stage -> out_stage (dsp/outstage.c)
+              0xFFA01118: ('l1_tramp_eq', bytes.fromhex('00e3ec0f'))}   # core_block_process: CALL master_eq -> eq_stage (dsp/eq.c)
 L1_TRAMP, L1_TRAMP_MAX = 0xFFA0BFB4, 0xFFA0C000 - 0xFFA0BFB4
 # docs/81: our output stage in place of R246's master_output_stage (L1 0xFFA04280..0xFFA04804), a plain LDR block after
 # the encrypted L1; check builds (OP1R_OUTSTAGE=check / stress) keep the original there and go through the trampoline
@@ -306,12 +307,14 @@ def gen_table(engs, fxs):
 def build(engs, fxs):
     os.makedirs(os.path.join(HERE, 'build'), exist_ok=True)
     gen_table(engs, fxs)
-    srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'seq/tombola.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/pcpage.c', 'screens/usbtrack.c', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'boottime.c', 'build/l1_runtime.c', 'dsp/outstage.c', 'dsp/outstage_l1.c', 'plugload/op1p_load.c', 'screens/settings.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/mixdrop.c', 'crash.c', 'patchjob.c', 'l1pool.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxgroups.c', 'screens/guiskip.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c', 'input/in_host.c'] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
+    srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'seq/tombola.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/pcpage.c', 'screens/usbtrack.c', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'boottime.c', 'build/l1_runtime.c', 'dsp/outstage.c', 'dsp/outstage_l1.c', 'dsp/eq.c', 'plugload/op1p_load.c', 'screens/settings.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/mixdrop.c', 'crash.c', 'patchjob.c', 'l1pool.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxgroups.c', 'screens/guiskip.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c', 'input/in_host.c'] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
     objs = []
     cmds = []
     flags = {}                                       # plugin.json "source_cflags": e.g. -O3 after the default -O2
     for e in engs + fxs:
         flags.update(plugins.source_flags(e, [e['source']] + e.get('extra_sources', [])))
+    if os.environ.get('OP1R_EQ') in ('check', 'stress'):                       # docs/81: master EQ model vs original, per block
+        flags['dsp/eq.c'] = flags.get('dsp/eq.c', []) + ['-DEQ_CHECK', '-DSTAGE_DUMP'] + (['-DEQ_STRESS'] if os.environ['OP1R_EQ'] == 'stress' else [])
     if os.environ.get('OP1R_OUTSTAGE') in ('check', 'stress'):                # docs/81: output stage model vs original, per block
         flags['dsp/outstage.c'] = flags.get('dsp/outstage.c', []) + ['-DOUTSTAGE_CHECK'] + (['-DOUTSTAGE_STRESS'] if os.environ['OP1R_OUTSTAGE'] == 'stress' else [])
     if L1_RUNTIME:                                                            # docs/56: L1 patches at boot by DTEST

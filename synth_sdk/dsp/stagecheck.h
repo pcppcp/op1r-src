@@ -8,8 +8,11 @@
 
 typedef struct { void *addr; uint32_t len; } stage_region;
 typedef struct { uint32_t blocks, bad, first_region, first_off, first_orig, first_model, cycles_orig, cycles_model; } stage_check_t;
+#ifdef STAGE_DUMP                                    /* the first differing block: state before, original's and model's result */
+uint8_t stage_dump[3][2048];
+#endif
 
-#define STAGE_CHECK_MAX 1024                       /* bytes all regions of one stage may have */
+#define STAGE_CHECK_MAX 2048                       /* bytes all regions of one stage may have */
 static inline void stage_copy(uint8_t *d, const volatile uint8_t *s, uint32_t n) { for (uint32_t i = 0; i < n; i++) d[i] = s[i]; }
 static inline void stage_put(volatile uint8_t *d, const uint8_t *s, uint32_t n) { for (uint32_t i = 0; i < n; i++) d[i] = s[i]; }
 static inline uint32_t stage_cyc(void) { uint32_t c; __asm__ volatile ("%0 = CYCLES;" : "=d"(c)); return c; }
@@ -36,6 +39,10 @@ static void stage_check(volatile stage_check_t *st, const stage_region *r, unsig
             if (m[k] != after[off + k]) {
                 bad = 1;
                 if (!st->bad) {                          /* the first one: region, offset, the aligned words */
+#ifdef STAGE_DUMP
+                    for (uint32_t j = 0; j < 2048; j++) { stage_dump[0][j] = before[j]; stage_dump[1][j] = after[j]; }
+                    { uint32_t o2 = 0; for (unsigned q = 0; q < n; q++) { stage_copy(stage_dump[2] + o2, (const volatile uint8_t *)r[q].addr, r[q].len); o2 += r[q].len; } }
+#endif
                     uint32_t w = k & ~3u;
                     st->first_region = i; st->first_off = k;
                     st->first_orig = after[off + w] | after[off + w + 1] << 8 | after[off + w + 2] << 16 | (uint32_t)after[off + w + 3] << 24;
