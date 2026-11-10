@@ -9,6 +9,7 @@ SECTIONS {
   __image_end = .;
   /* zero-initialised data right after the image, as an LDR FILL block (no bytes in the image) */
   .bss ALIGN(4) (NOLOAD) : { __bss_start = .; *(.bss*) *(COMMON) . = ALIGN(4); __bss_end = .; }
+  .l1out 0xFFA04280 : { KEEP(*(.l1out.0)) KEEP(*(.l1out.1)) }           /* dsp/outstage_l1.c: in place of master_output_stage (docs/81) */
   .l1tramp 0xFFA0BFB4 : { KEEP(*(.l1tramp)) }    /* free end of L1 instruction SRAM (image ends 0xFFA0BFB4) */
   .hook_namecmp 0x019B975C : { KEEP(*(.hook_namecmp)) }
   .hook_samplecheck 0x01A01844 : { KEEP(*(.hook_samplecheck)) }
