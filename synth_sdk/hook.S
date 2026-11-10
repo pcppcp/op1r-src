@@ -441,6 +441,16 @@ _l1_tramp_rev:
 	call (P1);
 	P1 = [SP++]; RETS = [SP++];
 	rts;
+	.global _l1_tramp_out
+	.align 2
+_l1_tramp_out:					/* CALL master_output_stage (core_block_process 0xFFA017AE) -> out_stage (dsp/outstage.c) */
+	[--SP] = RETS;
+	SP += -12;				/* the callee's argument area: master_output_stage writes [SP + 0x3C] past its frame */
+	P1.L = _out_stage; P1.H = _out_stage;
+	call (P1);
+	SP += 12;
+	RETS = [SP++];
+	rts;
 
 /* USB 6 channels (screens/usbtrack.c) */
 	.section .hook_usbdesc,"ax"
