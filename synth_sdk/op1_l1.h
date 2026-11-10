@@ -39,6 +39,7 @@
 enum { OP1_L1_SYNTH, OP1_L1_FX, OP1_L1_MASTER, OP1_L1_DRUM, OP1_L1_PARTS };
 static inline int op1_l1_fx_part(int pos) { return pos == 2 ? OP1_L1_MASTER : OP1_L1_FX; }
 #if defined(OP1_HOST) && !defined(L1POOL_IMPL)           /* host builds: no pool (l1pool_test.c: the real one) */
+#define OP1_L1_HOST_STUBS 1                               /* (a plugin's own host stubs can step back) */
 static inline void *op1_l1_claim(int part, const void *owner, uint32_t bytes, int *fresh)
 { (void)part; (void)owner; (void)bytes; if (fresh) *fresh = 0; return 0; }
 static inline void *op1_l1_claim_state(int part, void *home, uint32_t state_bytes, uint32_t bytes, int *fresh)

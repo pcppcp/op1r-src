@@ -23,6 +23,10 @@ FROM HUNDEKRAFT (kennel 3.1.4, GPL-3.0-or-later with the same additional permiss
 - The plugins juni, juni_chorus, pew, father, elg, hollowsaint, washer, snowglobe, hail, stutter, wavetable, taffy,
   monolit, mbira, eva, sid and sister (synth_sdk/plugins/<name>), synth_sdk/hk/, fx_spread.h, op1_l1.h,
   and the L1 lease logic in synth_sdk/l1pool.c (after kennel's kn_l1.c). Copyright (C) 2026 Hundekraft.
+- From hundekraft 3.2.3: reactor and rackverb (Copyright (C) 2026 Hundekraft), moai (Copyright (C) 2026 moai
+  contributors) and bloodmoon (Nola Drift, published as SammiBabe666, https://github.com/SammiBabe666/Project_Bloodmoon),
+  synth_sdk/plugins/<name>; moai's mm_ui.h / test files: host_shift typed int as in op1r's host harness; rackverb:
+  page-2 MODE / UNIT as OP1_FX_PAGE_STEPS (kennel's code means a list knob in op1r), host L1 stubs from op1_l1.h.
 
 NOT COVERED by this license
 - The Teenage Engineering OP-1 firmware and any part of it, including the original firmware bytes in the patch data

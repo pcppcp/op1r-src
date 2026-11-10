@@ -1,0 +1,36 @@
+{
+  "name": "rackverb",
+  "kind": "fx",
+  "symbol": "FX_rackverb",
+  "stereo": true,
+  "sources": [
+    "rackverb.c",
+    "rv_mv.c",
+    "rv_kern.S",
+    "rv_quad.c",
+    "rv_quad_kern.S",
+    "rackverb_screen.c"
+  ],
+  "defaults": [
+    0,
+    31763,
+    16384,
+    4424
+  ],
+  "page2_defaults": [
+    32767,
+    8192,
+    4096
+  ],
+  "screen": {
+    "svg": "rackverb.svg",
+    "symbol": "SCREEN_rackverb"
+  },
+  "loadable": true,
+  "claims": [],
+  "author": "Hundekraft",
+  "cost": {
+    "call": 37318,
+    "init": 2515
+  }
+}

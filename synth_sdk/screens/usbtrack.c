@@ -111,15 +111,26 @@ int usb6_desc_init(void)
  * 0x018B5FE8): written right after the stock push (same index), read by the packet builder at the same frames. */
 #define RING_WR (*(volatile uint32_t *)0x018B5FE4)
 #define RING_RD (*(volatile uint32_t *)0x018B5FE8)
-static int16_t usb6_ring[512][TR_N];
+static int32_t usb6_ring[512][TR_N];                               /* 24-bit values (int16 << 8) */
+/* test build OP1R_USB_RAWIN (docs/29, 24-bit input): channels 3 / 4 = the codec's raw input words L / R (top 24 bits of
+ * the 32-bit SPORT words, the audio callback's 2nd argument, midi/pclk.c pc_in_b), channels 5 / 6 = tracks 3 / 4 */
+#ifdef USB_RAWIN
+extern const int32_t *volatile pc_in_b;
+#endif
 static void ring_put(uint32_t wr0, int silent)
 {
     uint32_t wr1 = RING_WR;
     if (wr1 == wr0) return;                                         /* USB audio not active: nothing pushed */
+#ifndef USB_RAWIN
     if (!usb_tracks_live) silent = 1;
+#endif
     for (int f = 0; f < 64; f++) {
-        int16_t *d = usb6_ring[(wr0 + f) & 0x1FF];
-        for (int t = 0; t < TR_N; t++) d[t] = silent ? 0 : tr_out[t][f];
+        int32_t *d = usb6_ring[(wr0 + f) & 0x1FF];
+        for (int t = 0; t < TR_N; t++) d[t] = silent ? 0 : (int32_t)tr_out[t][f] << 8;
+#ifdef USB_RAWIN
+        const int32_t *raw = pc_in_b;
+        if (raw) { d[0] = raw[2 * f] >> 8; d[1] = raw[2 * f + 1] >> 8; }   /* always, also with tracks off */
+#endif
     }
 }
 /* L1 audio callback: CALL (P1) to usb_audio::push_lr (0xFFA049FC) / push_interleaved (0xFFA0487C, output muted) */
@@ -147,10 +158,10 @@ static int iso_build(void *dev, const uint8_t *buf, int bytes, int silent)
     uint8_t *o = usb6_pkt;
     for (int f = 0; f < frames; f++, buf += 6) {
         for (int i = 0; i < 6; i++) *o++ = buf[i];
-        const int16_t *s = usb6_ring[(rd + (uint32_t)f) & 0x1FF];
-        for (int t = 0; t < TR_N; t++) {                              /* 24-bit little endian, int16 << 8 */
-            int16_t v = silent ? 0 : s[t];
-            *o++ = 0; *o++ = (uint8_t)v; *o++ = (uint8_t)((uint16_t)v >> 8);
+        const int32_t *s = usb6_ring[(rd + (uint32_t)f) & 0x1FF];
+        for (int t = 0; t < TR_N; t++) {                              /* 24-bit little endian */
+            int32_t v = silent ? 0 : s[t];
+            *o++ = (uint8_t)v; *o++ = (uint8_t)(v >> 8); *o++ = (uint8_t)(v >> 16);
         }
     }
     return USB_ISO_IN(dev, usb6_pkt, frames * USB_CH * 3);

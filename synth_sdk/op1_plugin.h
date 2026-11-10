@@ -40,6 +40,10 @@ extern const int16_t *op1_sine_q;
 #define OP1_SINE_Q OP1_SINE_TABLE
 #endif
 static inline int32_t op1_sin(int32_t k) { return OP1_SINE_Q[k & 8191]; }
+/* kennel's names (hundekraft plugins): the table once per render, then op1_sin_q(tab, k). Kennel folds a quarter table;
+ * op1r's table is the full wave, whose values are the fold's bit for bit (docs/67), so a plain index. */
+static inline const int16_t *op1_sin_tab(void) { return OP1_SINE_Q; }
+static inline int32_t op1_sin_q(const int16_t *tab, int32_t k) { return tab[k & 8191]; }
 #include "op1_l1.h"                              /* the L1 pool (l1pool.c, kennel's API) */
 
 #define OP1_BLOCK        128             /* voice render: 128 samples at OP1_VOICE_RATE (one 64-frame audio block) */
@@ -248,6 +252,30 @@ static inline int op1_semi_cents(int word)
  * then the tempo-sync divisions. Older cores: a plain knob. */
 #define OP1_PRESS_EXTEND(n)   (0x80 | (n))
 #define OP1_PRESS_IS_EXTEND(v) (((v) & 0xC0) == 0x80)
+/* FX stepped knob (kennel's OP1_FX_STEPS(n), hundekraft plugins, e.g. rackverb): the page-1 word turns in n steps, one per
+ * click, step i at the middle of its n-th of the range; the ends stop, unless the FX sets op1_fx_wrap[pos][k] = m
+ * (2..n): then it turns round within steps 0..m-1 (cleared when a new FX starts at the position). Here n = 64..127
+ * only (0x80 | n below 64 is OP1_PRESS_EXTEND). */
+#define OP1_FX_STEPS(n)  (0x80 + (n))
+/* FX page-2 stepped knob (op1r; kennel FX use OP1_PRESS_PAGE_STEPS(n) = 0x40 + n, which is OP1_PRESS_LIST for op1r FX):
+ * the press toggles page 2 as OP1_PRESS_PAGE, and on page 2 the word 5 + k turns in n steps (2..31), one per click,
+ * step i at ((2i + 1) * 32768) / (2n): read it with (word * n) >> 15. */
+#define OP1_FX_PAGE_STEPS(n) (0x20 + (n))
+/* kennel's FX leases (OP1_FAST_API 1 / OP1_POOL_API 1): op1_fx_fast = 224 KiB per position from heap 0 (taken at boot
+ * when a loaded file imports it, cleared once), op1_fx_big = no pool in op1r (size 0). Same rules as the scratch. */
+#define OP1_FAST_API 1
+#define OP1_POOL_API 1
+#ifndef OP1_HOST
+void *op1_fx_fast(int pos, uint32_t *size);
+void *op1_fx_big(int pos, uint32_t *size);
+#endif
+static inline int op1_fx_page_steps(unsigned p) { return p >= 0x22 && p <= 0x3F ? (int)p - 0x20 : 0; }
+static inline int op1_fx_steps(unsigned p) { return p >= 0xC0 && p <= 0xFF ? (int)p - 0x80 : 0; }
+#ifndef OP1_HOST
+extern volatile uint8_t op1_fx_wrap[3][4];
+#else
+__attribute__((weak)) volatile uint8_t op1_fx_wrap[3][4];
+#endif
 static inline int op1_fx_list(int32_t q15, int n)
 {
     int i = (int)((q15 * (n - 1) + 16384) >> 15);

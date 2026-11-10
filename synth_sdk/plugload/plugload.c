@@ -113,9 +113,32 @@ __attribute__((noinline, used)) void op1_dbg(const char *text, int a, int b)
     __asm__ volatile ("" : : "r"(text), "r"(a), "r"(b) : "memory");
 }
 extern int se_is_open(void);                                    /* screens/sampedit.c */
+/* kennel's FX leases (op1_plugin.h OP1_FAST_API / OP1_POOL_API, hundekraft plugins, e.g. rackverb's QUAD): a fast lease
+ * of 224 KiB per FX position from heap 0, taken at boot only when a loaded file imports op1_fx_fast (cleared once);
+ * op1_fx_big has no pool here (size 0: the plugin falls back, as kennel's API requires). Same rules as the scratch. */
+#define FX_FAST_SIZE 0x38000u
+static uint8_t *fx_fast_mem[3];
+void *op1_fx_fast(int pos, uint32_t *size)
+{
+    uint8_t *m = pos >= 0 && pos < 3 ? fx_fast_mem[pos] : 0;
+    *size = m ? FX_FAST_SIZE : 0;
+    return m;
+}
+void *op1_fx_big(int pos, uint32_t *size) { (void)pos; *size = 0; return 0; }
+static void fx_fast_alloc(void)                 /* boot thread: the first file that imports op1_fx_fast */
+{
+    for (int p = 0; p < 3; p++) {
+        if (fx_fast_mem[p]) continue;
+        uint32_t *m = MALLOC(FX_FAST_SIZE);
+        if (!m) return;                          /* no room: size 0 (the plugin falls back) */
+        for (uint32_t i = 0; i < FX_FAST_SIZE / 4; i++) m[i] = 0;
+        fx_fast_mem[p] = (uint8_t *)m;
+    }
+}
 static const struct { const char *name; void *addr; } exports[] = {
+    { "op1_fx_fast", (void *)op1_fx_fast }, { "op1_fx_big", (void *)op1_fx_big },
     { "op1_eng_page", (void *)op1_eng_page }, { "op1_input_tuner_active", (void *)op1_input_tuner_active },
-    { "op1_input_gain_db", (void *)op1_input_gain_db }, { "op1_fx_page", (void *)op1_fx_page },
+    { "op1_input_gain_db", (void *)op1_input_gain_db }, { "op1_fx_page", (void *)op1_fx_page }, { "op1_fx_wrap", (void *)op1_fx_wrap },
     { "read_fx_param_safe", (void *)read_fx_param_safe },
     { "op1_sc_source", (void *)op1_sc_source },
     { "op1_page2_live", (void *)op1_page2_live },
@@ -389,6 +412,7 @@ static int load_one(void *db, const char *file)
         imp[i] = 0;
         for (unsigned k = 0; k < sizeof exports / sizeof exports[0]; k++)
             if (seq(exports[k].name, v.import[i])) imp[i] = (uint32_t)exports[k].addr;
+        if (imp[i] == (uint32_t)op1_fx_fast) fx_fast_alloc();
         if (!imp[i]) r = OP1P_E_IMPORT;
     }
     if (!r && total + v.mem_size > TOTAL_CAP) r = OP1P_E_SIZE;

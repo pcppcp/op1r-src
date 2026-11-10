@@ -1,0 +1,37 @@
+{
+  "name": "bloodmoon",
+  "kind": "synth",
+  "loadable": true,
+  "symbol": "ENGINE_bloodmoon",
+  "sources": [
+    "bloodmoon.c",
+    "moon.c",
+    "bloodmoon_dsp.S"
+  ],
+  "defaults": [
+    14000,
+    20000,
+    7000,
+    9000
+  ],
+  "screen": {
+    "svg": "bloodmoon.svg",
+    "symbol": "SCREEN_bloodmoon"
+  },
+  "claims": [],
+  "author": "SammiBabe666",
+  "cost": {
+    "voice": 10475,
+    "start": 36
+  },
+  "cost_stalls": {
+    "voice": [
+      11231,
+      13581
+    ],
+    "start": [
+      691,
+      998
+    ]
+  }
+}

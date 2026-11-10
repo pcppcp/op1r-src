@@ -188,7 +188,7 @@ static void fx_render_stereo_(void *self, int16_t *l, int16_t *r, const int16_t 
     int n = params[4] - OP1_ENGINE_MAGIC;
     int e = fx_index(n);
     if (!e) { fx_cur_master = 0; FILTER_ST_RENDER(self, l, r, params); return; }
-    if (e != fx_cur_master) { fx_cur_master = e; op1_fxs[e]->init(OP1_FX_MASTER); }
+    if (e != fx_cur_master) { fx_cur_master = e; *(volatile uint32_t *)op1_fx_wrap[OP1_FX_MASTER] = 0; op1_fxs[e]->init(OP1_FX_MASTER); }
     if (op1_fx_stereo[e]) { op1_fxs[e]->render_stereo(OP1_FX_MASTER, l, r, params); return; }   /* own stereo */
     int16_t m[OP1_FX_BLOCK], y[OP1_FX_BLOCK];
     for (int i = 0; i < OP1_FX_BLOCK; i++) y[i] = m[i] = (int16_t)((l[i] + r[i]) >> 1);
@@ -242,7 +242,7 @@ static void fx_render_(void *self, int16_t *buf, const int16_t *params)
     int n = params[4] - OP1_ENGINE_MAGIC;
     int e = fx_index(n);
     if (!e) { fx_cur = 0; FILTER_RENDER(self, buf, params); return; }
-    if (e != fx_cur) { fx_cur = e; op1_fxs[e]->init(fx_pos); }
+    if (e != fx_cur) { fx_cur = e; *(volatile uint32_t *)op1_fx_wrap[fx_pos % 3] = 0; op1_fxs[e]->init(fx_pos); }
     op1_fxs[e]->render(fx_pos, buf, params);
 }
 
@@ -945,6 +945,7 @@ static int current_fx(void)                 /* custom FX index of the shown FX, 
 #define KNOB_DISPATCH  ((void (*)(int, int16_t *))0x019B6C0C)
 #define CURRENT_SCREEN (*(volatile int *)0x018B65C8)
 volatile uint8_t op1_fx_page[3][4];
+volatile uint8_t op1_fx_wrap[3][4] __attribute__((aligned(4)));   /* op1_plugin.h: stepped knob wrap, set by the FX, cleared at its start */
 static int quad_lfo_page(void);                /* quad LFO page helpers (defined below) */
 static int lfo_page_pos(void);
 static int lfo_page_slot(int pos);
@@ -1295,7 +1296,7 @@ void key_event_hook(int code, int pressed)
             int k = press_knob[code - 0x3B];
             uint8_t mode = op1_fxs[e]->press[k];
             if (mode) {                                  /* handled: swallow press and release */
-                if (pressed && !OP1_PRESS_IS_EXTEND(mode) && !OP1_PRESS_IS_LIST(mode)) op1_fx_page[op1_fx_screen_pos()][k] ^= 1;
+                if (pressed && !OP1_PRESS_IS_EXTEND(mode) && !OP1_PRESS_IS_LIST(mode) && !op1_fx_steps(mode)) op1_fx_page[op1_fx_screen_pos()][k] ^= 1;
                 return;
             }
         }
@@ -1472,6 +1473,28 @@ void knob_event_hook(int knob, int16_t *delta)
         }
         acc[knob] = 0;                                               /* below: the stock knob */
     }
+    if (e && knob >= 0 && knob < 4 && op1_fx_steps(op1_fxs[e]->press[knob])) {   /* stepped knob (kennel OP1_FX_STEPS) */
+        static int32_t sacc[4];
+        if ((sacc[knob] > 0 && *delta < 0) || (sacc[knob] < 0 && *delta > 0)) sacc[knob] = 0;
+        sacc[knob] += *delta;
+        int st = sacc[knob] / 1024;                                  /* one step per click */
+        if (st) {
+            sacc[knob] -= st * 1024;
+            int pos = op1_fx_screen_pos(), n = op1_fx_steps(op1_fxs[e]->press[knob]), wrap = op1_fx_wrap[pos][knob];
+            int16_t *w = (int16_t *)op1_fx_knobs(pos);
+            const int16_t *rg = (const int16_t *)(0x01DE5C50 + 5 * 0x30 + knob * 6);
+            int32_t lo = rg[0], hi = rg[1];
+            if (hi <= lo) { lo = fx_rng_default[knob][0]; hi = fx_rng_default[knob][1]; }
+            int32_t span = hi - lo, v = w[knob] < lo ? lo : w[knob] > hi ? hi : w[knob];
+            int32_t i = (v - lo) * n / span;                         /* (after kennel's kn_step_turn_range) */
+            if (i > n - 1) i = n - 1;
+            if (wrap >= 2 && wrap <= n) { if (i > wrap - 1) i = wrap - 1; i = ((i + st) % wrap + wrap) % wrap; }
+            else { i += st; i = i < 0 ? 0 : i > n - 1 ? n - 1 : i; }
+            w[knob] = (int16_t)(lo + (2 * i + 1) * span / (2 * n));
+            if (pos != OP1_FX_MASTER) PATCH_SET_FX(PATCH_OBJ(pos, *(volatile int *)(pos ? 0xFF8016D8 : 0xFF8016D4)), w);
+        }
+        return;
+    }
     if (e && knob >= 0 && knob < 4 && OP1_PRESS_IS_LIST(op1_fxs[e]->press[knob])) {   /* list knob: an entry per click */
         static int32_t acc[4];
         if ((acc[knob] > 0 && *delta < 0) || (acc[knob] < 0 && *delta > 0)) acc[knob] = 0;
@@ -1491,6 +1514,22 @@ void knob_event_hook(int knob, int16_t *delta)
             w[knob] = op1_fx_list_word(i, n, lo, hi);
             if (pos != OP1_FX_MASTER)                    /* master: saved from the live words (0x019D9B94) */
                 PATCH_SET_FX(PATCH_OBJ(pos, *(volatile int *)(pos ? 0xFF8016D8 : 0xFF8016D4)), w);
+        }
+        return;
+    }
+    if (e && knob >= 0 && knob < 3 && op1_fx_page_steps(op1_fxs[e]->press[knob]) && op1_fx_page[op1_fx_screen_pos()][knob]) {
+        static int32_t pacc[3];                                      /* page-2 stepped knob: a step per click */
+        if ((pacc[knob] > 0 && *delta < 0) || (pacc[knob] < 0 && *delta > 0)) pacc[knob] = 0;
+        pacc[knob] += *delta;
+        int st = pacc[knob] / 1024;
+        if (st) {
+            pacc[knob] -= st * 1024;
+            int pos = op1_fx_screen_pos(), n = op1_fx_page_steps(op1_fxs[e]->press[knob]);
+            int16_t *w = (int16_t *)op1_fx_knobs(pos);
+            int i = (w[5 + knob] < 0 ? 0 : w[5 + knob]) * n >> 15;
+            i += st; i = i < 0 ? 0 : i > n - 1 ? n - 1 : i;
+            w[5 + knob] = (int16_t)(((2 * i + 1) * 32768) / (2 * n));
+            if (pos != OP1_FX_MASTER) PATCH_SET_FX(PATCH_OBJ(pos, *(volatile int *)(pos ? 0xFF8016D8 : 0xFF8016D4)), w);
         }
         return;
     }

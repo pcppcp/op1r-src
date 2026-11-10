@@ -70,7 +70,16 @@ sync toggle, Shift pages for shape and gain). Older cores ignore the extra field
   plugin.json; the master position then gets the mix's own left / right instead of the mono sum. Synth / drum FX
   still get `render` (their bus is mono).
 
-**Helpers**: `OP1_SINE_TABLE` (8192 x int16), `op1_sat16`, `op1_mul16` (Q15). Second knob pages and latching
+**Stepped FX knobs** (op1r 63+): `press[k] = OP1_FX_STEPS(n)` (n = 64..127, kennel's code) turns the page-1 word in n
+steps, one per click; the FX may set `op1_fx_wrap[pos][k] = m` to turn round within steps 0..m-1 (cleared when a new FX
+starts at the position). `press[k] = OP1_FX_PAGE_STEPS(n)` (n = 2..31): the press toggles page 2, where word 5 + k
+turns in n steps (read it with `(word * n) >> 15`). Example: `plugins/rackverb` (program, unit, mode).
+
+**FX leases** (op1r 63+, kennel's API): `op1_fx_fast(pos, &size)` gives 224 KB per position from heap 0, taken at boot
+only when a loaded plugin imports it; `op1_fx_big` has no pool in op1r (size 0). Read the size, fall back when it is 0.
+
+**Helpers**: `OP1_SINE_TABLE` (8192 x int16), `op1_sin(k)` / `op1_sin_tab()` + `op1_sin_q(tab, k)` (the L1 copy),
+`op1_sat16`, `op1_mul16` (Q15). Second knob pages and latching
 presses: the `press` field (see the comments in `op1_plugin.h`); synth engines can use Shift + turn instead of a
 page (`OP1_PRESS_SHIFT`, op1r 48 cores), `op1_shift_held()` tells a screen that Shift is down.
 

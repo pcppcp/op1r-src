@@ -1,0 +1,26 @@
+{
+  "name": "reactor",
+  "kind": "synth",
+  "order": 11,
+  "symbol": "ENGINE_reactor",
+  "loadable": true,
+  "sources": [
+    "reactor.c",
+    "reactor_kernel.S"
+  ],
+  "defaults": [
+    16384,
+    3000,
+    16384,
+    9000
+  ],
+  "author": "Hundekraft",
+  "screen": {
+    "svg": "reactor.svg",
+    "symbol": "SCREEN_reactor"
+  },
+  "cost": {
+    "voice": 12002,
+    "start": 501
+  }
+}

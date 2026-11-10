@@ -380,7 +380,16 @@ static void sm_update(void *scr, int dt)
         /* the db and snd boot stages split (docs/79, boottime.c): "9/10 open 0.4 clips 0.5 fat 0.1",
          * "10/10 pre 1.2 0.6 slot 0.4 0.3 smp 0.1" (synth / drum) */
         extern volatile uint32_t bt_split[8];
-        if (sm_page == PG_BOOTD) {
+        extern volatile uint32_t l1rd[4], l1rt[4];
+        static const char hx[] = "0123456789abcdef";
+        if (sm_page == PG_BOOTD && l1rt[3] && l1rt[1]) {     /* L1 patches at boot: shown only if one failed, "9/10 l1p 8/9 1" */
+            extern const unsigned l1_pokes_n;
+            q = put_u(put_s(q, "l1p "), l1rt[0]); *q++ = '/'; q = put_u(q, l1_pokes_n);
+            q = put_u(put_s(q, " "), l1rt[1]);
+        } else if (sm_page == PG_BOOTD && l1rd[0]) {         /* diagnostic OP1R_L1READ: "9/10 l1 3c076007 1ad735c6" */
+            q = put_s(q, "l1");
+            for (int k = 1; k < 3; k++) { *q++ = ' '; for (int s = 28; s >= 0; s -= 4) *q++ = hx[(l1rd[k] >> s) & 15]; }
+        } else if (sm_page == PG_BOOTD) {
             q = put_sec(put_s(q, "open "), bt_split[0]); q = put_sec(put_s(q, " clips "), bt_split[1]);
             q = put_sec(put_s(q, " fat "), bt_split[2]);
         } else {

@@ -1,0 +1,28 @@
+{
+  "name": "moai",
+  "author": "moai contributors",
+  "kind": "synth",
+  "symbol": "ENGINE_moai",
+  "sources": [
+    "moai.c",
+    "moai_fc.S",
+    "moai_osc.S",
+    "moai_ui.c"
+  ],
+  "defaults": [
+    1013,
+    3932,
+    26213,
+    21626
+  ],
+  "loadable": true,
+  "claims": [],
+  "screen": {
+    "svg": "moai.svg",
+    "symbol": "SCREEN_moai"
+  },
+  "cost": {
+    "voice": 20283,
+    "start": 4436
+  }
+}
