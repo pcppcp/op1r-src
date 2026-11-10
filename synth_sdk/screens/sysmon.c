@@ -383,11 +383,18 @@ static void sm_update(void *scr, int dt)
         extern volatile uint32_t l1rd[4], l1rt[4];
         static const char hx[] = "0123456789abcdef";
         extern volatile uint32_t os_check[8] __attribute__((weak));   /* dsp/outstage.c check builds (docs/81) */
+        extern volatile uint32_t eq_check[8] __attribute__((weak));   /* dsp/eq.c check builds */
         extern volatile uint32_t os_selftest[4];
-        if (sm_page == PG_BOOTD && os_selftest[3] && os_selftest[1]) {   /* L1 output stage self-test failed: "9/10 ost 64 3" */
+        extern volatile uint32_t eq_selftest[4];
+        if (sm_page == PG_BOOTD && eq_selftest[3] && eq_selftest[1]) {   /* L1 master EQ self-test failed: "9/10 eqt 48 3" */
+            q = put_u(put_s(q, "eqt "), eq_selftest[0]); q = put_u(put_s(q, " "), eq_selftest[1]);
+        } else if (sm_page == PG_BOOTD && os_selftest[3] && os_selftest[1]) {   /* L1 output stage self-test failed: "9/10 ost 64 3" */
             q = put_u(put_s(q, "ost "), os_selftest[0]); q = put_u(put_s(q, " "), os_selftest[1]);
         } else
-        if (sm_page == PG_BOOTD && &os_check && os_check[0]) {   /* "9/10 os 91274 0 12866 13732": blocks, differing, cycles */
+        if (sm_page == PG_BOOTD && &eq_check && eq_check[0]) {   /* "9/10 eq 91274 0 14191 60000" */
+            q = put_u(put_s(q, "eq "), eq_check[0]); q = put_u(put_s(q, " "), eq_check[1]);
+            q = put_u(put_s(q, " "), eq_check[6]); q = put_u(put_s(q, " "), eq_check[7]);
+        } else if (sm_page == PG_BOOTD && &os_check && os_check[0]) {   /* "9/10 os 91274 0 12866 13732": blocks, differing, cycles */
             q = put_u(put_s(q, "os "), os_check[0]); q = put_u(put_s(q, " "), os_check[1]);
             q = put_u(put_s(q, " "), os_check[6]); q = put_u(put_s(q, " "), os_check[7]);
         } else if (sm_page == PG_BOOTD && l1rt[3] && l1rt[1]) {     /* L1 patches at boot: shown only if one failed, "9/10 l1p 8/9 1" */

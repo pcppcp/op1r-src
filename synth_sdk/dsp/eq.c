@@ -13,109 +13,79 @@
 
 #define MASTER_EQ ((void (*)(void *))0xFFA030F0)
 
-static inline int32_t sat32(int64_t v) { return v > 0x7FFFFFFFLL ? 0x7FFFFFFF : v < -0x80000000LL ? (int32_t)0x80000000 : (int32_t)v; }
-static inline int16_t sat16(int32_t v) { return (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v); }
-static inline int64_t frac16(int16_t a, int16_t b) { return (a == -32768 && b == -32768) ? 0x7FFFFFFF : 2 * (int64_t)a * b; }
-static inline int32_t adds(int32_t a, int32_t b) { return sat32((int64_t)a + b); }
-static inline int32_t shls1(int32_t a) { return sat32((int64_t)a << 1); }
-static inline int32_t mul32(int32_t a, int32_t b)          /* libdsp mult_fr1x32x32 (as dsp/outstage_model.h) */
-{
-    uint16_t al = (uint16_t)a, bl = (uint16_t)b;
-    int16_t ah = (int16_t)(a >> 16), bh = (int16_t)(b >> 16);
-    int64_t a1 = ((uint32_t)al * bl) >> 16;
-    a1 += (int64_t)ah * bl;
-    int64_t a0 = frac16(ah, bh);
-    a1 += (int64_t)bh * al;
-    a1 >>= 15;
-    return sat32(a0 + a1);
-}
-static inline int16_t hi16(int32_t v) { return (int16_t)(v >> 16); }
-static inline int16_t rnd16(int64_t acc)                    /* accumulator -> 16 bits: round to nearest, ties to even */
-{
-    int64_t q = acc >> 16, r = acc & 0xFFFF;
-    if (r > 0x8000 || (r == 0x8000 && (q & 1))) q++;
-    return (int16_t)(q > 32767 ? 32767 : q < -32768 ? -32768 : q);
-}
-
-static inline int16_t mulh16(int16_t a, int16_t b) { return rnd16(frac16(a, b)); }   /* R.L = a * b: the same rounding (ties to even: measured) */
+#ifndef EQ_FIR_ST
+#define EQ_FIR_ST
 typedef struct { const int16_t *h; int16_t *d; int16_t *p; int32_t k; } fir_st;
-static void fir(const volatile int16_t *x, int16_t *y, int n, fir_st *s)
-{
-    const int k = s->k;
-    int idx = (int)(s->p - s->d);
-    for (int i = 0; i < n; i++) {
-        const int16_t xi = x[i];
-        int64_t acc = frac16(s->h[0], xi);
-        int e = idx + 1 == k ? 0 : idx + 1;               /* the newest sample sits at p + 1 (measured), older ones after it */
-        for (int j = 1; j < k; j++) { int t = e + j; if (t >= k) t -= k; acc += frac16(s->h[j], s->d[t]); }
-        y[i] = rnd16(acc);
-        s->d[e] = xi;
-        idx = idx ? idx - 1 : k - 1;
-    }
-    s->p = s->d + idx;
-}
-static int32_t onepole(int16_t *b, int16_t c, int32_t s)    /* in place; returns the new state */
-{
-    int32_t a = sat32((int64_t)s + frac16(c, b[0])), prev = s;
-    for (int i = 0; i < 64; i++) {
-        a = sat32((int64_t)a - frac16(c, hi16(prev)));
-        prev = a;
-        if (i < 63) { b[i] = hi16(a); a = sat32((int64_t)a + frac16(c, b[i + 1])); }
-        else b[i] = hi16(a);
-    }
-    return a;
-}
-#define PRM   ((volatile int32_t *)0xFF8017CC)              /* [0] w0, [1] w1, [2..4] meters */
-#define LO    ((int16_t *)0x01AABB28)
-#define HI    ((int16_t *)0x01AABBA8)
-#define MID   ((int16_t *)0x01AABC28)
-#define FIRS  ((fir_st *)0x01AABAD8)                       /* lo L, hi L, lo R, hi R (stride 0x14) */
-#define TAB   ((const volatile int16_t *)0x0106A5EC)
-static void channel(volatile int16_t *x, volatile int16_t *dly, int32_t *st, int ch, int16_t cl, int16_t cm,
-                    int32_t a, int32_t b, int32_t c)
-{
-    fir(x, LO, 64, (fir_st *)((uint8_t *)FIRS + 0x28 * ch));
-    fir(x, HI, 64, (fir_st *)((uint8_t *)FIRS + 0x28 * ch + 0x14));
-    int32_t di = st[4 + ch];
-    for (int i = 0; i < 64; i++) {
-        MID[i] = sat16(sat16(dly[di] - LO[i]) - HI[i]);
-        dly[di] = x[i];
-        if (++di >= 25) di -= 25;
-    }
-    st[4 + ch] = di;
-    st[2 * ch] = onepole(LO, cl, st[2 * ch]);
-    st[2 * ch + 1] = onepole(MID, cm, st[2 * ch + 1]);
-    int32_t m0 = PRM[2], m1 = PRM[3], m2 = PRM[4];
-    for (int i = 0; i < 64; i++) {
-        int32_t s1 = shls1(mul32((int32_t)LO[i] << 16, a));
-        if (s1 > m0) m0 = s1;
-        int32_t s3 = shls1(mul32((int32_t)MID[i] << 16, b));
-        if (s3 > m1) m1 = s3;
-        int32_t sum = adds(s1, s3);
-        int32_t s2 = shls1(mul32((int32_t)HI[i] << 16, c));
-        if (s2 > m2) m2 = s2;
-        sum = shls1(adds(s2, sum));
-        x[i] = hi16(sum);
-    }
-    PRM[2] = m0; PRM[3] = m1; PRM[4] = m2;
-}
-void eq_model(int32_t *st)
-{
-    const int32_t w0 = PRM[0], w1 = PRM[1];
-    PRM[2] = mul32(PRM[2], 0x7F000000); PRM[3] = mul32(PRM[3], 0x7F000000); PRM[4] = mul32(PRM[4], 0x7F000000);
-    const int16_t cl = TAB[sat16(hi16(w0) + 0x3000) >> 8], cm = TAB[sat16((int16_t)w1 + 0x5000) >> 8];
-    const int32_t a = (int32_t)mulh16((int16_t)w0, (int16_t)w0) << 16, b = (int32_t)mulh16(hi16(w0), hi16(w0)) << 16;
-    const int32_t c = (int32_t)mulh16((int16_t)w1, (int16_t)w1) << 16;
-    channel((volatile int16_t *)0xFF800D34, (volatile int16_t *)0xFF8017F8, st, 0, cl, cm, a, b, c);
-    channel((volatile int16_t *)0xFF800DB4, (volatile int16_t *)0xFF80182C, st, 1, cl, cm, a, b, c);
-}
+#endif
+#if defined(__bfin__)
+void eq_fir(fir_st *s, const volatile int16_t *x, int16_t *y);   /* dsp/fir.S */
+#define EQ_FIR eq_fir
+#endif
+#include "eq_model.h"
 
+static int32_t *eq_arg;
+static void eq_mod(void) { eq_model(eq_arg); }
 #ifdef EQ_CHECK
 volatile stage_check_t eq_check;
-static int32_t *eq_arg;
-static void eq_orig(void) { MASTER_EQ(eq_arg); }
-static void eq_mod(void) { eq_model(eq_arg); }
+static void eq_orig(void) { void (*volatile f)(void *) = MASTER_EQ; f(eq_arg); }
 #endif
+
+/* Boot self-test of the L1 copy (production builds): R246's routine is gone, so the compiled bytes at 0xFFA030F0
+ * (dsp/eq_l1.c + fir_l1.S) are compared with the model in SDRAM (eq.c + fir.S) on 48 synthetic blocks (noise, extremes,
+ * silence, random settings, states), every byte they write, from identical starting points. The FIR states at
+ * 0x01AABAD8 are not set up yet at boot (db stage): temporary ones on our own delay lines, everything put back after.
+ * eq_selftest: blocks, differing, first region, 1 = ran (page 9 shows "eqt .." only on a failure). */
+volatile uint32_t eq_selftest[4];
+static void eq_l1_call(void) { void (*volatile f)(void *) = MASTER_EQ; f(eq_arg); }
+void eq_stage_selftest(void)
+{
+#ifndef EQ_CHECK
+    static int16_t dl[4][51];
+    static int32_t fst[6];
+    static stage_region r[11];
+    static uint8_t keep[1300];
+    unsigned n = 0;
+    r[n++] = (stage_region){ (void *)0xFF8017CC, 0x14 };
+    r[n++] = (stage_region){ (void *)0xFF8017F8, 102 };
+    r[n++] = (stage_region){ fst, sizeof fst };
+    r[n++] = (stage_region){ (void *)0x01AABB28, 0x180 };
+    r[n++] = (stage_region){ (void *)0x01AABAD8, 0x50 };
+    for (int f = 0; f < 4; f++) r[n++] = (stage_region){ dl[f], sizeof dl[f] };
+    r[n++] = (stage_region){ (void *)0xFF800D34, 128 };
+    r[n++] = (stage_region){ (void *)0xFF800DB4, 128 };
+    uint32_t off = 0;
+    for (unsigned i = 0; i < n; i++) { stage_copy(keep + off, (const volatile uint8_t *)r[i].addr, r[i].len); off += r[i].len; }
+    stage_check_t st = { 0 };
+    uint32_t rng = 0x2468ACEu;
+    for (int b = 0; b < 48; b++) {
+        for (int f = 0; f < 4; f++) {                       /* temporary FIR states: lo / hi coefficients, our lines */
+            fir_st *s = (fir_st *)((uint8_t *)FIRS + 0x14 * f);
+            s->h = (const int16_t *)(f & 1 ? 0xFF80006C : 0xFF800004); s->d = dl[f]; s->k = 51;
+            rng = rng * 1103515245u + 12345u; s->p = dl[f] + (rng >> 8) % 51;
+            for (int j = 0; j < 51; j++) { rng = rng * 1103515245u + 12345u; dl[f][j] = (int16_t)(rng >> 16); }
+        }
+        volatile int16_t *x = (volatile int16_t *)0xFF800D34;
+        const int mode = b & 3;
+        for (int i = 0; i < 128; i++) {
+            rng = rng * 1103515245u + 12345u;
+            int32_t v = (int32_t)(rng >> 16) - 32768;
+            x[i] = (int16_t)(mode == 0 ? v : mode == 1 ? ((i & 2) ? 32767 : -32768) : mode == 2 ? 0 : v / 128);
+        }
+        volatile int16_t *dly = (volatile int16_t *)0xFF8017F8;
+        for (int i = 0; i < 51; i++) { rng = rng * 1103515245u + 12345u; dly[i] = (int16_t)(rng >> 16); }
+        for (int i = 0; i < 4; i++) { rng = rng * 1103515245u + 12345u; fst[i] = (int32_t)rng; }
+        fst[4] = b % 25; fst[5] = (b * 7) % 25;
+        rng = rng * 1103515245u + 12345u; PRM[0] = (int32_t)rng;
+        rng = rng * 1103515245u + 12345u; PRM[1] = (int32_t)rng;
+        for (int i = 2; i < 5; i++) { rng = rng * 1103515245u + 12345u; PRM[i] = (int32_t)(rng >> 1); }
+        eq_arg = fst;
+        stage_check(&st, r, n, eq_l1_call, eq_mod);
+    }
+    off = 0;
+    for (unsigned i = 0; i < n; i++) { stage_put((volatile uint8_t *)r[i].addr, keep + off, r[i].len); off += r[i].len; }
+    eq_selftest[0] = st.blocks; eq_selftest[1] = st.bad; eq_selftest[2] = st.first_region; eq_selftest[3] = 1;
+#endif
+}
 #ifdef EQ_STRESS
 /* test only (OP1R_EQ=stress): synthetic input and EQ settings per block (all gains and both table indices, loud,
  * clipping, silence, noise). Changes the sound. */

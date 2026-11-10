@@ -21,6 +21,7 @@ void bt_db_open(const char *root)                /* CALL @0x019F02E0 db2::open(r
     l1_read_test();                              /* after the patches: the checksum of the L1 that runs */
 #endif
     { extern void out_stage_selftest(void); out_stage_selftest(); }   /* docs/81: the L1 output stage vs the model */
+    { extern void eq_stage_selftest(void); eq_stage_selftest(); }     /* docs/81: the L1 master EQ vs the model */
     uint32_t c = op1_cycles();
     ((void (*)(const char *))0x0196F912)(root);
     bt_split[0] = MS(c);

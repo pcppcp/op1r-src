@@ -16,7 +16,12 @@ static inline int32_t subs(int32_t a, int32_t b) { return __builtin_bfin_sub_fr1
 static inline int32_t shls(int32_t a, int n) { return __builtin_bfin_shl_fr1x32(a, n); }
 static inline int32_t mul32(int32_t a, int32_t b) { return __builtin_bfin_mult_fr1x32x32(a, b); }
 static inline int64_t frac16(int16_t a, int16_t b) { return (a == -32768 && b == -32768) ? 0x7FFFFFFF : 2 * (int64_t)a * b; }
-static inline int16_t mulh16(int16_t a, int16_t b) { return __builtin_bfin_mult_fr1x16(a, b); }
+static inline int16_t mulh16(int16_t a, int16_t b)      /* rounded, ties to even (the GCC builtin differs at ties) */
+{
+    int32_t p = __builtin_bfin_mult_fr1x32(a, b), q = p >> 16, r = p & 0xFFFF;
+    if (r > 0x8000 || (r == 0x8000 && (q & 1))) q++;
+    return (int16_t)(q > 32767 ? 32767 : q);
+}
 #else                                                  /* host: the same arithmetic in C */
 static inline int32_t sat32(int64_t v) { return v > 0x7FFFFFFFLL ? 0x7FFFFFFF : v < -0x80000000LL ? (int32_t)0x80000000 : (int32_t)v; }
 static inline int32_t adds(int32_t a, int32_t b) { return sat32((int64_t)a + b); }
