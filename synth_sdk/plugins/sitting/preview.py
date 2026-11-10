@@ -15,7 +15,9 @@ import xml.etree.ElementTree as ET                               # noqa: E402
 STATES = ['idle, blue page 2: SYNC 1 BAR', 'free loop GEN 05, armed for 1 BAR (old loop keeps playing)',
           'synced 1 BAR: recording', 'synced 1 BAR at 120 BPM: GEN 08',
           '2 BARS at 120 BPM (11.025 kHz), golden room: GEN 24', 'free 2.6 s loop GEN 03, blue page 2',
-          '1/16 (1/4 beat), small cube, green page 2 (absorb)', '1/2 (2 beats), bolt, max erosion: GEN 40']
+          '1/16 (1/4 beat), small cube, green page 2 (absorb)', '1/2 (2 beats), bolt, max erosion: GEN 40',
+          'idle at 50 BPM, blue page 2: SYNC 1 BAR LO-FI', 'idle, tape at 25 %: SYNC 1 BAR AS 1/2',
+          'free 7.5 s (11.025 kHz) GEN 01, blue page 2']
 
 
 def main(out=None):

@@ -1,7 +1,7 @@
 /* "in a room" - Alvin Lucier, "I am sitting in a room" (1969/70). Lucier recorded a paragraph of speech, played
  * it back into a room and re-recorded it, again and again, until the words melted into the room's own
- * resonances. Here the room is a model, the tape is a loop in the FX scratch buffer (22.05 kHz, up to 3.9 s,
- * lo-fi on purpose; 11.025 kHz for long tempo-synced loops) and every pass of the loop is one generation:
+ * resonances. Here the room is a model, the tape is a loop in the FX scratch buffer (22.05 kHz, up to 3.8 s,
+ * lo-fi on purpose; 11.025 kHz for longer loops, up to 7.6 s) and every pass of the loop is one generation:
  * playback -> room -> peak-normalise -> written back in place. You hear the loop (wet); the dry signal passes
  * underneath with the mix knob. (Source folder and symbols keep the old name "sitting".)
  *
@@ -13,8 +13,9 @@
  *                                  room share 12 .. 100 % (the rest is the direct sound + early reflections)
  *   knob 3 (orange): mix           dry .. wet (wet = the loop)
  * encoder press:
- *   blue press  -> page 2: loop length of the next capture (params[5]): the first 40 % FREE 0.5 .. 3.9 s, then 6
- *                  tempo-synced lengths: 1/4 BEAT, 1/2 BEAT, 1 BEAT, 2 BEATS, 1 BAR, 2 BARS (4/4)
+ *   blue press  -> page 2: loop length of the next capture (params[5]): the first 40 % FREE 0.5 .. 7.6 s (2.6 s at
+ *                  the default 8100, as before; over 3.8 s at 11.025 kHz), then 6 tempo-synced lengths (screen
+ *                  names): 1/16, 1/8, 1/4, 1/2 (= 1, 2, 4, 8 quarter-beat grid points), 1 BAR, 2 BARS (4/4)
  *   green press -> page 2: absorption, high-frequency loss per generation (none .. one-pole ~1.3 kHz; params[6])
  *   white press -> page 2: crossfade at the loop boundary of the next capture, off .. 93 ms (params[7]): the loop's
  *                  end blends into the input just before its start instead of fading both ends to silence
@@ -30,9 +31,11 @@
  * after exactly `lq` grid points, at the output sample of the grid point - so the loop length follows the clock to
  * the sample and never drifts. While the clock stands still (it follows the tape and the tape is stopped) a copy
  * runs on at the tempo. Bars come from the tape position while the clock follows the tape (as the accent click),
- * else the first synced capture defines beat 1. A loop that does not fit 3.9 s at 22.05 kHz is recorded at
- * 11.025 kHz (7.8 s); one that does not fit that either is halved. Tempo changes while a loop plays: the loop stays
- * on the grid; faster cuts its end (de-clicked), slower leaves a gap of silence before the next start.
+ * else the first synced capture defines beat 1. A loop that does not fit 3.8 s at 22.05 kHz is recorded at
+ * 11.025 kHz (7.6 s, screen: LO-FI); one that does not fit that either is halved (screen: "1 BAR AS 1/2"). Tempo
+ * or tape speed changes while a loop plays: the loop stays on the grid; faster cuts its end (de-clicked); slower
+ * restarts it on the largest power-of-two part of its length that the recording still fills (within sqrt 2, e.g.
+ * every beat for 1 BAR at 25 % tape speed), so a slowdown of less than that leaves a short gap before the next start.
  *
  * Room model (per loop sample): 3 early reflections (round trips across L, W, H, from a small delay line) + 6
  * resonant peaks at the room's axial modes f = n c / 2D (c = 343 m/s; the 6 lowest modes of the three dimensions at
@@ -40,7 +43,8 @@
  * 32-bit state and Q15 coefficients (2 sin(pi f/fs) by a Taylor series, per knob change), stable down to the lowest
  * mode. Then a DC blocker, the absorption low-pass and the normalisation gain, updated per generation from the peaks
  * the last pass read and wrote (see next_generation), so the loop neither explodes nor dies (two divisions per
- * generation). Memory (scratch of this FX position): loop 86016 x int16 + early-reflection line 2048 x int16.
+ * generation). Memory (scratch of this FX position): loop 84096 x int16 + early-reflection line 2048 x int16 +
+ * crossfade pre-roll ring 2048 x int16.
  * Copyright (C) 2026 ultralazr. GPL-3.0-or-later with the OP-1 firmware permission (see LICENSE and NOTICE). */
 #include "op1_plugin.h"
 
@@ -62,7 +66,14 @@
 enum { S_IDLE = 0, S_REC, S_ERODE };
 static const uint8_t sync_lq[NSYNC] = { 1, 2, 4, 8, 16, 32 };   /* length in quarter beats */
 static inline int sync_sel(int32_t w5) { return w5 < FREE_V ? -1 : ((w5 - FREE_V) * 20) >> 16; }   /* 0..5 */
-static inline int32_t free_len(int32_t w5) { int32_t n = NMIN + ((w5 * 46876) >> 13); return n > NMAX ? NMAX : n; }
+/* free length in samples at 22.05 kHz: 0.5 .. 2.6 s (the default, 8100) as before, then steeper up to 7.6 s; longer
+ * than NMAX runs at 11.025 kHz */
+static inline int32_t free_len(int32_t w5)
+{
+    if (w5 <= 8100) return NMIN + ((w5 * 46876) >> 13);
+    int32_t n = 57374 + (((w5 - 8100) * 22664) >> 10);
+    return n > 2 * NMAX ? 2 * NMAX : n;
+}
 
 /* ---------------- room geometry (shared by the audio and the screen thread) ---------------- */
 typedef struct {
@@ -153,6 +164,7 @@ typedef struct {
     int32_t env[NMODE];                /* resonator amplitudes for the screen */
     /* sync */
     int32_t lq, qleft, armed;          /* loop length in quarter beats (0 = free), grid points left, capture armed */
+    int32_t qph;                       /* grid points since the capture start, mod lq (where the loop's bar is) */
     int32_t bp, blen, tape, tbeat;     /* own beat phase, beat length in real time (1/16384 samples), tape, beat no. */
     int32_t qbar;                      /* quarter in the bar 0..15 (-1: unknown) */
     int32_t plen;                      /* expected loop length (loop samples) of the capture: screen */
@@ -222,13 +234,15 @@ static void start_capture(sit_t *s, int pos, int32_t w5, int32_t lq, int32_t w7)
     s->dkv = s->lw; s->dkn = 256;                   /* the old wet level fades out (de-click) */
     s->mode = S_REC; s->i = 0; s->gen = 0; s->cpeak = 0; s->ph = 0; s->pw = s->x = 0; s->erc = 0;
     if (!lq) {
-        s->dsh = 1; s->len = s->plen = free_len(w5); s->fade = FADE; s->fmul = 149;
+        int32_t n = free_len(w5);
+        s->dsh = n > NMAX ? 2 : 1; s->len = s->plen = n >> (s->dsh - 1);
+        s->fade = FADE >> (s->dsh - 1); s->fmul = s->dsh == 1 ? 149 : 297;
     } else {
         int32_t dsh, lout = sync_fit(s->blen, &lq, &dsh);
         int32_t cap = (lout >> dsh) + (lout >> (dsh + 4)) + 64;             /* room for a slower tempo meanwhile */
         s->dsh = dsh; s->len = cap > NMAX ? NMAX : cap; s->plen = lout >> dsh;
         s->fade = SFADE >> (dsh - 1); s->fmul = 32768 / s->fade;
-        s->qleft = lq;
+        s->qleft = lq; s->qph = 0;
     }
     s->lq = lq;
     /* crossfade (white page 2): the loop's end is blended into the input just before its start (pre-roll ring), so
@@ -333,6 +347,7 @@ ALWAYS_INLINE void hot_store(sit_t *s, const hot_t *h)
 {
     s->i = h->i; s->erw = h->erw; s->dcx = h->dcx; s->dcy = h->dcy; s->z = h->z; s->peak = h->pk; s->ipeak = h->ipk;
     s->ba = h->ba; s->cb = h->cb; s->bhi = h->bhi; s->blo = h->blo; s->gk = h->gk; s->gap = h->gap; s->xl = h->xl;
+    s->gmo = h->gmo; s->rso = h->rso;                                        /* a free wrap's ramp spans blocks */
 }
 /* one loop sample: returns the heard sample (generation g) and writes generation g + 1 in its place; a synced
  * loop that ran out before its grid point fades from its last sample (prev) to silence until the grid point */
@@ -578,9 +593,13 @@ static void grid_event(sit_t *s, int pos, int16_t *loop, int16_t *er, int32_t qp
             return;
         }
     }
-    if (!s->lq || --s->qleft > 0) return;
-    s->qleft = s->lq;
+    if (!s->lq) return;
+    s->qph = s->qph + 1 == s->lq ? 0 : s->qph + 1;
+    if (s->qbar >= 0) s->qph = s->lq > 16 ? (s->qph & 16) | s->qbar : s->qbar & (s->lq - 1);   /* the clock's bar */
+    int early = s->mode == S_ERODE && s->gap;                                /* the recording ran out: slower clock */
+    if (--s->qleft > 0 && !early) return;
     if (s->mode == S_REC) {                                                  /* capture complete: exactly lq quarters */
+        s->qleft = s->lq;
         int32_t n = s->i;
         if (n < 64) { for (int32_t k = n; k < 64; k++) loop[k] = 0; n = 64; }   /* (the clock jumped) */
         s->len = s->plen = n;
@@ -591,9 +610,21 @@ static void grid_event(sit_t *s, int pos, int16_t *loop, int16_t *er, int32_t qp
         s->rb = (WB << 16) / n;                                              /* per capture */
         start_erode(s, er);
     } else if (s->mode == S_ERODE) {                                         /* generation: back to the start */
+        /* the clock slowed down (tape speed, tempo): the loop restarts on the largest power-of-two part of its length
+         * that the recording still fills (within sqrt 2), on that part's grid within the bar - so at 25 % tape speed
+         * a 1 BAR loop restarts every beat instead of playing once and then 3 beats of silence. Once the recording
+         * has run out, the restart comes on the next such grid point instead of at the end of the count. */
+        int32_t q = s->blen >> 16, k = s->lq;                               /* q: grid step in output samples */
+        while (k > 1 && k * q * 29 > (s->len << s->dsh) * 41) k >>= 1;
+        if (s->qleft > 0 && (s->qph & (k - 1))) return;                      /* ran out: wait for the part's grid */
+        s->qleft = k - (s->qph & (k - 1));
         bucket_flush(pos, s->cb, s->bhi, s->blo);
-        s->gmo = s->gm; s->rso = s->rs; s->gk = GRAMP;
-        next_generation(s);
+        if (s->i >= s->len >> 3) {                                           /* a tiny pass (realigning, a clock jump)
+                                                                              * is no generation: its peaks would jerk
+                                                                              * the gain */
+            s->gmo = s->gm; s->rso = s->rs; s->gk = GRAMP;
+            next_generation(s);
+        }
         int exact = s->i >= s->len && !s->gap;                              /* the loop ended on the grid point */
         s->gap = 0;
         s->i = 0; s->ph = 0; s->ba = 0; s->cb = 0; s->bhi = s->blo = 0;
@@ -663,7 +694,7 @@ const op1_fx_t FX_sitting = { sit_init, sit_render,
 /* ======================= screen (GUI thread) =======================
  * lucierroom.svg (gen_svg.py, geometry in sitting_geom.h): only the tape lane ends and the knob tracks are static.
  * Drawn here: the generation counter "GEN 07" (stroke font; "REC" while capturing, "GEN --" before the first
- * capture), next to it the loop length (blue: "1 BAR", "1/16", "2.6 SEC") and ARMED / 11K, three info lines (shape in green,
+ * capture), next to it the loop length (blue: "1 BAR", "1/16", "2.6 SEC") and ARMED / LO-FI, three info lines (shape in green,
  * L x W x H in blue, the loudest room mode in white - or the page-2 value being edited), the floor plan L x W (blue,
  * grows with the size knob) with the nodal lines of the active axial modes (L modes vertical, W modes horizontal)
  * lighting up with their resonator, a side section for the height modes, the loop waveform across the lane (min /
@@ -740,7 +771,7 @@ static void sit_screen_update(void *scr, int dt)
         sq_text(r, x, Q(SG_GEN_Y), SG_GEN_S, t, 0x800, mode == S_ERODE ? C_WHITE : C_GREY);
     }
 
-    /* ---- tags: loop length (blue), ARMED (blinking) or 11K ---- */
+    /* ---- tags: loop length (blue), ARMED (blinking) or LO-FI ---- */
     int32_t blen = s->blen > 0 ? s->blen : 22050 << 14;
     if (mode != S_IDLE) {
         put_len(t, s->lq, s->plen, s->dsh);
@@ -750,7 +781,7 @@ static void sit_screen_update(void *scr, int dt)
     }
     if (s->armed) {
         if ((blink >> 8) & 1) sq_text(r, Q(SG_TAG_X), Q(sg_tag_y[1]), SG_TAG_S, "ARMED", 0x500, C_RED);
-    } else if (mode != S_IDLE && s->dsh == 2) sq_text(r, Q(SG_TAG_X), Q(sg_tag_y[1]), SG_TAG_S, "11K", 0x500, C_GREY);
+    } else if (mode != S_IDLE && s->dsh == 2) sq_text(r, Q(SG_TAG_X), Q(sg_tag_y[1]), SG_TAG_S, "LO-FI", 0x500, C_GREY);
 
     /* ---- info lines ---- */
     room_t rm;
@@ -762,13 +793,18 @@ static void sit_screen_update(void *scr, int dt)
     for (int i = 0; i < NMODE; i++) if (s->env[i] > emax) { emax = s->env[i]; kmax = i; }
     const uint8_t *ic = C_WHITE;
     if (pg_blue) {                                                           /* next capture length */
-        if (sel < 0) { p = put_str(t, "LOOP "); put_secs(p, free_len(w5), 22050); }
+        if (sel < 0) {
+            int32_t n = free_len(w5);
+            p = put_str(t, "LOOP "); p = put_secs(p, n, 22050);
+            if (n > NMAX) put_str(p, " LO-FI");                              /* 11.025 kHz */
+        }
         else {
             int32_t lq = sync_lq[sel], dsh;
             sync_fit(blen, &lq, &dsh);
             p = put_str(t, "SYNC "); p = put_str(p, sync_name[sel]);
-            if (lq != sync_lq[sel]) put_str(p, " LONG");                     /* does not fit even at 11.025 kHz */
-            else if (dsh == 2) put_str(p, " 11K");
+            for (int k = 0; k < NSYNC; k++)                                  /* does not fit even at 11.025 kHz: */
+                if (lq != sync_lq[sel] && sync_lq[k] == lq) { p = put_str(p, " AS "); p = put_str(p, sync_name[k]); }   /* "1 BAR AS 1/2" */
+            if (lq == sync_lq[sel] && dsh == 2) put_str(p, " LO-FI");       /* 11.025 kHz */
         }
         ic = C_BLUE;
     } else if (pg_green) {
