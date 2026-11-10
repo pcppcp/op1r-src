@@ -43,9 +43,13 @@ static uint32_t *vbuf;
 #define TICK_BUF      (*(uint32_t *volatile *)0x01D08520)
 #define RASTER_CLEAR  ((void (*)(void *))0x01A23466)
 #define RASTER_TARGET ((void (*)(void *, void *))0x01A23442)
-#define BUF_ROWS      (*(volatile uint32_t *)0xFF8017B4)   /* panel long side: 400 rev 1, 376 rev 2, 320 FE (Opus kit) */
-#define BUF_BYTES     (BUF_ROWS << 9)
-#define BUF_COLS      ((int)BUF_ROWS / 2)                  /* its short side: 200 / 188 / 160 visible of each 256-pixel row */
+/* the panel as the raster object describes it (as kennel's kn_artcache reads it): [1] visible columns (198 on rev 1),
+ * [2] bytes per row (512), [3] rows (400 rev 1, 376 rev 2, 320 FE); taken each frame in gs_frame. Pixel work needs
+ * 512-byte rows and at most 400 rows (the buffers' size), else the normal drawing runs (geom_ok 0). */
+static uint32_t g_rows = 400, g_cols = 198, g_ok;
+#define BUF_ROWS      g_rows
+#define BUF_BYTES     (g_rows << 9)
+#define BUF_COLS      ((int)g_cols)
 
 static int main_ras(const void *ras) { return ras == RASTER + 0x30; }
 #ifdef GS_TILESTAT
@@ -230,7 +234,7 @@ static void render_start(void *raster)
 {
     void *only = 0;
     rg_active = 0;
-    if (rg_scr && rg_n && BUF_ROWS <= 400 && (void *)SCREEN_TABLE[CUR_SCREEN] == rg_scr && visible_screens(&only) == 1 && only == rg_scr
+    if (rg_scr && rg_n && g_ok && (void *)SCREEN_TABLE[CUR_SCREEN] == rg_scr && visible_screens(&only) == 1 && only == rg_scr
         && slot_of(cur_buf) >= 0) {
         if (!rg_prev_active) gen++;               /* the buffers / cache hold another picture */
         rg_active = 1; rg_raster = raster; gs_rg_stat.frames++;
@@ -253,63 +257,64 @@ static void render_start(void *raster)
 }
 
 /* ---- kennel's static SVG prefix (op1_screen_draw_cached, docs/77) ----
- * A screen's SVG tree: the screen's word 0 = the root node; a node: +0x44 / +0x48 its children (vector of node
- * pointers), +0x50 visible, drawn in order (group draw 0x019EB818). The static part = the nodes before first_live in
- * that order (first_live 0: all). It is drawn once into `cache` (visibility switched so only it shows), then each
- * render frame copies the cache into the display buffer and draws the live nodes only. */
+ * The prefix = the root's top-level children before first_live (0: all of them). After Hundekraft's kennel 3.2.2
+ * (kn_artcache.c): a range of children is drawn by a copy of the root's group header with its child vector set to
+ * that range (Group::draw 0x019EB818 reads matrix, children and visibility only; R1 = the document as
+ * Document::draw passes it), so the shared tree is never changed (other threads may look nodes up / set them
+ * meanwhile). The prefix is drawn once into `cache`, then each render frame copies the cache into the frame's
+ * target buffer and draws the rest of the children. After a build the document's raster chunks are released
+ * (its reset, vtable +0x7c, as on a screen change): the cache owns those pixels now. Falls back to the normal
+ * draw when first_live is not a top-level child, the document's draw is not the known forwarder 0x01976560, or the
+ * panel is not one we can copy. Ours: raw copy instead of kennel's run-length records, any panel size. */
 #define SCREEN_DRAW ((void (*)(void *, int))0x01A3B4C8)
-static uint8_t *vis_node[256], vis_old[256];
-static int vis_n;
-static void vis_set(uint8_t *n, int on) { if (vis_n < 256) { vis_node[vis_n] = n; vis_old[vis_n++] = n[0x50]; } n[0x50] = (uint8_t)on; }
-static void vis_restore(void) { while (vis_n) { vis_n--; vis_node[vis_n][0x50] = vis_old[vis_n]; } }
-static int contains(uint8_t *n, const uint8_t *fl)
+#define GROUP_DRAW  ((void (*)(void *, void *, const void *, void *))0x019EB818)
+static void draw_range(void *doc, void **begin, void **end)
 {
-    if (n == fl) return 1;
-    for (uint8_t **c = *(uint8_t ***)(n + 0x44), **e = *(uint8_t ***)(n + 0x48); c < e; c++) if (contains(*c, fl)) return 1;
-    return 0;
+    uint32_t copy[0x58 / 4];
+    for (unsigned i = 0; i < 0x58 / 4; i++) copy[i] = ((const uint32_t *)doc)[i];
+    copy[0x44 / 4] = (uint32_t)(uintptr_t)begin; copy[0x48 / 4] = (uint32_t)(uintptr_t)end;
+    GROUP_DRAW(copy, doc, (const void *)0x01B60FD8, *(void *volatile *)0x01DF4E34);   /* identity, the raster */
 }
-static void hide_live(uint8_t *n, const uint8_t *fl, int *reached)   /* static pass: hide fl and all after it */
+static void doc_reset(void *doc)
 {
-    if (*reached || n == fl) { *reached = 1; vis_set(n, 0); return; }
-    for (uint8_t **c = *(uint8_t ***)(n + 0x44), **e = *(uint8_t ***)(n + 0x48); c < e; c++) hide_live(*c, fl, reached);
-}
-static void hide_static(uint8_t *n, const uint8_t *fl)               /* live pass: hide whatever lies before fl */
-{
-    for (uint8_t **c = *(uint8_t ***)(n + 0x44), **e = *(uint8_t ***)(n + 0x48); c < e; c++) {
-        if (*c == fl) return;                    /* fl and everything after it stay */
-        if (contains(*c, fl)) { hide_static(*c, fl); return; }
-        vis_set(*c, 0);
-    }
+    uint8_t *v = *(uint8_t **)((uint8_t *)doc + 0x54);
+    ((void (*)(void *))*(void **)(v + 0x7C))((uint8_t *)doc + *(int16_t *)(v + 0x78));
 }
 static void *dc_fl, *dc_raster;
 static uint32_t dc_gen;
-struct { uint32_t calls, builds, copies; } gs_dc_stat;
+struct { uint32_t calls, builds, copies, fallbacks; } gs_dc_stat;
 void op1_screen_draw_cached_fn(void *scr, int dt, void *first_live)
 {
-    uint8_t *root = scr ? *(uint8_t **)scr : 0;
+    uint8_t *doc = scr ? *(uint8_t **)scr : 0;
 #if defined(GS_ON) && !defined(GS_NOCACHE)
-    if (root && !rg_active && dc_raster && tgt_buf && BUF_ROWS <= 400) {
-        gs_dc_stat.calls++;
-        if (!recording) {
-            if (dc_scr != scr || dc_fl != first_live || dc_gen != gen) {   /* the static picture into the cache */
-                int reached = 0;
-                if (first_live) hide_live(root, first_live, &reached);
-                no_hash = 1;
-                RASTER_TARGET(dc_raster, cache); RASTER_CLEAR(dc_raster);
-                SCREEN_DRAW(scr, dt);
-                RASTER_TARGET(dc_raster, tgt_buf);
-                no_hash = 0;
-                vis_restore();
-                dc_scr = scr; dc_fl = first_live; dc_gen = gen; cache_gen = 0;   /* the regions' cache is gone */
-                gs_dc_stat.builds++;
+    if (doc && !rg_active && dc_raster && tgt_buf && g_ok && *(volatile uint32_t *)0x01B60FFC) {
+        const uint8_t *vt = *(uint8_t *const *)(doc + 0x54);
+        void **begin = *(void ***)(doc + 0x44), **end = *(void ***)(doc + 0x48), **stop = end;
+        int ok = *(const uint32_t *)(vt + 0x14) == 0x01976560u && *(const int16_t *)(vt + 0x10) == 0 && end - begin <= 1024;
+        if (ok && first_live) { for (stop = begin; stop < end && *stop != first_live; stop++) ; ok = stop < end; }
+        if (ok && stop > begin) {
+            gs_dc_stat.calls++;
+            if (!recording) {
+                if (dc_scr != scr || dc_fl != first_live || dc_gen != gen) {   /* the static picture into the cache */
+                    no_hash = 1;
+                    RASTER_TARGET(dc_raster, cache); RASTER_CLEAR(dc_raster);
+                    draw_range(doc, begin, stop);
+                    RASTER_TARGET(dc_raster, tgt_buf);
+                    no_hash = 0;
+                    doc_reset(doc);
+                    dc_scr = scr; dc_fl = first_live; dc_gen = gen; cache_gen = 0;   /* the regions' cache is gone */
+                    gs_dc_stat.builds++;
+                }
+                copy_rows((uint8_t *)tgt_buf, cache, 0, (int)BUF_ROWS - 1, 0, BUF_COLS - 1);
+                gs_dc_stat.copies++;
             }
-            copy_rows((uint8_t *)tgt_buf, cache, 0, (int)BUF_ROWS - 1, 0, BUF_COLS - 1);
-            gs_dc_stat.copies++;
+            if (stop < end) draw_range(doc, stop, end);                         /* the live children */
+            return;
         }
-        if (first_live) { hide_static(root, first_live); SCREEN_DRAW(scr, dt); vis_restore(); }   /* the live nodes */
-        return;
+        gs_dc_stat.fallbacks++;
     }
 #endif
+    (void)dt;
     SCREEN_DRAW(scr, dt);
 }
 
@@ -317,6 +322,9 @@ static int slot_of(const uint32_t *b) { if (buf_id[0] == b) return 0; if (buf_id
 void gs_frame(void *raster)                    /* CALL Raster::clear in Screen::frame (0x01A3BBE0): a new frame */
 {
     dc_raster = raster;
+    {   const uint32_t *r = raster;
+        g_ok = r[2] == 512 && r[3] >= 64 && r[3] <= 400 && r[1] >= 32 && r[1] <= 256;
+        if (g_ok) { g_rows = r[3]; g_cols = r[1]; } }
     /* the frame just drawn */
     uint32_t h = fh; fh = 0x811C9DC5u; no_hash = 0;
 #ifdef GS_TILESTAT
@@ -348,7 +356,7 @@ void gs_frame(void *raster)                    /* CALL Raster::clear in Screen::
     }
     gs_stat.ticks++;
     int rec = !force && buf_id[1] && hash_buf[0] == last && hash_buf[1] == last && slot_of(cur_buf) >= 0
-              && BUF_BYTES <= sizeof scratch;
+              && g_ok;
     if (force) force--;
     if (gs_off) rec = 0;
     recording = (uint8_t)rec; prev_rec = (uint8_t)rec; prev_buf = cur_buf;
