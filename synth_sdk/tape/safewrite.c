@@ -129,5 +129,8 @@ int tape_service(int arg)
             return 1;
         }
     }
+#ifndef OP1_HOST
+    if (!arg) { extern int tm_service(void); return tm_service(); }   /* the free tape machine's chunks (tape/tm.c) */
+#endif
     return 0;
 }

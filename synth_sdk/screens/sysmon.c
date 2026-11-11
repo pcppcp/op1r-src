@@ -404,6 +404,14 @@ static void sm_update(void *scr, int dt)
         } else if (sm_page == PG_BOOTD && l1rd[0]) {         /* diagnostic OP1R_L1READ: "9/10 l1 3c076007 1ad735c6" */
             q = put_s(q, "l1");
             for (int k = 1; k < 3; k++) { *q++ = ' '; for (int s = 28; s >= 0; s -= 4) *q++ = hx[(l1rd[k] >> s) & 15]; }
+#ifdef SPK_DIAG
+        } else if (sm_page == PG_BOOTD) {                    /* OP1R_SPKDIAG=1: "9/10 e8 0 e9 1 1d 0 a6 2a" (speaker amp state) */
+            static const char hx2[] = "0123456789abcdef";
+            const uint8_t v[4] = { *(volatile uint8_t *)0xFF9004E8, *(volatile uint8_t *)0xFF9004E9,
+                                   *(volatile uint8_t *)0x018B621D, *(volatile uint8_t *)0x01BAA6E9 };
+            static const char *const nm[4] = { "e8 ", " e9 ", " 1d ", " a6 " };
+            for (int k = 0; k < 4; k++) { q = put_s(q, nm[k]); *q++ = hx2[v[k] >> 4]; *q++ = hx2[v[k] & 15]; }
+#endif
 #ifdef TAPE_IO
         } else if (sm_page == PG_BOOTD) {                    /* OP1R_TAPEIO=1: "9/10 r 12.3 40.1 w 20.2 60.3 n 37" (ms per 64 KB) */
             extern volatile uint32_t ts_io[6];
