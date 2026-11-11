@@ -4,8 +4,8 @@
  *   and "rev" (red); middle: a window of +-8 s around its own head (fixed in the middle), clips blue, its loop green;
  *   bottom: the four tracks as thin lanes around their own heads, the active one's clips blue, the others grey.
  * Keys (consumed on this screen): T1..T4 select; s1 / s2 / s3 (0x2D / 0x2E / 0x2F) set the active track's loop in /
- * out at its head and toggle it (out also switches it on), as stock does for the global loop. Knobs: blue speed
- * (ratios; Shift: fine), red direction; green / white stay R246's. Every other key stays R246's.
+ * out at its head and toggle it (out also switches it on), as stock does for the global loop. Knobs: white speed
+ * (ratios; Shift: fine), red direction; blue / green stay R246's. Every other key stays R246's.
  * Text in the stock font (op1_text_*, lowercase); lines with Raster::line. Clips from db2::Clips (0x01AA8D70:
  * 512 x { track, start, stop } in samples, used flags at + 0x1800).
  * Swap like the MIDI sequencer view (seqdev/ms_fw.c): an iter-class screen object (empty usbout.svg) in the tape
@@ -80,12 +80,14 @@ static void txt(void *r, int i, const char *s)
     if (!same) { op1_text_set(tx[i], s); int j = 0; for (; j < 15 && s[j]; j++) shown[i][j] = s[j]; shown[i][j] = 0; }
     op1_text_draw(tx[i], r, ident);
 }
+#define TXT_CTOR(o, x, y, sz, c, a) (((void *(*)(void *, int32_t, int32_t, int32_t, const uint8_t *, int32_t))0x01A61904)( \
+                                    (o), (x), (y), (sz), (c), (a)))   /* align: 0 left, 1 centred, 2 right */
 static void make(void)
 {
-    op1_text_ctor(tx[T_NUM], OP1_Q10(11), 7, 20, c_white);
-    op1_text_ctor(tx[T_TIME], OP1_Q10(112), 6, 24, c_white);
-    op1_text_ctor(tx[T_SPEED], OP1_Q10(272), 6, 12, c_blue);
-    op1_text_ctor(tx[T_REV], OP1_Q10(290), 20, 12, c_red);
+    TXT_CTOR(tx[T_NUM], OP1_Q10(13), 4, 12, c_white, 1);       /* as the MIDI sequencer view's track square */
+    TXT_CTOR(tx[T_TIME], OP1_Q10(160), 4, 20, c_white, 1);
+    TXT_CTOR(tx[T_SPEED], OP1_Q10(315), 4, 12, c_white, 2);
+    TXT_CTOR(tx[T_REV], OP1_Q10(315), 18, 12, c_red, 2);
     made = 1;
 }
 
@@ -104,7 +106,7 @@ static void lane(void *r, int t, int32_t y, int32_t x0, int32_t x1, int32_t head
     }
     const int lp = tm_tr[t].lon && tm_tr[t].lout > tm_tr[t].lin;
     if (lp || tm_tr[t].lset) {                                   /* loop in (also set but off): a line, a circle on top */
-        const int32_t a = XOF(tm_tr[t].lin), h = thick / 2 + OP1_Q10(big ? 3 : 2), g = 0x4CC;
+        const int32_t a = XOF(tm_tr[t].lin), h = thick / 2 + OP1_Q10(big ? 3 : 2), g = big ? 0x800 : 0x4CC;
         const uint8_t *c = on ? c_green : c_dgreen;
         if (a >= x0 && a <= x1) {
             ln(r, a, y - h, a, y + h, g, c);
@@ -135,8 +137,8 @@ static void tfs_update(void *scr, int dt)
     const int32_t head = tm_head_pos(sel) < 0 ? 0 : tm_head_pos(sel);
     const int rev = tm_tr[sel].speed < 0;
     /* boxed track number */
-    ln(r, OP1_Q10(6), OP1_Q10(5), OP1_Q10(28), OP1_Q10(5), 0x4CC, c_white); ln(r, OP1_Q10(28), OP1_Q10(5), OP1_Q10(28), OP1_Q10(27), 0x4CC, c_white);
-    ln(r, OP1_Q10(28), OP1_Q10(27), OP1_Q10(6), OP1_Q10(27), 0x4CC, c_white); ln(r, OP1_Q10(6), OP1_Q10(27), OP1_Q10(6), OP1_Q10(5), 0x4CC, c_white);
+    ln(r, OP1_Q10(3), OP1_Q10(1), OP1_Q10(23), OP1_Q10(1), 0x500, c_white); ln(r, OP1_Q10(23), OP1_Q10(1), OP1_Q10(23), OP1_Q10(21), 0x500, c_white);
+    ln(r, OP1_Q10(23), OP1_Q10(21), OP1_Q10(3), OP1_Q10(21), 0x500, c_white); ln(r, OP1_Q10(3), OP1_Q10(21), OP1_Q10(3), OP1_Q10(1), 0x500, c_white);
     char b[16]; b[0] = (char)('1' + sel); b[1] = 0; txt(r, T_NUM, b);
     const uint32_t sec = (uint32_t)head / SR;
     char *q = put_u(b, sec / 3600, 1); *q++ = ':'; q = put_u(q, sec / 60 % 60, 2); *q++ = ':'; put_u(q, sec % 60, 2);
@@ -149,7 +151,7 @@ static void tfs_update(void *scr, int dt)
         const int64_t a = (int64_t)(head - 8 * SR) << 8, b = (int64_t)(head + 8 * SR) << 8;
         for (int64_t k = a <= 0 ? 0 : (a + bar_q8 - 1) / bar_q8; k * bar_q8 <= b && k < 4096; k++) {
             const int32_t x = OP1_Q10(160) + (int32_t)(((k * bar_q8 >> 8) - head) * OP1_Q10(150) / (8 * SR));
-            ln(r, x, OP1_Q10(76), x, OP1_Q10(80), 0x400, c_grey);
+            ln(r, x, OP1_Q10(76), x, OP1_Q10(82), 0x800, c_grey);
         }
     }
     lane(r, sel, OP1_Q10(68), OP1_Q10(10), OP1_Q10(310), head, 8, OP1_Q10(9), 1, 1);
@@ -206,7 +208,8 @@ void tfs_poll(void)                                              /* main loop, e
     if (tm_on && !tfs_in && CUR_MODE_ID == 2) tfs_set(1);
     else if (!tm_on && tfs_in) tfs_set(0);
     extern volatile int8_t tm_scrub; extern int tm_scrubbing(void);
-    tm_scrub = wind;                                             /* the engine plays the tracks at up to 8x (audible) */
+    extern volatile uint8_t tm_scrub_track; tm_scrub_track = sel;
+    tm_scrub = wind;                                             /* the engine plays the active track at up to 8x (audible) */
     if (!wind && !tm_scrubbing()) return;
     const uint32_t t = now();
     if (t - wind_t < 8000000u) return;                           /* every 20 ms the transport follows the active head */
@@ -258,7 +261,7 @@ int tfs_knob(int knob, int delta)                                /* key thread: 
 {
     if (!shown_now() || knob < 0 || knob > 7) return 0;
     const int k = knob & 3, fine = knob > 3 || SHIFT;
-    if (k != 0 && k != 3) return 0;                              /* green / white: R246's */
+    if (k != 2 && k != 3) return 0;                              /* blue / green: R246's */
     volatile tm_track *tr = &tm_tr[sel];
     if (k == 3) {                                                /* red: direction; Shift + red: op1r's marker jump */
         if (fine) return 0;
@@ -267,9 +270,9 @@ int tfs_knob(int knob, int delta)                                /* key thread: 
     }
     const int neg = tr->speed < 0;
     int32_t sp = neg ? -tr->speed : tr->speed;
-    if (fine) { const int st = step_of(4, delta, 512); if (!st) return 1;
+    if (fine) { const int st = step_of(6, delta, 512); if (!st) return 1;
         sp += st * (sp >> 7); if (sp < 0x2000) sp = 0x2000; if (sp > 0x40000) sp = 0x40000; }
-    else { const int st = step_of(0, delta, 2048); if (!st) return 1;
+    else { const int st = step_of(2, delta, 2048); if (!st) return 1;
         int i = 0; while (i < NR - 1 && ratios[i] < sp) i++;    /* nearest ratio at or above */
         if (ratios[i] != sp && st < 0) i++;
         i += st; i = i < 0 ? 0 : i >= NR ? NR - 1 : i; sp = ratios[i]; }

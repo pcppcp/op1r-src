@@ -65,6 +65,7 @@ static int32_t last_pos = -1;
 static uint32_t blk;
 static uint8_t rec_seen;
 volatile int8_t tm_scrub;                                        /* -1 / +1: < / > held on our screen (tfscreen.c) */
+volatile uint8_t tm_scrub_track;                                 /* the active track: only it scrubs (and sounds) */
 static int32_t scrub_v;                                          /* current scrub speed, Q16 (ramps to +-8x) */
 int tm_scrubbing(void) { return scrub_v != 0; }
 volatile uint32_t tm_miss, tm_loads;
@@ -120,13 +121,14 @@ static void tm_resync(int32_t pos)
     }
 }
 
-/* scrubbing: every head at scrub_v (no loops), the tracks mixed as in play (R246's player is stopped or winding) */
+/* scrubbing: the active track's head at scrub_v (no loops), only it sounds; the others keep their heads */
 static void tm_scrub_block(void)
 {
     int32_t accL[64], accR[64];
     for (int i = 0; i < 64; i++) accL[i] = accR[i] = 0;
     const int64_t step = (int64_t)scrub_v << 16;
-    for (int t = 0; t < 4; t++) {
+    {
+        const int t = tm_scrub_track & 3;
         int64_t h = head[t];
         const int16_t gl = GAIN_L(t), gr = GAIN_R(t);
         const int16_t *cache = 0; int32_t cache_c = -1;
