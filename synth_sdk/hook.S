@@ -385,6 +385,11 @@ _l1_rs_probe:
 _mix_hook_fwd:                                /* loop 1 @0xFFA0709C: src P4, dest P3, track R1 */
 	R0 = MAX (R2, R0) (V);
 	[--SP] = P0; [--SP] = P5; [--SP] = R7; [--SP] = R6;
+	P0 = [SP + 16];                           /* the loop's P1: track gains (L, R at + 8) -> tm_g (tape/tm.c, docs/82) */
+	R6 = W[P0] (X); R7 = W[P0 + 8] (X);
+	P0 = R1; P0 = P0 << 1;
+	P5.L = _tm_g; P5.H = _tm_g; P5 = P5 + P0;
+	W[P5] = R6; W[P5 + 8] = R7;
 	R6 = P4; R7 = P3;
 	[--SP] = R1;
 	jump.s _mix_rec_common;
@@ -393,6 +398,11 @@ _mix_hook_fwd:                                /* loop 1 @0xFFA0709C: src P4, des
 _mix_hook_rev:                                /* loop 2 @0xFFA0712C: src P1 (+2), dest I1, track R3 */
 	R0 = MAX (R0, R1) (V);
 	[--SP] = P0; [--SP] = P5; [--SP] = R7; [--SP] = R6;   /* 16 bytes: the trampoline's saved P1 is now at SP + 16 */
+	P0 = [SP + 12];                           /* the loop's P0: track gains (L, R at + 8) -> tm_g */
+	R6 = W[P0] (X); R7 = W[P0 + 8] (X);
+	P0 = R3; P0 = P0 << 1;
+	P5.L = _tm_g; P5.H = _tm_g; P5 = P5 + P0;
+	W[P5] = R6; W[P5 + 8] = R7;
 	R6 = [SP + 16];                           /* the loop's P1: pushed by the trampoline (P1 = hook address here) */
 	R6 += 2; R7 = I1;
 	[--SP] = R3;

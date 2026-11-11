@@ -7,7 +7,7 @@
  * Heads: Q32.32 samples. With R246's loop on, track t loops in [Ls + off_t L, + loop_t L) of the global loop
  * [Ls, Le) (L = Le - Ls); without it the heads run free from the transport position. Each block every head moves
  * by the transport speed x the track's speed; a locate or a (re)start resyncs them to the transport.
- * Mix: linear interpolation, R246's per-track gains (L 0xFF802998 + 2t, R 0xFF8029A0 + 2t), saturating sums.
+ * Mix: linear interpolation, R246's per-block track gains (tm_g, from its mix loops), saturating sums.
  * shortcut: v1 has no output filter / start-stop ramp of R246's player and linear interpolation only; upgrade
  * (R246's tail filter, a better interpolator) once the engine is confirmed on the device. */
 #include <stdint.h>
@@ -52,8 +52,11 @@ extern int host_tm_read(int t, int chunk, int16_t *dst);         /* fills 64 KB,
 #define MODE       (*(volatile int32_t *)(X + 0x00))             /* 0 stop, 1 rec, 2 play, 3 wind */
 #define TSPEED     (*(volatile int32_t *)(X + 0x08))             /* 1x = 0x08000000 (emulator: 64 samples per block); winding 0x40000000 = 8x */
 #define TPOS       (*(volatile int32_t *)(X + 0x14))             /* samples << 6 */
-#define GAIN_L(t)  (((volatile int16_t *)(X + 0x38))[t])
-#define GAIN_R(t)  (((volatile int16_t *)(X + 0x40))[t])
+/* R246's per-block track gains (a stack array in tape_play_mix: L[4], R[4]), copied by op1r's mix-loop hooks (hook.S
+ * mix_hook_fwd / rev); X + 0x38 / 0x40 are only inputs to that computation (docs/82) */
+volatile int16_t tm_g[8] = { 32767, 32767, 32767, 32767, 32767, 32767, 32767, 32767 };
+#define GAIN_L(t)  (tm_g[t])
+#define GAIN_R(t)  (tm_g[4 + (t)])
 
 typedef struct { int16_t *data; volatile int16_t t, chunk; volatile uint8_t state; volatile uint8_t gen; uint32_t used; } tm_slot;
 static tm_slot slot[TM_SLOTS];                                   /* state 0 free, 1 wanted, 2 loaded */

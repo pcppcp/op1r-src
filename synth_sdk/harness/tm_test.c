@@ -14,8 +14,8 @@ int host_tm_read(int t, int c, int16_t *dst) { for (int k = 0; k < 0x8000; k++) 
 #include "../tape/tm.c"
 
 #define SET32(o, v) (*(int32_t *)(host_tm_xport + (o)) = (v))
-#define GL(t) (((int16_t *)(host_tm_xport + 0x38))[t])
-#define GR(t) (((int16_t *)(host_tm_xport + 0x40))[t])
+#define GL(t) (tm_g[t])
+#define GR(t) (tm_g[4 + (t)])
 
 static void run(int32_t start, int blocks, int pos_step)          /* pos_step: transport samples per block */
 {
@@ -30,7 +30,8 @@ int main(void)
 {
     tm_on = 1;
     SET32(0x00, 2); SET32(0x08, 0x08000000);
-    memset(host_tm_xport + 0x38, 0, 16); GL(0) = 0x7FFF; GR(0) = 0x7FFF;
+    for (int k = 0; k < 8; k++) tm_g[k] = 0;
+    GL(0) = 0x7FFF; GR(0) = 0x7FFF;
     tm_service();                                                 /* allocates */
     run(100000, 8, 64);                                           /* 1x, track 1: warms the cache */
     SET32(0x14, (100000 + 8 * 64) << 6); tm_block();
