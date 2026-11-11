@@ -63,6 +63,8 @@ typedef struct {
 } du_session;
 #define DU_STAGE_DIR  "/yaffs2/op1r_stage"
 #define DU_MANIFEST   "/yaffs2/op1r_stage/manifest"
+#define DU_TRIES      "/yaffs2/op1r_stage/tries"   /* boot: apply attempts of this manifest (a failing one is not run forever) */
+#define DU_MAX_LDR    (4u << 20)            /* OP1_vdk.ldr is read whole into heap 0 at boot (real ~2.4 MiB, heap 0 16 MiB) */
 
 void du_init(du_session *s, const du_fs *fs);
 void du_abort(du_session *s);                                     /* drop the session + whole staging dir */

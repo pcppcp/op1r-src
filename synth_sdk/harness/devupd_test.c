@@ -197,6 +197,9 @@ int main(int argc, char **argv)
     begin(&s, "te-boot.ldr", data, 10, DU_E_PATH);
     begin(&s, "content/te-boot.op1", data, 10, DU_E_PATH);
     begin(&s, "OP1_vdk.ldr", data, 128u * DU_BLOCK, DU_E_SIZE);
+    begin(&s, "OP1_vdk.ldr", data, DU_MAX_LDR + 1, DU_E_SIZE);     /* read whole into RAM at boot: bounded */
+    begin(&s, "content/big.bin", data, DU_MAX_LDR + 1, DU_OK);     /* content files are copied in pieces */
+    send(&s, DU_ABORT, 4, 0, 0, DU_OK);
     send(&s, DU_COMMIT, 4, 0, 0, DU_E_STATE);                       /* nothing staged */
     put_file(&s, "content/display/a.svg", data, 5000);
     begin(&s, "content/display/a.svg", data, 5000, DU_E_STATE);    /* same path twice */
@@ -208,7 +211,9 @@ int main(int argc, char **argv)
     send(&s, DU_END, 8, 0, 0, DU_E_CRC);                           /* CRC catches it, staged file removed */
     put_file(&s, "OP1_vdk.ldr", data, 1000);
     key_ok = 0; send(&s, DU_COMMIT, 9, 0, 0, DU_WAIT_KEY); assert(reboots == 0);
+    f_open(0, DU_TRIES); f_write(0, (const uint8_t *)"\2", 1); f_close(0);   /* attempts of an older manifest */
     key_ok = 1; send(&s, DU_COMMIT, 10, 0, 0, DU_OK); assert(reboots == 1);
+    assert(find(DU_TRIES) < 0);                                    /* a new manifest starts from 0 */
     int mi = find(DU_MANIFEST); assert(mi >= 0);
     char text[4096]; memcpy(text, fsf[mi].data, fsf[mi].size); text[fsf[mi].size] = 0;
     du_file mf[DU_MAX_FILES]; int mn;
@@ -216,7 +221,16 @@ int main(int argc, char **argv)
            mf[1].size == 1000 && mf[1].crc == du_crc32(0, data, 1000));
     char name[40]; du_stage_name(1, name); assert(find(name) >= 0 && fsf[find(name)].size == 1000);
     text[20] ^= 1; assert(du_manifest_parse(text, mf, &mn) != 0);  /* any change breaks the manifest checksum */
-    send(&s, DU_ABORT, 11, 0, 0, DU_OK); assert(nfiles() == 0);
+    {   /* sizes in the manifest: OP1_vdk.ldr at most DU_MAX_LDR, content files up to the old bound */
+        du_session t; t.n = 1; snprintf(t.f[0].path, DU_MAX_PATH, "OP1_vdk.ldr"); t.f[0].crc = 0;
+        char mt[256];
+        t.f[0].size = DU_MAX_LDR; assert(du_manifest_write(&t, mt, sizeof mt) > 0 && du_manifest_parse(mt, mf, &mn) == 0);
+        t.f[0].size = DU_MAX_LDR + 1; assert(du_manifest_write(&t, mt, sizeof mt) > 0 && du_manifest_parse(mt, mf, &mn) != 0);
+        snprintf(t.f[0].path, DU_MAX_PATH, "content/big.bin");
+        assert(du_manifest_write(&t, mt, sizeof mt) > 0 && du_manifest_parse(mt, mf, &mn) == 0);
+    }
+    f_open(0, DU_TRIES); f_write(0, (const uint8_t *)"\1", 1); f_close(0);
+    send(&s, DU_ABORT, 11, 0, 0, DU_OK); assert(nfiles() == 0);   /* (the attempt counter too) */
     printf("session: refusals, offsets, CRC, key prompt, manifest, abort ok\n");
 
     {   /* LIST + DELETE (protocol 3, docs/37) */

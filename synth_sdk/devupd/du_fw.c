@@ -1,8 +1,10 @@
 /* Development update, firmware side: apply phase at boot (docs/35). Built always, hooked only with
  * make_firmware.py --dev: the boot's CALL access("/yaffs2/te-boot.op1") (0x019F01B8, after mount_yaffs, before USB /
  * audio / GUI = single-threaded) goes to du_boot_access, which applies a staged update first.
- * Apply: manifest valid -> every staged file's size + CRC checked (any failure: staging removed, nothing applied)
- * -> content files copied to their final paths -> OP1_vdk.ldr flashed to the boot area from block 4 with the stock
+ * Apply: manifest valid -> every staged file's size + CRC checked, OP1_vdk.ldr read into RAM and checked, free space
+ * for the content files probed, the attempt counted (any failure: staging removed, nothing applied) -> content files
+ * copied to their final paths (a failure keeps the staging: tried again at the next boot, DU_TRIES_MAX attempts in
+ * all) -> OP1_vdk.ldr flashed to the boot area from block 4 with the stock
  * primitives in the stock order (erase 4..131 = 0x019EABB4, write_boot_block per block), every block number passing
  * du_guard (logical and physical after the bad-block mapping) -> staging removed -> "restart" (as the stock updater).
  * Never called: 0x019EAC08 (erases te-boot), flash_te_boot; paths with te-boot are refused by du_path_ok. */
@@ -19,8 +21,8 @@
 #define Y_MKDIR   ((int (*)(const char *, int))0x01A9A886)   /* entry: P0 = R0 (path); 0x01A9A888 skips it */
 #define O_READ    0
 #define O_CREATE  0x241                                           /* O_WRONLY | O_CREAT | O_TRUNC (as the firmware) */
-#define NEW_ARR   ((void *(*)(unsigned))0x01AA370C)
-#define DEL_ARR   ((void (*)(void *))0x01AA2B04)
+#define MALLOC    ((void *(*)(unsigned))0x01A9F348)              /* heap 0, 0 if it does not fit (as plugload.c) */
+#define FREE      ((void (*)(void *))0x01AA0040)
 #define CONSOLE   ((void (*)(const char *))0x019D2BF0)            /* boot console line (the stock updater's) */
 #define NAND_WAIT ((void (*)(void))0x01A5E454)                    /* as flash_firmware 0x019A1B48 */
 #define NAND_LOCK ((void (*)(int))0x019E9DE4)
@@ -47,7 +49,7 @@ int du_fw_flash(const uint8_t *ldr, uint32_t size)
     uint32_t tail = size - (uint32_t)(nb - 1) * DU_BLOCK;
     int need = nb + (DU_BLOCK - tail < 0x100 ? 1 : 0);
     if (!du_guard(DU_FIRST_BLOCK + need - 1)) return DU_F_NOSPACE;
-    uint8_t *last = NEW_ARR(DU_BLOCK);
+    uint8_t *last = MALLOC(DU_BLOCK);
     if (!last) return DU_F_WRITE;
     NAND_WAIT(); NAND_LOCK(0); NAND_ERASE_MAIN(); NAND_LOCK(1);
     int r = DU_F_OK;
@@ -64,7 +66,7 @@ int du_fw_flash(const uint8_t *ldr, uint32_t size)
         if (NAND_WRITE_BLOCK(lb, src)) r = DU_F_WRITE;            /* (writes, reads back, retries itself) */
         NAND_LOCK(1);
     }
-    DEL_ARR(last);
+    FREE(last);
     return r;
 }
 
@@ -106,15 +108,55 @@ static int copy_file(const char *src, const char *final_rel)
     return ok;
 }
 
+#define DU_PROBE     DU_STAGE_DIR "/probe"
+#define DU_TRIES_MAX 2
 static void cleanup(void)
 {
     char name[40];
     for (int i = 0; i <= DU_MAX_FILES; i++) { du_stage_name(i, name); Y_UNLINK(name); }
-    Y_UNLINK(DU_MANIFEST);
+    Y_UNLINK(DU_MANIFEST); Y_UNLINK(DU_TRIES); Y_UNLINK(DU_PROBE);
 }
+
+static int room(uint32_t need)                                    /* 1: need more bytes fit (written once, removed) */
+{
+    int fd = Y_OPEN(DU_PROBE, O_CREATE, 0x180), ok = fd >= 0;
+    for (uint32_t k = 0; ok && k < need; k += sizeof io) ok = Y_WRITE(fd, io, sizeof io) == (int)sizeof io;
+    if (fd >= 0) Y_CLOSE(fd);
+    Y_UNLINK(DU_PROBE);
+    return ok;
+}
+
+static int tries(void)                                            /* attempts of this manifest so far */
+{
+    uint8_t n = 0;
+    int fd = Y_OPEN(DU_TRIES, O_READ, 0x100);
+    if (fd >= 0) { if (Y_READ(fd, &n, 1) != 1) n = DU_TRIES_MAX; Y_CLOSE(fd); }
+    return n;
+}
+
+static int f_stat(void *c, const char *rel, uint32_t *size);
 
 static du_session sess;
 volatile int du_fw_result = -1;                                   /* last apply: 0 ok, else step (emulator tests) */
+
+static uint8_t *read_ldr(const char *name, uint32_t size, uint32_t crc)   /* whole, checked; 0 on any failure */
+{
+    uint8_t *buf = MALLOC(size);                                   /* (size <= DU_MAX_LDR: du_manifest_parse) */
+    if (!buf) return 0;
+    int fd = Y_OPEN(name, O_READ, 0x100);
+    uint32_t got = 0;
+    if (fd >= 0) {
+        for (;;) {
+            int k = Y_READ(fd, buf + got, size - got > 65536 ? 65536 : size - got);
+            if (k <= 0) break;
+            got += (uint32_t)k;
+        }
+        Y_CLOSE(fd);
+    }
+    if (got == size && du_crc32(0, buf, got) == crc && du_ldr_ok(buf, got)) return buf;
+    FREE(buf);
+    return 0;
+}
 
 static int apply(void)
 {
@@ -128,14 +170,29 @@ static int apply(void)
     text[n] = 0;
     int nf;
     if (du_manifest_parse(text, f, &nf)) return 3;
+    int t = tries();
+    if (t >= DU_TRIES_MAX) return 4;                               /* failed (or crashed) every time: give up */
     char name[40];
     int ldr = -1;
+    uint32_t grow = 0;
     for (int i = 0; i < nf; i++) {                                 /* everything checked before anything changes */
         du_stage_name(i, name);
         if (f[i].size != DU_DEL_SIZE && !file_crc(name, f[i].size, f[i].crc)) return 10 + i;
-        if (f[i].path[0] == 'O') ldr = i;                          /* (du_path_ok: "OP1_vdk.ldr" or "content/...") */
+        if (f[i].path[0] == 'O') { ldr = i; continue; }            /* (du_path_ok: "OP1_vdk.ldr" or "content/...") */
+        uint32_t old = 0;
+        if (f[i].size != DU_DEL_SIZE && (f_stat(0, f[i].path, &old) || old < f[i].size)) grow += f[i].size - old;
     }
-    for (int i = 0; i < nf; i++) {
+    uint8_t *buf = 0;
+    if (ldr >= 0) { du_stage_name(ldr, name); if (!(buf = read_ldr(name, f[ldr].size, f[ldr].crc))) return 5; }
+    int r = 0;
+    if (!room(grow + DU_BLOCK)) { CONSOLE("op1r: not enough free space for the update."); r = 6; }   /* (+ a block: margin) */
+    else {
+        fd = Y_OPEN(DU_TRIES, O_CREATE, 0x180);                    /* counted before the first change */
+        uint8_t c = (uint8_t)(t + 1);
+        if (fd < 0 || Y_WRITE(fd, &c, 1) != 1) r = 7;
+        if (fd >= 0) Y_CLOSE(fd);
+    }
+    for (int i = 0; i < nf && !r; i++) {
         if (i == ldr) continue;
         du_stage_name(i, name);
         CONSOLE(f[i].path);
@@ -145,27 +202,11 @@ static int apply(void)
             Y_UNLINK(dst);                                         /* missing: nothing to do */
             continue;
         }
-        if (!copy_file(name, f[i].path)) return 100 + i;
+        if (!copy_file(name, f[i].path)) r = 100 + i;
     }
-    if (ldr >= 0) {
-        uint8_t *buf = NEW_ARR(f[ldr].size);
-        if (!buf) return 200;
-        du_stage_name(ldr, name);
-        fd = Y_OPEN(name, O_READ, 0x100);
-        uint32_t got = 0;
-        if (fd >= 0) {
-            for (;;) {
-                int k = Y_READ(fd, buf + got, f[ldr].size - got > 65536 ? 65536 : f[ldr].size - got);
-                if (k <= 0) break;
-                got += (uint32_t)k;
-            }
-            Y_CLOSE(fd);
-        }
-        int r = got == f[ldr].size && du_crc32(0, buf, got) == f[ldr].crc ? (CONSOLE("Writing firmware..."), du_fw_flash(buf, got)) : 201;
-        DEL_ARR(buf);
-        if (r) return 300 + r;
-    }
-    return 0;
+    if (!r && buf) { CONSOLE("Writing firmware..."); r = du_fw_flash(buf, f[ldr].size); if (r) r += 300; }
+    if (buf) FREE(buf);
+    return r;
 }
 
 int du_boot_access(const char *path, int mode)
@@ -177,8 +218,9 @@ int du_boot_access(const char *path, int mode)
             CONSOLE("op1r: applying staged update...");
             int r = apply();
             du_fw_result = r;
-            cleanup();
-            if (r != 0 && r < 100) CONSOLE("op1r: staged update invalid, discarded.");   /* nothing changed: boot on */
+            if (r < 100 || r >= 200) cleanup();                    /* a failed copy: staging kept, next boot tries again */
+            if (r == 4) CONSOLE("op1r: staged update failed again, discarded.");
+            else if (r != 0 && r < 100) CONSOLE("op1r: staged update invalid, discarded.");   /* nothing changed: boot on */
             else {
                 CONSOLE(r == 0 ? "op1r: update applied, restarting..." : "op1r: update FAILED (te-boot untouched), restarting...");
                 UNMOUNT(); DELAY_MS(500);

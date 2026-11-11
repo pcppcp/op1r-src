@@ -127,7 +127,7 @@ static void abort_session(du_session *s)
     if (s->open) s->fs->close(s->fs->ctx);
     char name[40];
     for (int i = 0; i <= DU_MAX_FILES; i++) { du_stage_name(i, name); s->fs->remove(s->fs->ctx, name); }   /* whole staging dir */
-    s->fs->remove(s->fs->ctx, DU_MANIFEST);
+    s->fs->remove(s->fs->ctx, DU_MANIFEST); s->fs->remove(s->fs->ctx, DU_TRIES);
     s->open = 0; s->n = 0;
 }
 
@@ -152,7 +152,7 @@ int du_handle(du_session *s, const uint8_t *msg, int n, uint8_t *rep)
         const char *path = (const char *)pl + 8;
         if (!du_path_ok(path)) return reply(rep, cmd, seq, DU_E_PATH, 0, 0);
         uint32_t size = rd32(pl);
-        if (size > 127u * DU_BLOCK) return reply(rep, cmd, seq, DU_E_SIZE, 0, 0);
+        if (size > (path[0] == 'O' ? DU_MAX_LDR : 127u * DU_BLOCK)) return reply(rep, cmd, seq, DU_E_SIZE, 0, 0);   /* 'O': OP1_vdk.ldr */
         if (s->n >= DU_MAX_FILES) return reply(rep, cmd, seq, DU_E_FULL, 0, 0);
         for (int i = 0; i < s->n; i++) {                          /* same path twice: refuse */
             const char *a = s->f[i].path, *b = path;
@@ -192,6 +192,7 @@ int du_handle(du_session *s, const uint8_t *msg, int n, uint8_t *rep)
         if (s->open || s->n == 0) return reply(rep, cmd, seq, DU_E_STATE, 0, 0);
         if (!s->fs->key_pressed(s->fs->ctx)) return reply(rep, cmd, seq, DU_WAIT_KEY, 0, 0);   /* host asks again */
         int len = du_manifest_write(s, du_text, (int)sizeof du_text);
+        s->fs->remove(s->fs->ctx, DU_TRIES);                      /* a new manifest: attempts from 0 */
         if (len < 0 || s->fs->open_w(s->fs->ctx, DU_MANIFEST) || s->fs->write(s->fs->ctx, (const uint8_t *)du_text, (uint32_t)len)) {
             abort_session(s); return reply(rep, cmd, seq, DU_E_IO, 0, 0);
         }
@@ -335,7 +336,7 @@ int du_manifest_parse(const char *t, du_file *f, int *n)
         while (*p && *p != '\n') { if (i >= DU_MAX_PATH - 1) return -1; f[k].path[i++] = *p++; }
         f[k].path[i] = 0;
         if (*p++ != '\n' || !du_path_ok(f[k].path)) return -1;
-        if (f[k].size == DU_DEL_SIZE ? !du_plugin_file(f[k].path) : f[k].size > 127u * DU_BLOCK) return -1;
+        if (f[k].size == DU_DEL_SIZE ? !du_plugin_file(f[k].path) : f[k].size > (f[k].path[0] == 'O' ? DU_MAX_LDR : 127u * DU_BLOCK)) return -1;
         k++;
     }
     uint32_t c = du_crc32(0, (const uint8_t *)t, (uint32_t)(p - t)), cnt, cc;
