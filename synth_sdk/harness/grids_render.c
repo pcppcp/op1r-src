@@ -66,6 +66,9 @@ static void glue_test(void)
     gr_b[1].g.s.density[0] = 255; ticks(1, 48);             /* step 2 (the second 16th) 8 ticks late, if it hits */
     if (hits[0] >> 2 & 1) assert(strstr(nlog, "32+53/"));
     gr_b[1].swing = 0;
+    { extern int gr_host_oct; gr_host_oct = 1;                   /* drum octave +1: the pad's note-off is its key */
+      gr_b[1].g.s.density[0] = 255; nlog[0] = 0; now = 0; gr_restart(1); ticks(1, 13); gr_host_oct = 0;
+      if (!strstr(nlog, "0+65/80 12-53/0 ")) { fprintf(stderr, "drum octave log: %s\n", nlog); assert(0); } }
     /* synth: held keys give the notes, lowest -> BD */
     gr_tick(0); gr_press(0, 3); gr_set *z = &gr_b[0].g.s; z->x = 0; z->y = 0; z->density[0] = 255; z->density[1] = 0; z->density[2] = 0;
     { extern int gr_host_on_page; gr_host_on_page = 0;          /* off the grids page: keys pass through, not recorded */

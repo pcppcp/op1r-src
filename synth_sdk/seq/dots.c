@@ -111,6 +111,8 @@ void host_dt_fx_lock(int pos, int knob, int pc);       /* knob: lock index 0..7 
 void host_dt_fx_restore(int pos, int knob);
 #define DT_FX_LOCK(pos, k, pc)   host_dt_fx_lock((pos), (k), (pc))
 #define DT_FX_RESTORE(pos, k)    host_dt_fx_restore((pos), (k))
+static uint32_t dt_irq_off(void) { return 0; }
+static void dt_irq_on(uint32_t m) { (void)m; }
 #else
 static void dt_changed(void);
 #define DT_CHANGED() dt_changed()
@@ -122,6 +124,8 @@ static void dt_fw_fx_lock(int pos, int knob, int pc);
 static void dt_fw_fx_restore(int pos, int knob);
 #define DT_FX_LOCK(pos, k, pc)   dt_fw_fx_lock((pos), (k), (pc))
 #define DT_FX_RESTORE(pos, k)    dt_fw_fx_restore((pos), (k))
+static uint32_t dt_irq_off(void) { uint32_t m; __asm__ volatile ("cli %0;" : "=d"(m) : : "memory"); return m; }
+static void dt_irq_on(uint32_t m) { __asm__ volatile ("sti %0;" : : "d"(m) : "memory"); }
 #endif
 
 static int dt_clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
@@ -168,10 +172,15 @@ static void dt_lock(int pos, int slot, dt_run_t *r, const uint8_t *fx)
 }
 static int dt_slot_of(int pos, const dt_run_t *r) { return (int)(r - dt[pos & 1].rt); }
 
+/* the key thread and the tick both release a slot's note: the id is taken with interrupts off, the note-off goes
+ * out after (as scale/sc_fw.c), so a tick inside the key thread's note-off can't lose the note it starts */
 static void dt_silence(int pos, dt_run_t *r)
 {
-    if (r->sounding) { DT_NOTE_OFF(pos, r->sounding - 1); r->sounding = 0; }
-    r->off_at = 0;
+    uint32_t m = dt_irq_off();
+    int id = r->sounding;
+    r->sounding = 0; r->off_at = 0;
+    dt_irq_on(m);
+    if (id) DT_NOTE_OFF(pos, id - 1);
     if (r->locks) dt_unlock(pos, dt_slot_of(pos, r), r);
 }
 

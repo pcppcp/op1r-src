@@ -109,6 +109,8 @@ void host_pl_note_on(int pos, int note, int vel);
 void host_pl_note_off(int pos, int note);
 #define PL_NOTE_ON(pos, n, k, v) (host_pl_note_on((pos), (n), (v)), (n))
 #define PL_NOTE_OFF(pos, n)      host_pl_note_off((pos), (n))
+static uint32_t pl_irq_off(void) { return 0; }
+static void pl_irq_on(uint32_t m) { (void)m; }
 #else
 static void pl_changed(void);
 #define PL_CHANGED() pl_changed()
@@ -116,6 +118,8 @@ int  eu_fw_note_on(int pos, int note, int key, int vel);   /* seq/euclid.c: Voic
 void eu_fw_note_off(int midi);
 #define PL_NOTE_ON(pos, n, k, v) eu_fw_note_on((pos), (n), (k), (v))
 #define PL_NOTE_OFF(pos, n)      eu_fw_note_off(n)
+static uint32_t pl_irq_off(void) { uint32_t m; __asm__ volatile ("cli %0;" : "=d"(m) : : "memory"); return m; }
+static void pl_irq_on(uint32_t m) { __asm__ volatile ("sti %0;" : : "d"(m) : "memory"); }
 #endif
 
 static int pl_clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
@@ -261,10 +265,16 @@ static void pl_bank_init(pl_bank_t *b)
     pl_rounds(b);
 }
 
+/* the key thread and the tick both release the bell: the id is taken with interrupts off, the note-off goes out
+ * after (as scale/sc_fw.c), so a tick inside the key thread's note-off can't lose the note it starts */
 static void pl_silence(int pos, pl_bank_t *b)
 {
     (void)pos;
-    if (b->sounding) { PL_NOTE_OFF(pos, b->sounding - 1); b->sounding = 0; }
+    uint32_t m = pl_irq_off();
+    int id = b->sounding;
+    b->sounding = 0;
+    pl_irq_on(m);
+    if (id) PL_NOTE_OFF(pos, id - 1);
 }
 /* when: 0 next step boundary, 1 now, 2 after PL_CHORD_TICKS (keys) */
 static void pl_start(pl_bank_t *b, int when)

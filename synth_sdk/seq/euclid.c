@@ -44,7 +44,7 @@ typedef struct {
     uint8_t  vel;                                       /* level = note velocity 1..127 */
     uint8_t  sounding;                                  /* note id currently on (+1), 0 = none */
     uint32_t start;                                     /* tick of step 0 */
-    int16_t  step;                                      /* current step (-1 = not started yet) */
+    int32_t  step;                                      /* current step (-1 = not started yet) */
 } eu_seq_t;
 
 typedef struct {
@@ -89,6 +89,16 @@ void eu_fw_note_off(int midi);
 
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
+/* the key thread and the tick both release a slot's note: the id is taken with interrupts off, the note-off goes
+ * out after (as scale/sc_fw.c), so a tick inside the key thread's note-off can't lose the note it starts */
+#ifdef OP1_HOST
+static uint32_t eu_irq_off(void) { return 0; }
+static void eu_irq_on(uint32_t m) { (void)m; }
+#else
+static uint32_t eu_irq_off(void) { uint32_t m; __asm__ volatile ("cli %0;" : "=d"(m) : : "memory"); return m; }
+static void eu_irq_on(uint32_t m) { __asm__ volatile ("sti %0;" : : "d"(m) : "memory"); }
+#endif
+
 static inline int eu_hit(const eu_seq_t *q, int i)
 {
     if (!q->pulses) return 0;
@@ -98,7 +108,11 @@ static inline int eu_hit(const eu_seq_t *q, int i)
 
 static void eu_silence(int pos, eu_seq_t *q)
 {
-    if (q->sounding) { EU_NOTE_OFF(pos, q->sounding - 1); q->sounding = 0; }
+    uint32_t m = eu_irq_off();
+    int id = q->sounding;
+    q->sounding = 0;
+    eu_irq_on(m);
+    if (id) EU_NOTE_OFF(pos, id - 1);
 }
 
 /* ---- keys / encoders (UI thread) ---- */
@@ -215,7 +229,7 @@ int eu_parse(int pos, const char *s, int len)
     int v[EU_TEXT_MAX], c = 0, x = -1;
     for (int i = 0; i <= len && c < (int)(sizeof v / sizeof v[0]); i++) {
         char ch = i < len ? s[i] : ',';
-        if (ch >= '0' && ch <= '9') x = (x < 0 ? 0 : x * 10) + (ch - '0');
+        if (ch >= '0' && ch <= '9') { x = (x < 0 ? 0 : x * 10) + (ch - '0'); if (x > 9999) return 0; }   /* as sq_split */
         else if (ch == ',') { if (x < 0) return 0; v[c++] = x; x = -1; }
         else return 0;
     }
@@ -382,7 +396,7 @@ static void eu_advance(int pos, uint64_t inc)
         uint64_t in = (t1 - st0) % r;                   /* position inside the step, Q16 ticks */
         if (q->sounding && in >= r * q->gate / 100) eu_silence(pos & 1, q);
         if (step != q->step) {
-            q->step = (int16_t)step;
+            q->step = step;
             eu_silence(pos & 1, q);
             int i = step % q->steps;
             if (q->used && eu_hit(q, i) && !q->muted) {
@@ -516,8 +530,10 @@ static void eu_screen_draw(void *r, int pos)
     etext(r, OP1_Q10(EU_PAT_X), OP1_Q10(EU_PAT_Y), OP1_Q10(2), pt, 0x400, eu_white);
     /* note name */
     char t[12];
-    if (q->used) eu_note_name(t, q->note + (pos & 1 ? 0 : (q->oct - 2) * 12));
-    else { t[0] = '-'; t[1] = '-'; t[2] = 0; }                      /* no note yet: press a key */
+    int n = q->note + (pos & 1 ? 0 : (q->oct - 2) * 12);
+    if (!q->used) { t[0] = '-'; t[1] = '-'; t[2] = 0; }             /* no note yet: press a key */
+    else if (n >= 0 && n <= 127) eu_note_name(t, n);
+    else { t[0] = '?'; t[1] = 0; }                                  /* below / above MIDI: plays nothing */
     etext(r, OP1_Q10(EU_TEXT_X), OP1_Q10(EU_NOTE_Y), OP1_Q10(3), t, 0x600, eu_white);
     /* encoder rows */
     static const char *rates[EU_RATES] = { "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32" };

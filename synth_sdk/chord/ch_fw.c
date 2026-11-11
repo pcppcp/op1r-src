@@ -42,6 +42,8 @@ void host_ch_note(int pos, int note, int vel, int on);
 #define CH_KEY_PLAYED(m, v, on)         ((void)0)
 #define CH_CHANGED()                    ((void)0)
 static int ch_oct(int m) { (void)m; return 0; }
+static uint32_t ch_irq_off(void) { return 0; }
+static void ch_irq_on(uint32_t m) { (void)m; }
 #else
 int  eu_fw_note_on(int pos, int note, int key, int vel);   /* seq/seq_core.c: VoiceCtl note on / off */
 void eu_fw_note_off(int midi);
@@ -55,6 +57,8 @@ static int ch_oct(int m)                                    /* keyboard octave o
 {
     return m ? ((const int *)0x01DFE500)[*(volatile int *)0xFF8016D8 & 7] : ((const int *)0x01DFE4E0)[*(volatile int *)0xFF8016D4 & 7];
 }
+static uint32_t ch_irq_off(void) { uint32_t m; __asm__ volatile ("cli %0;" : "=d"(m) : : "memory"); return m; }
+static void ch_irq_on(uint32_t m) { __asm__ volatile ("sti %0;" : : "d"(m) : "memory"); }
 #endif
 
 static void ch_init_bank(ch_bank *b)
@@ -74,6 +78,20 @@ static void ch_out(int note, int vel, int on, void *ctx)
 }
 
 static void ch_cancel(ch_bank *b, int key) { b->npend[key] = b->ipend[key] = 0; }
+
+/* the key thread and the player tick (strum) both change the held notes, whose counts keys share: the key side
+ * changes them with interrupts off and plays the notes after (as scale/sc_fw.c), else a count can be lost and a
+ * note never released. One key: at most CH_MAXN offs + CH_MAXN ons. */
+typedef struct { int m, n; uint8_t ev[2 * CH_MAXN][3]; } ch_q;
+static void ch_qout(int note, int vel, int on, void *ctx)
+{
+    ch_q *q = ctx;
+    if (q->n < 2 * CH_MAXN) { q->ev[q->n][0] = (uint8_t)note; q->ev[q->n][1] = (uint8_t)vel; q->ev[q->n][2] = (uint8_t)on; q->n++; }
+}
+static void ch_flush(const ch_q *q)
+{
+    for (int i = 0; i < q->n; i++) ch_out(q->ev[i][0], q->ev[i][1], q->ev[i][2], (void *)(intptr_t)q->m);
+}
 
 int ch_key_down_from(int m, int key, uint32_t caller)        /* caller: OP1_SEQ_CALLER() of the player's key_down */
 {
@@ -101,15 +119,20 @@ int ch_key_down_from(int m, int key, uint32_t caller)        /* caller: OP1_SEQ_
             int j = (int)((b->rng >> 16) % (uint32_t)(i + 1));
             uint8_t t = o[i]; o[i] = o[j]; o[j] = t;
         }
-    void *ctx = (void *)(intptr_t)(m & 1);
-    ch_cancel(b, key);
+    ch_q q; q.m = m & 1; q.n = 0;
     int st = ch_strum_ticks[b->s.strum & 7];
-    if (!st) { ch_down(&b->h, key, o, k, CH_VEL, ch_out, ctx); return 1; }
-    ch_up(&b->h, key, ch_out, ctx);                             /* (a second down of a held key) */
-    if (k) ch_add(&b->h, key, o[0], CH_VEL, ch_out, ctx);       /* first note now, the rest on the ticks */
-    for (int i = 1; i < k; i++) b->pend[key][i - 1] = o[i];
-    b->npend[key] = (uint8_t)(k ? k - 1 : 0); b->ipend[key] = 0;
-    b->due[key] = b->tick + (uint32_t)st;
+    uint32_t im = ch_irq_off();
+    ch_cancel(b, key);
+    if (!st) ch_down(&b->h, key, o, k, CH_VEL, ch_qout, &q);
+    else {
+        ch_up(&b->h, key, ch_qout, &q);                         /* (a second down of a held key) */
+        if (k) ch_add(&b->h, key, o[0], CH_VEL, ch_qout, &q);   /* first note now, the rest on the ticks */
+        for (int i = 1; i < k; i++) b->pend[key][i - 1] = o[i];
+        b->due[key] = b->tick + (uint32_t)st;
+        b->npend[key] = (uint8_t)(k ? k - 1 : 0); b->ipend[key] = 0;
+    }
+    ch_irq_on(im);
+    ch_flush(&q);
     return 1;
 }
 int ch_key_down(int m, int key) { return ch_key_down_from(m, key, 0); }   /* host tests: the keyboard */
@@ -119,8 +142,12 @@ void ch_key_up(int m, int key)
     ch_bank *b = &chb[m & 1];
     if (key < 0 || key >= CH_KEYS) return;
     if (b->raw[key]) { CH_KEY_PLAYED(b->raw[key] - 1, 0, 0); b->raw[key] = 0; }
+    ch_q q; q.m = m & 1; q.n = 0;
+    uint32_t im = ch_irq_off();
     ch_cancel(b, key);
-    ch_up(&b->h, key, ch_out, (void *)(intptr_t)(m & 1));
+    ch_up(&b->h, key, ch_qout, &q);
+    ch_irq_on(im);
+    ch_flush(&q);
 }
 
 void ch_tick(int m)                                             /* 1/96 beat */
@@ -138,8 +165,15 @@ void ch_tick(int m)                                             /* 1/96 beat */
 void ch_all_notes_off(int m)
 {
     ch_bank *b = &chb[m & 1];
-    for (int key = 0; key < CH_KEYS; key++) { ch_cancel(b, key); if (b->raw[key]) { CH_KEY_PLAYED(b->raw[key] - 1, 0, 0); b->raw[key] = 0; } }
-    ch_all_off(&b->h, ch_out, (void *)(intptr_t)(m & 1));
+    for (int key = 0; key < CH_KEYS; key++) {
+        if (b->raw[key]) { CH_KEY_PLAYED(b->raw[key] - 1, 0, 0); b->raw[key] = 0; }
+        ch_q q; q.m = m & 1; q.n = 0;
+        uint32_t im = ch_irq_off();
+        ch_cancel(b, key);
+        ch_up(&b->h, key, ch_qout, &q);
+        ch_irq_on(im);
+        ch_flush(&q);
+    }
 }
 
 /* ---- page: turns and presses ---- */

@@ -24,7 +24,7 @@ static gr_run gr_r[2];
 
 #ifdef OP1_HOST
 void host_gr_note(int m, int note, int vel, int on);
-#define GR_NOTE_ON(m, note, key, vel) ((void)(key), host_gr_note((m), (note), (vel), 1))
+#define GR_NOTE_ON(m, note, key, vel) (host_gr_note((m), (note), (vel), 1), (m) ? (key) + 0x35 : (note))   /* id as seq_core.c */
 #define GR_NOTE_OFF(m, note)          host_gr_note((m), (note), 0, 0)
 #define GR_CHANGED()                  ((void)0)
 int gr_host_oct;                                             /* host tests: keyboard octave */
@@ -90,8 +90,8 @@ static void fire(int m, int e)                               /* hits (bits 0..2)
         for (int j = 0; j < np; j++) dup |= played[j] == note;   /* fewer keys than parts: one note-on per note */
         if (dup) continue;
         played[np++] = note;
-        GR_NOTE_ON(m, note, m ? b->note[i] : 0, vel < 1 ? 1 : vel);
-        r->on_note[i] = (int16_t)note;
+        r->on_note[i] = (int16_t)GR_NOTE_ON(m, note, m ? b->note[i] : 0, vel < 1 ? 1 : vel);   /* the id the note-off takes */
+        if (r->on_note[i] < 0) continue;
         r->off_at[i] = (uint8_t)(b->res32 ? TICKS_STEP / 2 : TICKS_STEP);   /* half a step */
     }
 }

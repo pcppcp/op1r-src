@@ -13,15 +13,21 @@ int16_t host_fx_knobs[3][8]; int16_t host_fx_meter[3]; void *host_fx_scratch[3];
 volatile uint8_t op1_fx_page[3][4];
 
 /* note log */
-static int n_on[2], n_off[2], last_on, last_vel, active[2][128], max_active;
+static int n_on[2], n_off[2], last_on, last_vel, active[2][128], max_active, vc_held[2][128];   /* vc_held: VoiceCtl's view */
 static long sample_now, on_at[64], off_at[64]; static int n_log;
 void host_eu_note_on(int pos, int n, int v)
 {
-    n_on[pos]++; last_on = n; last_vel = v; active[pos][n]++;
+    n_on[pos]++; last_on = n; last_vel = v; active[pos][n]++; vc_held[pos][n] = 1;
     int a = 0; for (int i = 0; i < 128; i++) a += active[pos][i]; if (a > max_active) max_active = a;
     if (n_log < 64) on_at[n_log] = sample_now;
 }
-void host_eu_note_off(int pos, int n) { n_off[pos]++; active[pos][n]--; if (n_log < 64) off_at[n_log++] = sample_now; }
+static void (*preempt)(void);                          /* the tick interrupt, fired inside a key-thread note-off */
+void host_eu_note_off(int pos, int n)
+{
+    n_off[pos]++; active[pos][n]--; vc_held[pos][n] = 0; if (n_log < 64) off_at[n_log++] = sample_now;
+    if (preempt) { void (*f)(void) = preempt; preempt = 0; f(); }
+}
+static void tick_to_next_step(void) { int s0 = eu[0].s[0].step; for (int i = 0; i < 64 && eu[0].s[0].step == s0; i++) eu_advance(0, 1u << 14); }
 
 #define MAXL 2048
 static struct { int32_t x0, y0, x1, y1, w; uint8_t c[4]; } lines[MAXL]; static int nlines;
@@ -267,6 +273,38 @@ int main(int argc, char **argv)
         eu_midi_start();
         eu_advance(0, 1u << 14);
         CHECK(q->step == 0, "MIDI START: euclid step 0 on the next tick (%d)", q->step);
+    }
+    {   /* a tick inside the key thread's note-off (new note key: the slot's note released) starts the next note */
+        memset(eu, 0, sizeof eu); memset(vc_held, 0, sizeof vc_held);
+        eu_key(0, 60); turn(0, 1, 12); turn(0, 3, 1);            /* 16 / 16: every step a hit */
+        for (int i = 0; i < 200 && !eu[0].s[0].sounding; i++) eu_advance(0, 1u << 14);
+        preempt = tick_to_next_step; eu_key_ex(0, 64, 64); preempt = 0;
+        turn(0, 3, -1); eu_all_off(0);
+        int held = 0; for (int i = 0; i < 128; i++) held += vc_held[0][i];
+        CHECK(held == 0 && eu[0].s[0].sounding == 0, "key-thread note-off preempted by the tick: %d notes left on", held);
+    }
+    {   /* long run: the step count passes 32767 (~34 min at 1/32, 120 bpm): still one note per step */
+        memset(eu, 0, sizeof eu);
+        eu_key(0, 60); turn(0, 1, 12); eu_press(0, 0); turn(0, 0, 5); eu_press(0, 0); turn(0, 3, 1);   /* 1/32 = 3 ticks */
+        eu_seq_t *q = &eu[0].s[0];
+        eu_advance(0, 1u << 16);
+        eu[0].tick_q16 = ((uint64_t)q->start + 3ull * 32760) << 16;   /* just before step 32768 */
+        int before = n_on[0];
+        for (int i = 0; i < 3 * 16; i++) eu_advance(0, 1u << 16);       /* 16 steps */
+        CHECK(n_on[0] - before == 16 && q->step > 32767, "step 32768+: %d note-ons in 16 steps (step %ld)", n_on[0] - before, (long)q->step);
+        eu_all_off(0);
+    }
+    {   /* note name: slot octave -2 on a low note is below MIDI 0: no name read before the table */
+        memset(eu, 0, sizeof eu);
+        eu_key(0, 5); eu_press(0, 2); turn(0, 2, -2); eu_press(0, 2);  /* note 5, octave -2 -> -19 */
+        CHECK(eu[0].s[0].oct == 0, "octave -2 (%d)", eu[0].s[0].oct);
+        eu_screen_update(0, 16, 0);
+    }
+    {   /* persistence: a number too long for an int is refused, not overflowed */
+        char t[1200]; int n = eu_serialize(0, t, sizeof t);
+        CHECK(eu_parse(0, t, n) == 1, "own text loads");
+        const char *big = "0,0,99999999999";
+        CHECK(eu_parse(0, big, (int)strlen(big)) == 0, "a number > 9999 refuses the text");
     }
     if (!render) { printf(fails ? "%d FAILED\n" : "OK: all euclid checks pass\n", fails); return fails != 0; }
 
