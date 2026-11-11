@@ -30,7 +30,9 @@ int32_t tm_head_pos(int t);
 #define NCLIPS         512
 #define SR             44100
 #define REC_LEVEL      (*(volatile int16_t *)0x01B4EF6E)          /* R246's tape record level (stock slider: >> 5, docs/11) */
-#define IN_PEAK        (*(volatile int16_t *)0xFF801088)          /* R246's tape input meter source (getter 0x01A2A064) */
+extern volatile int16_t tm_in_peak;                              /* tape/tm.c: peak of the bus R246 records; (0xFF801088,
+                                                                  * R246's meter source, stays 0 with the instrument) */
+#define IN_PEAK        tm_in_peak
 #define T_MODE         (*(volatile int32_t *)0xFF802960)          /* 0 stop, 1 rec, 2 play, 3 wind */
 #define TSPEED_RAW     (*(volatile int32_t *)0xFF802968)          /* transport speed (0: stood still) */
 #define UI_STATE       (*(volatile int32_t *)0x018C17D4)          /* 6 = record armed (docs/25) */
@@ -113,7 +115,8 @@ static void lane(void *r, int t, int32_t y, int32_t x0, int32_t x1, int32_t head
         if (!CLIP_USED[i] || CLIPS[i * 3] != t) continue;
         const int32_t a = XOF(CLIPS[i * 3 + 1]), b = XOF(CLIPS[i * 3 + 2]);
         if (b <= x0 || a >= x1) continue;
-        ln(r, CLAMP(a), y, CLAMP(b), y, thick, tm_tr[t].mute ? c_dim : on ? (rec_red ? c_red : c_blue) : c_grey);
+        const int under = on && CLIPS[i * 3 + 1] <= head && head < CLIPS[i * 3 + 2];   /* the clip under the head: red */
+        ln(r, CLAMP(a), y, CLAMP(b), y, thick, tm_tr[t].mute ? c_dim : on ? (rec_red || under ? c_red : c_blue) : c_grey);
     }
     if (on && T_MODE == 1 && TAKE_B >= TAKE_A) {                 /* the take, while it is recorded */
         const int32_t a = XOF(TAKE_A), b = XOF(TAKE_B);
@@ -177,7 +180,7 @@ static void tfs_update(void *scr, int dt)
     fmt_speed(b, tm_tr[sel].speed); txt(r, T_SPEED, b);
     {                                                            /* right edge, as stock: record level + input meter */
         const int32_t x = OP1_Q10(310), y0 = OP1_Q10(8), y1 = OP1_Q10(100), hgt = y1 - y0;   /* above the tracks to the top */
-        ln(r, x, y0, x, y1, 0x500, c_dred);                      /* as stock: a red line, the signal red, the level a red dot */
+        ln(r, x, y0, x, y1, 0x500, c_dim);                       /* the scale dark, the signal red, the level a red dot */
         /* as stock: a dB scale (R246's getter: log, clamped to -24 dB); here -24 .. 0 dB over the height */
         int32_t pk = IN_PEAK < 0 ? -IN_PEAK : IN_PEAK, db8 = -24 * 256;           /* dB, Q8 */
         if (pk > 0) {                                            /* 20 log10(pk / 32768) = 6.0206 (log2 pk - 15) */
@@ -278,13 +281,22 @@ int tfs_key(int code, int pressed)                               /* key thread: 
         if (pressed) { if (SHIFT) tm_tr[code - 0x06].mute ^= 1; else { extern volatile uint8_t tm_sel; sel = (uint8_t)(code - 0x06); tm_sel = sel; SEL_TRACK = sel; } }
         return 1;
     }
+    if (code == 0x0C && !SHIFT) {                                /* scissors: split the active track's clip at its head */
+        if (pressed && T_MODE != 1) {                            /* (R246's split: Clips::update_clip(track, pos, 0)) */
+            ((void (*)(int, int32_t, int))0x0195CF9C)(sel, tm_head_pos(sel), 0);
+            extern volatile uint8_t tm_reload_after_clip; tm_reload_after_clip = 1;
+        }
+        return 1;
+    }
     if ((code == 0x0A || code == 0x0B) && !SHIFT) {              /* lift / drop: the active track at its head (R246's clipboard) */
         if (pressed) {
             const int32_t h = tm_head_pos(sel);
             if (code == 0x0B) ((void (*)(int, int32_t, int))0x0191BEA8)(sel, h, 0);   /* drop (as the tape key handler) */
             else for (int i = 0; i < NCLIPS; i++)                /* lift: the clip under the head */
                 if (CLIP_USED[i] && CLIPS[i * 3] == sel && CLIPS[i * 3 + 1] <= h && h < CLIPS[i * 3 + 2]) {
-                    ((void (*)(int, int32_t, int32_t, int))0x0191BBD0)(sel, CLIPS[i * 3 + 1], CLIPS[i * 3 + 2], i);   /* audio_clipboard::copy */
+                    const int32_t a = CLIPS[i * 3 + 1];
+                    ((void (*)(int, int32_t, int32_t, int))0x0191BBD0)(sel, a, CLIPS[i * 3 + 2], i);   /* audio_clipboard::copy */
+                    tm_set_head(sel, a);                         /* as stock: to the lifted clip's start */
                     break;
                 }
             extern volatile uint8_t tm_reload_after_clip; tm_reload_after_clip = 1;
