@@ -158,8 +158,12 @@ static void tfs_update(void *scr, int dt)
         for (int i = 0; i < tm_n; i++) {
             const int64_t d = (int64_t)(tm_pos[i] - head) * OP1_Q10(150) / (8 * SR);
             if (d < -OP1_Q10(150) || d > OP1_Q10(150)) continue;
-            const int32_t x = OP1_Q10(160) + (int32_t)d;
-            ln(r, x, OP1_Q10(58), x, OP1_Q10(78), 0x500, c_red);
+            const int32_t x = OP1_Q10(160) + (int32_t)d;         /* as on the stock tape screen (tape/markers.c): a grey
+                                                                  * line through the track, a green v above (white at the head) */
+            const uint8_t *col = d > -OP1_Q10(2) && d < OP1_Q10(2) ? c_white : c_green;
+            ln(r, x, OP1_Q10(58), x, OP1_Q10(78), 0x400, c_grey);
+            ln(r, x - OP1_Q10(3), OP1_Q10(50), x, OP1_Q10(55), 0x600, col);
+            ln(r, x + OP1_Q10(3), OP1_Q10(50), x, OP1_Q10(55), 0x600, col);
         }
     }
     ln(r, OP1_Q10(160), OP1_Q10(48), OP1_Q10(160), OP1_Q10(88), 0x600, c_white);
@@ -201,11 +205,13 @@ void tfs_poll(void)                                              /* main loop, e
 {
     if (tm_on && !tfs_in && CUR_MODE_ID == 2) tfs_set(1);
     else if (!tm_on && tfs_in) tfs_set(0);
-    if (!wind) return;
-    const uint32_t t = now(), dt = t - wind_t;
-    if (dt < 8000000u) return;                                   /* 20 ms */
+    extern volatile int8_t tm_scrub; extern int tm_scrubbing(void);
+    tm_scrub = wind;                                             /* the engine plays the tracks at up to 8x (audible) */
+    if (!wind && !tm_scrubbing()) return;
+    const uint32_t t = now();
+    if (t - wind_t < 8000000u) return;                           /* every 20 ms the transport follows the active head */
     wind_t = t;
-    int32_t p = (TPOS >> 6) + wind * (int32_t)((uint64_t)dt * 8 * SR / 400000000u);   /* 8x, as stock winding */
+    const int32_t p = tm_head_pos(sel);
     LOCATE(p < 0 ? 0 : p > TM_MAXPOS ? TM_MAXPOS : p);
 }
 static int shown_now(void) { return tfs_in && CUR_MODE_ID == 2 && tfs_id >= 0 && SCREEN_TABLE[tfs_id] == (void *)tfs_scr; }

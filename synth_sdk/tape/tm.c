@@ -64,6 +64,9 @@ static int64_t head[4];
 static int32_t last_pos = -1;
 static uint32_t blk;
 static uint8_t rec_seen;
+volatile int8_t tm_scrub;                                        /* -1 / +1: < / > held on our screen (tfscreen.c) */
+static int32_t scrub_v;                                          /* current scrub speed, Q16 (ramps to +-8x) */
+int tm_scrubbing(void) { return scrub_v != 0; }
 volatile uint32_t tm_miss, tm_loads;
 
 static int tm_alloc(void)
@@ -117,12 +120,45 @@ static void tm_resync(int32_t pos)
     }
 }
 
+/* scrubbing: every head at scrub_v (no loops), the tracks mixed as in play (R246's player is stopped or winding) */
+static void tm_scrub_block(void)
+{
+    int32_t accL[64], accR[64];
+    for (int i = 0; i < 64; i++) accL[i] = accR[i] = 0;
+    const int64_t step = (int64_t)scrub_v << 16;
+    for (int t = 0; t < 4; t++) {
+        int64_t h = head[t];
+        const int16_t gl = GAIN_L(t), gr = GAIN_R(t);
+        const int16_t *cache = 0; int32_t cache_c = -1;
+        for (int i = 0; i < 64; i++) {
+            if (h < 0) h = 0;
+            const int32_t n = (int32_t)(h >> 32), f = (int32_t)((uint64_t)h >> 20 & 0xFFF);
+            const int32_t s0 = tm_sample(t, n, &cache, &cache_c), s1 = tm_sample(t, n + 1, &cache, &cache_c);
+            const int32_t s = s0 + ((s1 - s0) * f >> 12);        /* linear: scrubbing only */
+            accL[i] += s * gl >> 16; accR[i] += s * gr >> 16;     /* -6 dB, as winding is quieter */
+            h += step;
+        }
+        head[t] = h < 0 ? 0 : h;
+        const int32_t c = (int32_t)(h >> 32) >> 15, d = step < 0 ? -1 : 1;
+        for (int k = 1; k <= 3; k++) tm_chunk(t, c + k * d, 1);
+    }
+    for (int i = 0; i < 64; i++) {
+        OUT_L[i] = (int16_t)(accL[i] > 32767 ? 32767 : accL[i] < -32768 ? -32768 : accL[i]);
+        OUT_R[i] = (int16_t)(accR[i] > 32767 ? 32767 : accR[i] < -32768 ? -32768 : accR[i]);
+    }
+}
+
 void tm_block(void)                                              /* audio ISR, after tape_play_mix */
 {
     blk++;
     if (!tm_on || !slot[0].data) return;                         /* memory comes from tm_service (main loop) */
     const int32_t mode = MODE, pos = TPOS >> 6;
     if (mode == 1) rec_seen = 1;                                 /* recording (R246's machine) changes chunks we may hold */
+    {                                                            /* scrubbing: spin up / down to +-8x like stock winding */
+        const int32_t target = tm_scrub * (8 << 16), dv = 0x2000;      /* 1/8x per block: ~90 ms to 8x */
+        scrub_v = scrub_v < target ? (target - scrub_v < dv ? target : scrub_v + dv) : (scrub_v - target < dv ? target : scrub_v - dv);
+    }
+    if (scrub_v) { tm_scrub_block(); last_pos = -1; return; }
     if (mode != 2) { tm_resync(pos); last_pos = -1; return; }    /* playing only; stopped / winding: the heads follow the transport */
     if (rec_seen) {                                              /* first play after a recording: reload every chunk */
         rec_seen = 0;
