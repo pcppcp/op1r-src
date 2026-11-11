@@ -228,14 +228,16 @@ static void pulse(uint32_t t, uint32_t now, int n, int ppq)
 
 void pc_poll(void)
 {
-    uint32_t now = pc_samples;
     if (!pc_active()) { pc_r = pc_w; running = 0; return; }
     int ppq = pc_ppq[pc_src], n = 96 / ppq;
     /* PPQ changed while running: the ticks already given were a share of the old n; rescale them to the new one, so
      * the pulse completes the same position (hardware: a negative completion made the pending ticks < 0, assert
      * PlayerManager.cpp:366 midi_ext_clock_in >= 0) */
     if (running && n != run_n) { emitted = emitted * n / run_n; run_n = n; }   /* (the pulse period is the source's: kept) */
-    while (pc_r != pc_w) { uint32_t t = pc_q[pc_r & 15]; pc_r++; pulse(t, now, n, ppq); }
+    /* the pulses queued so far, then the clock: an audio block between the two only adds later pulses (next poll), so
+     * every pulse taken is at or before now (now read first, a pulse after it made since = now - last wrap: FC + FA) */
+    uint32_t w = pc_w, now = pc_samples;
+    while (pc_r != w) { uint32_t t = pc_q[pc_r & 15]; pc_r++; pulse(t, now, n, ppq); }
     if (!running) return;
     uint32_t since = now - last;
     uint32_t wait = period ? 2u * (uint32_t)ppq * period : PC_NOPERIOD;   /* 2 beats */
