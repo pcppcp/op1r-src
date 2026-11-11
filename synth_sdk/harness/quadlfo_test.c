@@ -414,6 +414,13 @@ int main(int argc, char **argv)
         pond_get(ml_words(), &pf);
         nf = n_fx; for (int b = 0; b < 200; b++) { host_cycles += cpb; ml_params(live); }
         CHECK(pf.amt[1] == 20 && n_fx > nf && !memcmp(live, keep, sizeof keep), "master pond: modulates the copy");
+        {   /* pond retrig decodes as MONO: not the master's - polarity (knob both sides of its value) */
+            ml_turn(1, 1024, 1); pond_get(ml_words(), &pf); ql_dec(ml_words(), 1, &o);
+            int hi = 0, lo = 0;
+            for (int b = 0; b < 4000; b++) { host_cycles += cpb; const int16_t *q = ml_params(live); if (q[1] > 2000) hi = 1; if (q[1] < 2000) lo = 1; }
+            CHECK(pf.retrig && ql_pol(2, &o) == 0 && hi && lo, "master pond retrig: no polarity (pol %d hi %d lo %d)", ql_pol(2, &o), hi, lo);
+            ml_turn(1, -1024, 1);
+        }
         ml_flush();
         int16_t wq[8], wp[8]; memcpy(wq, ml_w[0], 16); memcpy(wp, ml_w[1], 16);
         memset(ml_w, 0, sizeof ml_w); ml_on = 0; ml_type = 0; ml_load();

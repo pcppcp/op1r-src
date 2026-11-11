@@ -340,8 +340,9 @@ static inline int ql_dest(const ql_lfo *o)  { return o->tgt < 12 ? o->tgt & 3 : 
 /* shared state (no per-voice phase): drums, FX targets, FREE and MONO */
 /* master LFO polarity (after Hundekraft kennel 3.2.3 screens/mlfo.c): the master steps every LFO as FREE, so its type
  * field holds the polarity: FREE (and anything else) +-, GATE +, MONO - (both step exactly like FREE). Unipolar:
- * (v + 32767) / 2, negated for -, for the FX knob targets and the LFO-to-LFO targets alike. */
-static inline int ql_pol(int pos, const ql_lfo *o) { return pos != 2 ? 0 : o->type == QT_GATE ? 1 : o->type == QT_MONO ? -1 : 0; }
+ * (v + 32767) / 2, negated for -, for the FX knob targets and the LFO-to-LFO targets alike. Pond (waves 10..13): its type
+ * is the retrig flag (ql_pond.h), no polarity. */
+static inline int ql_pol(int pos, const ql_lfo *o) { return pos != 2 || o->wave >= 10 ? 0 : o->type == QT_GATE ? 1 : o->type == QT_MONO ? -1 : 0; }
 static inline int16_t ql_polar(int16_t v, int pol)
 {
     if (!pol) return v;
