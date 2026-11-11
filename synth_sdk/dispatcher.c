@@ -912,6 +912,7 @@ void screens_load_hook(void *table)
     }
     { extern void pc_load(void); pc_load(); }                    /* pulse clock in: source setting (midi/pclk.c) */
     pcp_load();                                                  /* pulse sync page settings (screens/pcpage.c) */
+    { extern volatile uint8_t tm_on; extern int op1r_setting_get(const char *, int); tm_on = (uint8_t)(op1r_setting_get("tapemach", tm_on) == 1); }   /* tape machine (docs/82) */
     { extern void cc_load(void); cc_load(); }                    /* CC channels / feedback (midi/ccmap.c) */
     dpu_ui_load();                                               /* drum+ plugin: load its pages, take the stock ones */
     spc_ui_load();                                               /* sampler+ plugin: the same for 6 / 0x16 */
@@ -1123,6 +1124,7 @@ void key_event_hook(int code, int pressed)
     if (code == 0x3F && pressed == 0xA5) { extern void mx_apply(void); mx_apply(); return; }   /* MX_KEY_DOWN */
     { extern void cc_fb_key(int, int); cc_fb_key(code, pressed); }   /* CC feedback (midi/ccmap.c) */
     if (du_prompt_key(code, pressed)) return;                    /* dev update prompt: T1 restart / T2 cancel */
+    { extern int tfs_key(int, int); if (tfs_key(code, pressed)) return; }   /* free tape machine screen: T1..T4 */
     extern int ms_key(int code, int pressed, int on_tape);
     if (ms_key(code, pressed, tape_page())) return;              /* MIDI sequencer device: SEQ + TAPE (docs/39) */
     se_swap();                                                   /* drum+ / stock pages follow the drum slot */
@@ -1393,6 +1395,7 @@ void knob_event_hook(int knob, int16_t *delta)
     if (knob >= 0 && knob < 4 && !mx_pan[knob] && *(volatile uint8_t *)0x01DD7F78 && fr_src == 2 && CUR_SCREEN_ID == MIXER_SCREEN_ID) {
         fr_send_turn(knob, *delta); mx_changed = 1; return;
     }
+    { extern int tfs_knob(int, int); if (tfs_knob(knob, *delta)) return; }   /* free tape machine screen (docs/82) */
     { extern int ms_knob(int knob, int delta); if (ms_knob(knob, *delta)) return; }   /* MIDI seq view: white */
     if (knob == 3 && *(volatile uint8_t *)0x01DD7F78 && tape_page()) { tm_turn(*delta); return; }  /* tape: jump */
     if (knob >= 0 && knob < 4) {                                 /* sequencer plugin page (docs/44) */

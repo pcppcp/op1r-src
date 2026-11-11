@@ -11,13 +11,15 @@ static const uint8_t ci_vals[3] = { 4, 8, 16 };
 static uint8_t ci_idx;                                      /* index into ci_vals */
 
 uint8_t kb_vel = 127;                                       /* keyboard note velocity (127: as the stock) */
+extern volatile uint8_t tm_on;                              /* tape machine: 0 stock, 1 free (tape/tm.c, docs/82) */
 
 static void st_load(void)
 {
     int v = op1r_setting_get("countin", -1); if (v >= 0 && v <= 2) ci_idx = (uint8_t)v;
     v = op1r_setting_get("kbvel", 127); if (v >= 1 && v <= 127) kb_vel = (uint8_t)v;
+    v = op1r_setting_get("tapemach", -1); if (v == 0 || v == 1) tm_on = (uint8_t)v;
 }
-static void st_save(void) { op1r_setting_put("countin", ci_idx); op1r_setting_put("kbvel", kb_vel); }   /* KeyHandler thread */
+static void st_save(void) { op1r_setting_put("countin", ci_idx); op1r_setting_put("kbvel", kb_vel); op1r_setting_put("tapemach", tm_on); }   /* KeyHandler thread */
 
 static int32_t acc, vacc;
 static uint8_t st_dirty;
@@ -32,6 +34,11 @@ void settings_turn(int knob, int delta)                     /* blue: one value p
         int v = kb_vel + st; v = v < 1 ? 1 : v > 127 ? 127 : v;
         if (v != kb_vel) { kb_vel = (uint8_t)v; st_dirty = 1; }
         return;
+    }
+    if (knob == 2) {                                        /* white: tape machine stock / free (any detent flips) */
+        if ((acc > 0 && delta < 0) || (acc < 0 && delta > 0)) acc = 0;
+        acc += delta; if (acc / 1024 == 0) return;
+        acc = 0; tm_on = (uint8_t)!tm_on; st_dirty = 1; return;
     }
     if (knob != 0) return;
     if ((acc > 0 && delta < 0) || (acc < 0 && delta > 0)) acc = 0;
@@ -66,5 +73,8 @@ static void st_update(void *scr, int dt)
     v[i++] = (char)('0' + n % 10); v[i] = 0;
     sf_text(r, ST_LX, ST_Y0 + ST_DY, ST_S, "VELOCITY", ST_W, c_green);
     sf_text(r, ST_VX, ST_Y0 + ST_DY, ST_S, v, ST_W, c_green);
+    static const uint8_t c_white[4] = { 0xFF, 0xFF, 0xFF, 0xFF };
+    sf_text(r, ST_LX, ST_Y0 + 2 * ST_DY, ST_S, "TAPE", ST_W, c_white);
+    sf_text(r, ST_VX, ST_Y0 + 2 * ST_DY, ST_S, tm_on ? "FREE" : "STOCK", ST_W, c_white);
 }
 const op1_screen_t SCREEN_settings = { st_init, st_update };

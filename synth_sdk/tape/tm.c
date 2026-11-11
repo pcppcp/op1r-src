@@ -39,7 +39,7 @@ extern int host_tm_read(int t, int chunk, int16_t *dst);         /* fills 64 KB,
 #define X          ((volatile uint8_t *)0xFF802960)              /* R246's transport (docs/29) */
 #define LOOP_S     (*(volatile int32_t *)0x01B4EF34)
 #define LOOP_E     (*(volatile int32_t *)0x01B4EF38)
-#define LOOP_ON    (*(volatile uint8_t *)0x018C17F4)
+#define LOOP_ON    (*(volatile uint8_t *)0xFF8029C5)             /* loop on (docs/26; 0x018C17F4 is not it) */
 #define OUT_L      ((volatile int16_t *)0xFF800D34)
 #define OUT_R      ((volatile int16_t *)0xFF800DB4)
 #define MALLOC     ((void *(*)(unsigned))0x01A9F348)             /* heap 0 */
@@ -165,8 +165,21 @@ void tm_block(void)                                              /* audio ISR, a
     }
 }
 
+int32_t tm_head_pos(int t) { return (int32_t)(head[t] >> 32); }   /* GUI: head in samples */
+int tm_span(int t, int32_t *lo, int32_t *hi)                     /* GUI: the track's own loop (1 if R246's loop is on) */
+{
+    if (!(LOOP_ON && LOOP_E > LOOP_S)) return 0;
+    const int32_t L = LOOP_E - LOOP_S;
+    *lo = LOOP_S + (int32_t)((int64_t)L * tm_tr[t].off >> 16);
+    *hi = *lo + (int32_t)((int64_t)L * tm_tr[t].loop >> 16) + 1;
+    return 1;
+}
+
 int tm_service(void)                                             /* main loop (tape_service): one chunk per call */
 {
+#ifndef OP1_HOST
+    { extern void tfs_poll(void); tfs_poll(); }                  /* the screen follows the setting */
+#endif
     if (!tm_on) return 0;
     if (!tm_alloc()) return 0;
     for (int i = 0; i < TM_SLOTS; i++) {

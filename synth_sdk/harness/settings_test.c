@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+volatile uint8_t tm_on;                                         /* tape/tm.c */
 #include "../screens/settings.c"
 uint8_t ci_beats = 4;
 
