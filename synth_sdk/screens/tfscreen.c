@@ -13,7 +13,7 @@
 #include "../op1_synth.h"
 #include "stroke_font.h"
 
-typedef struct { int32_t speed; int32_t lin, lout; uint8_t lon; } tm_track;
+typedef struct { int32_t speed; int32_t lin, lout; uint8_t lon, lset; } tm_track;
 extern volatile tm_track tm_tr[4];
 extern volatile uint8_t tm_on;
 int32_t tm_head_pos(int t);
@@ -29,6 +29,18 @@ int32_t tm_head_pos(int t);
 #define CLIP_USED      ((const volatile uint8_t *)0x01AAA570)
 #define NCLIPS         512
 #define SR             44100
+#define TAPE_VT        0x01911B5C                                 /* R246's TapeScreen vtable (docs/22) */
+#define TPOS           (*(volatile int32_t *)0xFF802974)          /* samples << 6 */
+#define LOCATE(s)      (((void (*)(int32_t))0x01A55024)(s))       /* tape_c::check_pos (0 .. 0xF2BFA0) */
+#define TM_MAXPOS      0xF2BFA0
+#define TE_BPM_BITS    (*(volatile uint32_t *)0x018C1878)         /* tempo, float (read as bits) */
+static inline uint32_t now(void) { uint32_t c; __asm__ volatile ("%0 = CYCLES;" : "=d"(c)); return c; }
+static int32_t bpm_q8(void)                                      /* as seqdev/ms_fw.c: float bits -> Q8, 120 if odd */
+{
+    const uint32_t b = TE_BPM_BITS; const int e = (int)((b >> 23) & 0xFF) - 127;
+    if ((b >> 31) || e < 5 || e > 7) return 120 << 8;
+    return (int32_t)(((b & 0x7FFFFF) | 0x800000) >> (15 - e));
+}
 
 static uint32_t tfs_scr[32], tfs_vt[10];
 static void *tape_obj;
@@ -90,12 +102,21 @@ static void lane(void *r, int t, int32_t y, int32_t x0, int32_t x1, int32_t head
         if (b <= x0 || a >= x1) continue;
         ln(r, CLAMP(a), y, CLAMP(b), y, thick, on ? c_blue : c_grey);
     }
-    if (tm_tr[t].lon && tm_tr[t].lout > tm_tr[t].lin) {
-        const int32_t a = XOF(tm_tr[t].lin), b = XOF(tm_tr[t].lout), h = thick / 2 + OP1_Q10(big ? 3 : 2), g = 0x4CC;
+    const int lp = tm_tr[t].lon && tm_tr[t].lout > tm_tr[t].lin;
+    if (lp || tm_tr[t].lset) {                                   /* loop in (also set but off): a line, a circle on top */
+        const int32_t a = XOF(tm_tr[t].lin), h = thick / 2 + OP1_Q10(big ? 3 : 2), g = 0x4CC;
         const uint8_t *c = on ? c_green : c_dgreen;
-        if (a >= x0 && a <= x1) ln(r, a, y - h, a, y + h, g, c);
-        if (b >= x0 && b <= x1) ln(r, b, y - h, b, y + h, g, c);
-        if (big && b > x0 && a < x1) ln(r, CLAMP(a), y - h, CLAMP(b), y - h, g, c);
+        if (a >= x0 && a <= x1) {
+            ln(r, a, y - h, a, y + h, g, c);
+            if (big) { const int32_t cy = y - h - OP1_Q10(3), q = OP1_Q10(2);   /* the circle: an octagon */
+                static const int8_t ox[9] = { 2, 1, -1, -2, -2, -1, 1, 2, 2 }, oy[9] = { 1, 2, 2, 1, -1, -2, -2, -1, 1 };
+                for (int k = 0; k < 8; k++) ln(r, a + ox[k] * q / 2, cy + oy[k] * q / 2, a + ox[k + 1] * q / 2, cy + oy[k + 1] * q / 2, 0x300, c); }
+        }
+        if (lp) {
+            const int32_t b = XOF(tm_tr[t].lout);
+            if (b >= x0 && b <= x1) ln(r, b, y - h, b, y + h, g, c);
+            if (big && b > x0 && a < x1) ln(r, CLAMP(a), y - h, CLAMP(b), y - h, g, c);
+        }
     }
     #undef XOF
     #undef CLAMP
@@ -118,6 +139,14 @@ static void tfs_update(void *scr, int dt)
     fmt_speed(b, tm_tr[sel].speed); txt(r, T_SPEED, b);
     if (rev) txt(r, T_REV, "rev");
     /* the active track around its head */
+    {                                                            /* bar marks (from tape 0, R246's tempo) */
+        const int64_t bar_q8 = (int64_t)4 * 60 * SR * 256 * 256 / bpm_q8();   /* samples per bar, Q8 */
+        const int64_t a = (int64_t)(head - 8 * SR) << 8, b = (int64_t)(head + 8 * SR) << 8;
+        for (int64_t k = a <= 0 ? 0 : (a + bar_q8 - 1) / bar_q8; k * bar_q8 <= b && k < 4096; k++) {
+            const int32_t x = OP1_Q10(160) + (int32_t)(((k * bar_q8 >> 8) - head) * OP1_Q10(150) / (8 * SR));
+            ln(r, x, OP1_Q10(76), x, OP1_Q10(80), 0x400, c_grey);
+        }
+    }
     lane(r, sel, OP1_Q10(68), OP1_Q10(10), OP1_Q10(310), head, 8, OP1_Q10(9), 1, 1);
     ln(r, OP1_Q10(160), OP1_Q10(48), OP1_Q10(160), OP1_Q10(88), 0x600, c_white);
     ln(r, OP1_Q10(160), OP1_Q10(48), OP1_Q10(rev ? 154 : 166), OP1_Q10(48), 0x600, rev ? c_red : c_white);
@@ -133,8 +162,9 @@ static void tfs_init(void *scr) { (void)scr; }
 static void tfs_set(int on)                                      /* main loop */
 {
     if (on && tfs_id < 0) {                                      /* first time: the tape screen is the current one */
-        const int id = CUR_SCREEN;
-        if (id < 0 || id >= 0x44 || !SCREEN_TABLE[id]) return;
+        int id = -1;                                             /* the tape screen's slot, by class (not the current screen) */
+        for (int i = 0; i < 0x44; i++) if (SCREEN_TABLE[i] && ((const uint32_t *)SCREEN_TABLE[i])[3] == TAPE_VT) { id = i; break; }
+        if (id < 0) return;
         void *saved = SCREEN_TABLE[id];
         SCREEN_CTOR(tfs_scr, id, "usbout.svg");
         SCREEN_TABLE[id] = saved;
@@ -151,10 +181,18 @@ static void tfs_set(int on)                                      /* main loop */
     SCREEN_TABLE[tfs_id] = on ? (void *)tfs_scr : tape_obj;
     tfs_in = (uint8_t)on;
 }
-void tfs_poll(void)                                              /* main loop: follow the setting */
+static int8_t wind;                                              /* -1 / +1 while < / > is held on this screen */
+static uint32_t wind_t;
+void tfs_poll(void)                                              /* main loop, every pass: setting, scrubbing */
 {
     if (tm_on && !tfs_in && CUR_MODE_ID == 2) tfs_set(1);
     else if (!tm_on && tfs_in) tfs_set(0);
+    if (!wind) return;
+    const uint32_t t = now(), dt = t - wind_t;
+    if (dt < 8000000u) return;                                   /* 20 ms */
+    wind_t = t;
+    int32_t p = (TPOS >> 6) + wind * (int32_t)((uint64_t)dt * 8 * SR / 400000000u);   /* 8x, as stock winding */
+    LOCATE(p < 0 ? 0 : p > TM_MAXPOS ? TM_MAXPOS : p);
 }
 static int shown_now(void) { return tfs_in && CUR_MODE_ID == 2 && tfs_id >= 0 && SCREEN_TABLE[tfs_id] == (void *)tfs_scr; }
 
@@ -162,11 +200,16 @@ int tfs_key(int code, int pressed)                               /* key thread: 
 {
     if (!shown_now()) return 0;
     if (code >= 0x06 && code <= 0x09) { if (pressed) sel = (uint8_t)(code - 0x06); return 1; }
+    if (code == 0x24 || code == 0x25) {                          /* < / >: our scrubbing (R246's would call TapeScreen
+                                                                  * methods on this object) */
+        wind = pressed ? (code == 0x24 ? -1 : 1) : 0; wind_t = now();
+        return 1;
+    }
     if (code < 0x2D || code > 0x2F) return 0;
     if (!pressed) return 1;
     volatile tm_track *tr = &tm_tr[sel];
     const int32_t h = tm_head_pos(sel);
-    if (code == 0x2D) tr->lin = h;                               /* s1: in */
+    if (code == 0x2D) { tr->lin = h; tr->lset = 1; if (tr->lout <= tr->lin) tr->lon = 0; }   /* s1: in (marker even if off) */
     else if (code == 0x2E) {                                     /* s2: out, the loop on */
         tr->lout = h;
         if (tr->lout < tr->lin) { const int32_t x = tr->lin; tr->lin = tr->lout; tr->lout = x; }

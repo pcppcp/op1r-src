@@ -97,6 +97,9 @@ static uint32_t *ts_slot(const uint8_t *c)
 
 int tape_service(int arg)
 {
+#ifndef OP1_HOST
+    if (!arg) { extern void tfs_poll(void); tfs_poll(); }     /* free tape machine screen: setting, scrubbing (every pass) */
+#endif
     int pos = 0;
     for (uint8_t *c = CLIP_HEAD; c; c = CLIP_NEXT(c), pos++) {
         int idx = *(volatile int16_t *)(c + 6);

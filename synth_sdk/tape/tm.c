@@ -15,8 +15,8 @@
 #define TM_CHUNKS  0x1E5                                         /* chunks per track (R246) */
 #define CHUNK      0x8000                                        /* samples */
 
-typedef struct { int32_t speed; int32_t lin, lout; uint8_t lon; } tm_track;   /* speed Q16 (negative = reverse); own loop in / out (samples), on */
-volatile tm_track tm_tr[4] = { { 0x10000, 0, 0, 0 }, { 0x10000, 0, 0, 0 }, { 0x10000, 0, 0, 0 }, { 0x10000, 0, 0, 0 } };
+typedef struct { int32_t speed; int32_t lin, lout; uint8_t lon, lset; } tm_track;   /* lset: in set (marker shown) */   /* speed Q16 (negative = reverse); own loop in / out (samples), on */
+volatile tm_track tm_tr[4] = { { 0x10000, 0, 0, 0, 0 }, { 0x10000, 0, 0, 0, 0 }, { 0x10000, 0, 0, 0, 0 }, { 0x10000, 0, 0, 0, 0 } };
 #ifdef TAPE_FREE
 volatile uint8_t tm_on = 1;                                      /* test builds (OP1R_TAPEFREE=1): on */
 #else
@@ -183,9 +183,6 @@ int tm_span(int t, int32_t *lo, int32_t *hi)                     /* GUI: the tra
 
 int tm_service(void)                                             /* main loop (tape_service): one chunk per call */
 {
-#ifndef OP1_HOST
-    { extern void tfs_poll(void); tfs_poll(); }                  /* the screen follows the setting */
-#endif
     if (!tm_on) return 0;
     if (!tm_alloc()) return 0;
     for (int i = 0; i < TM_SLOTS; i++) {
