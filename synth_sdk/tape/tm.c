@@ -7,9 +7,8 @@
  * Heads: Q32.32 samples. With R246's loop on, track t loops in [Ls + off_t L, + loop_t L) of the global loop
  * [Ls, Le) (L = Le - Ls); without it the heads run free from the transport position. Each block every head moves
  * by the transport speed x the track's speed; a locate or a (re)start resyncs them to the transport.
- * Mix: linear interpolation, R246's per-block track gains (tm_g, from its mix loops), saturating sums.
- * shortcut: v1 has no output filter / start-stop ramp of R246's player and linear interpolation only; upgrade
- * (R246's tail filter, a better interpolator) once the engine is confirmed on the device. */
+ * Mix: 4-point Hermite interpolation, R246's per-block track gains (tm_g, from its mix loops), saturating sums.
+ * shortcut: no output filter / start-stop ramp of R246's player yet; upgrade if start / stop clicks on the device. */
 #include <stdint.h>
 
 #define TM_SLOTS   32
@@ -151,9 +150,14 @@ void tm_block(void)                                              /* audio ISR, a
         const int16_t *cache = 0; int32_t cache_c = -1;
         for (int i = 0; i < 64; i++) {
             if (h >= hi) h -= hi - lo; else if (h < lo) h += hi - lo;
-            const int32_t n = (int32_t)(h >> 32), f = (int32_t)((uint64_t)h >> 17 & 0x7FFF);
-            const int32_t s0 = tm_sample(t, n, &cache, &cache_c), s1 = tm_sample(t, n + 1, &cache, &cache_c);
-            const int32_t s = s0 + ((s1 - s0) * f >> 15);
+            const int32_t n = (int32_t)(h >> 32), f = (int32_t)((uint64_t)h >> 20 & 0xFFF);   /* fraction Q12 */
+            const int32_t sm = tm_sample(t, n - 1, &cache, &cache_c), s0 = tm_sample(t, n, &cache, &cache_c),
+                          s1 = tm_sample(t, n + 1, &cache, &cache_c), s2 = tm_sample(t, n + 2, &cache, &cache_c);
+            /* 4-point Hermite (Catmull-Rom): coefficients up to ~2^18, x Q12 stays in 32 bits */
+            const int32_t c1 = (s1 - sm) >> 1, c2 = sm - (5 * s0 >> 1) + 2 * s1 - (s2 >> 1),
+                          c3 = ((s2 - sm) >> 1) + (3 * (s0 - s1) >> 1);
+            int32_t s = ((((c3 * f >> 12) + c2) * f >> 12) + c1) * f >> 12;
+            s += s0; s = s > 32767 ? 32767 : s < -32768 ? -32768 : s;
             accL[i] += s * gl >> 15; accR[i] += s * gr >> 15;
             h += step;
         }

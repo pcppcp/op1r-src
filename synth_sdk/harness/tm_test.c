@@ -60,6 +60,17 @@ int main(void)
     SET32(0x00, 1); tm_block(); SET32(0x00, 2);
     run(300000 + 5 * 64, 2, 64);
     assert(tm_loads > before);
+    /* 1/2x on a straight ramp: the Hermite interpolation hits the midpoints exactly (no dulling of a line) */
+    host_tm_loopon = 0; tm_tr[2].loop = 0xFFFF; tm_tr[2].off = 0; tm_tr[2].speed = 0x8000;
+    run(400000, 6, 32);
+    SET32(0x14, (400000 + 6 * 32) << 6); tm_block();
+    h = (int32_t)(head[2] >> 32) - 32;
+    for (int i = 2; i < 62; i++) {
+        const int32_t n = h + i / 2, e0 = val(2, n), e1 = val(2, n + 1);
+        if ((n & 1023) > 1020 || (n & 1023) < 2) continue;              /* the synthetic ramp wraps every 1024 */
+        const int e = ((i & 1) ? (e0 + e1) / 2 : e0) * 0x7FFF >> 15;
+        assert(abs(host_tm_out[0][i] - e) <= 2);
+    }
     printf("tm ok (loads %u, misses %u)\n", tm_loads, tm_miss);
     return 0;
 }
