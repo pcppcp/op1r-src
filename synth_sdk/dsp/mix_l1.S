@@ -2,7 +2,8 @@
  * (0xFFA00E58..0xFFA00FDC, 388 bytes): one pass per sample instead of two (per sample the same operations in the
  * same order, so bit-exact with the model dsp/mix.c). Entered inside R246's frame (after LINK / saves / SP -= 16):
  * R0 = the argument; R4-R7, P3-P5 are restored by R246's epilogue. Leaves what the rest of the function reads:
- * [SP + 0x2C] = R0, [SP + 0x38] = &flag 0xFF80103C, [FP - 8] = &peak 0xFF801084, W[FP + 0x10] = vl b; the slot meter
+ * [SP + 0x2C] = R0, [SP + 0x38] = &flag 0xFF80103C, [FP - 8] = &peak 0xFF801084, W[FP + 0x10] = vl b,
+ * [FP - 4] = &m 0x01B4EF6E and P3 = 0xFF800BB4 (both read by the master monitor 0xFFA013A0); the slot meter
  * (flag) follows at 0xFFA00FDC, R246's. */
 	.section .l1mix,"ax"
 	.global _l1_mix
@@ -73,4 +74,7 @@ _l1_mix:
 	W[P2] = R7;
 	W[P2 + 2] = R5;
 	W[P2 + 4] = R3;
+	P3.L = 0x0BB4; P3.H = 0xFF80;		/* R246's loops leave these for the master monitor (0xFFA013A0): */
+	P0.L = 0xEF6E; P0.H = 0x01B4;		/* P3 = the bus (its output), [FP - 4] = &m */
+	[FP - 4] = P0;
 	JUMP.L _mix_ret;

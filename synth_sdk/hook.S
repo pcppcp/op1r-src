@@ -607,7 +607,7 @@ __hook_usbbuf2:
  * then constant and ship as precomputed bytes (l1_patches.json); plugins can change without regenerating them.
  * JUMP.L keeps all registers, RETS and ASTAT: the target returns straight to the L1 caller. Append only. */
 	.section .l1vec, "ax"
-	.global _l1v_metro, _l1v_push_lr, _l1v_push_interleaved, _l1v_rs_probe, _l1v_cw_pre, _l1v_cw_post1, _l1v_cw_post0
+	.global _l1v_metro, _l1v_push_lr, _l1v_push_interleaved, _l1v_rs_probe, _l1v_cw_pre, _l1v_cw_post1, _l1v_cw_post0, _l1v_mon_pre
 _l1v_metro:            JUMP.L _ci_metro_render
 _l1v_push_lr:          JUMP.L _usb6_push_lr
 _l1v_push_interleaved: JUMP.L _usb6_push_interleaved
@@ -615,6 +615,7 @@ _l1v_rs_probe:         JUMP.L _l1_rs_probe
 _l1v_cw_pre:           JUMP.L _cw_pre_stub		/* OP1R_CW=check (docs/81): Core_mix_master's volume call */
 _l1v_cw_post1:         JUMP.L _cw_post1_stub		/* .. its VU getters after the codec loops */
 _l1v_cw_post0:         JUMP.L _cw_post0_stub
+_l1v_mon_pre:          JUMP.L _mon_pre_stub		/* OP1R_MON=check|stress: Core_mix_master's album call */
 	.text
 	.align 2
 _cw_pre_stub:					/* in place of 0x01A10DE4; SP = Core_mix_master's (CALL pushes nothing) */
@@ -624,6 +625,7 @@ _cw_pre_stub:					/* in place of 0x01A10DE4; SP = Core_mix_master's (CALL pushes
 	[--SP] = R0;
 	[--SP] = R1;
 	SP += -12;
+	call _mon_post;
 	P1.L = 0x0DE4; P1.H = 0x01A1;
 	call (P1);
 	SP += 12;
@@ -634,6 +636,15 @@ _cw_pre_stub:					/* in place of 0x01A10DE4; SP = Core_mix_master's (CALL pushes
 	SP += 12;
 	RETS = [SP++];
 	[SP + 0x3C] = R0;			/* the flag back (stress builds change it) */
+	rts;
+_mon_pre_stub:					/* in place of the album call 0x01915608 */
+	[--SP] = RETS;
+	SP += -12;
+	P1.L = 0x5608; P1.H = 0x0191;
+	call (P1);
+	call _mon_pre;
+	SP += 12;
+	RETS = [SP++];
 	rts;
 _cw_post1_stub:
 	P1.L = 0x942E; P1.H = 0x019D;
