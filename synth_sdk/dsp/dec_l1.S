@@ -4,6 +4,7 @@
  * the pass: y[i] still reads its old value as v_0):
  *   y[i] acc A0 = B[i + 16] << 15, += h[k] v_k (k = 0..31); y[i+1] acc A1 = B[i + 17] << 15, += h[k-1] v_k (k = 1..32),
  * both in R246's order (W32, saturating per MAC; the extra h[32] = 0 / h[-1] = 0 products change nothing).
+ * Registers as R246's: only M0 of the M registers (its caller keeps a pointer in M1), L1-L3 0 at the end.
  * Pairs hp[k] = (h[k], h[k-1]) are built on the stack every block (h: R246's table 0x0106A6F0, filled at its init). */
 	.section .l1dec,"ax"
 	.global _l1_dec
@@ -16,8 +17,7 @@ _l1_dec:
 	I1.L = 0x123C; I1.H = 0xFF80; B1 = I1; L1 = 64;	/* A */
 	I3.L = 0x127C; I3.H = 0xFF80; B3 = I3; L3 = 64;	/* B, written */
 	I2 = I3; B2 = I3; L2 = 64;
-	M2 = 32; I2 += M2;			/* B, read from index 16 */
-	M1 = -2;
+	M0 = 32; I2 += M0;			/* B, read from index 16 */
 	P2 = 32;
 	LSETUP (3f, 4f) LC1 = P2;
 3:	R4 = [P3++];				/* x[2i], x[2i+1] */
@@ -40,13 +40,13 @@ _l1_dec:
 	LSETUP (5f, 5f) LC0 = P2;
 5:	A1 += R0.L * R1.H, A0 += R0.L * R1.L (W32) || R1 = [P0++] || R0.L = W[I1++];
 	A1 += R5.L * R1.H, A0 += R5.L * R1.L (W32);
-	I1 += M1;				/* the pass read one past: back to A[i + 1] */
+	I1 -= 2;				/* the pass read one past: back to A[i + 1] */
 	W[I1++] = R5.L;				/* A[i + 1] */
 	R2 = A0;
-	R3 = A1;
 	R6.L = R2.H * R7.L;
 	R7.L = R7.L + R7.H (S);
-	R6.H = R3.H * R7.L;
+	R1 = A1;
+	R6.H = R1.H * R7.L;
 	R7.L = R7.L + R7.H (S);
 4:	[P4++] = R6;
 	W[P5] = R7;
