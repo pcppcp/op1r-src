@@ -114,7 +114,12 @@ static void lane(void *r, int t, int32_t y, int32_t x0, int32_t x1, int32_t head
         }
         if (lp) {
             const int32_t b = XOF(tm_tr[t].lout);
-            if (b >= x0 && b <= x1) ln(r, b, y - h, b, y + h, g, c);
+            if (b >= x0 && b <= x1) {
+                ln(r, b, y - h, b, y + h, g, c);
+                if (big) { const int32_t cy = y - h - OP1_Q10(3);   /* loop out: a filled circle (stacked lines) */
+                    static const int8_t hw[5] = { 1, 2, 2, 2, 1 };
+                    for (int k = 0; k < 5; k++) ln(r, b - hw[k] * OP1_Q10(1), cy + (k - 2) * OP1_Q10(1), b + hw[k] * OP1_Q10(1), cy + (k - 2) * OP1_Q10(1), 0x480, c); }
+            }
             if (big && b > x0 && a < x1) ln(r, CLAMP(a), y - h, CLAMP(b), y - h, g, c);
         }
     }
@@ -201,8 +206,23 @@ int tfs_key(int code, int pressed)                               /* key thread: 
     if (!shown_now()) return 0;
     if (code >= 0x06 && code <= 0x09) { if (pressed) sel = (uint8_t)(code - 0x06); return 1; }
     if (code == 0x24 || code == 0x25) {                          /* < / >: our scrubbing (R246's would call TapeScreen
-                                                                  * methods on this object) */
-        wind = pressed ? (code == 0x24 ? -1 : 1) : 0; wind_t = now();
+                                                                  * methods on this object); Shift: previous / next marker */
+        if (pressed && SHIFT) {
+            extern int32_t tm_pos[]; extern int tm_n;            /* op1r tape markers (tape/markers.c), sorted */
+            const int32_t h = tm_head_pos(sel), m = 2000;        /* ~45 ms: not the marker we stand on */
+            int32_t best = -1;
+            int32_t cand[34]; int n = 0;
+            for (int i = 0; i < tm_n && n < 32; i++) cand[n++] = tm_pos[i];
+            if (tm_tr[sel].lset) cand[n++] = tm_tr[sel].lin;
+            if (tm_tr[sel].lon) cand[n++] = tm_tr[sel].lout;
+            for (int i = 0; i < n; i++) {
+                const int32_t v = cand[i];
+                if (code == 0x25 ? (v > h + m && (best < 0 || v < best)) : (v < h - m && (best < 0 || v > best))) best = v;
+            }
+            if (best >= 0) LOCATE(best > TM_MAXPOS ? TM_MAXPOS : best);
+            return 1;
+        }
+        wind = pressed && !SHIFT ? (code == 0x24 ? -1 : 1) : 0; wind_t = now();
         return 1;
     }
     if (code < 0x2D || code > 0x2F) return 0;
