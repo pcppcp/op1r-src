@@ -451,6 +451,10 @@ def write_l1_runtime_table():
     if not _mon: drop |= {'0xffa01374', '0xffa01378'}
     if os.environ.get('OP1R_DEC') not in ('check', 'stress', 'l1check', 'l1stress'): drop |= {'0xffa01eb4', '0xffa02456', '0xffa02888'}
     pokes = [p for p in rec['pokes'] if p[0] not in drop]
+    for p in list(pokes):                                            # docs/81: a poke inside one of our L1 stages patches R246
+        a0 = int(p[0], 16)                                           # code that is gone (e.g. the metronome call in
+        if any(on and base <= a0 < base + room for _, base, room, on, _ in L1_STAGES):   # Core_mix_master under .l1master)
+            pokes.remove(p)
     for a, new, orig in pokes:
         n = len(new) // 2
         assert n <= 16 and len(orig) == len(new)
