@@ -5,7 +5,7 @@
  *   bottom: the four tracks as thin lanes around their own heads, the active one's clips blue, the others grey.
  * Keys (consumed on this screen): T1..T4 select; s1 / s2 / s3 (0x2D / 0x2E / 0x2F) set the active track's loop in /
  * out at its head and toggle it (out also switches it on), as stock does for the global loop. Knobs: white speed
- * (ratios; Shift: fine), red direction; blue / green stay R246's. Every other key stays R246's.
+ * (ratios; Shift: fine), red record level (Shift + red: marker jump), Shift + s5 reverse; blue / green R246's. Every other key stays R246's.
  * Text in the stock font (op1_text_*, lowercase); lines with Raster::line. Clips from db2::Clips (0x01AA8D70:
  * 512 x { track, start, stop } in samples, used flags at + 0x1800).
  * Swap like the MIDI sequencer view (seqdev/ms_fw.c): an iter-class screen object (empty usbout.svg) in the tape
@@ -29,6 +29,9 @@ int32_t tm_head_pos(int t);
 #define CLIP_USED      ((const volatile uint8_t *)0x01AAA570)
 #define NCLIPS         512
 #define SR             44100
+#define REC_LEVEL      (*(volatile int16_t *)0x01B4EF6E)          /* R246's tape record level (stock slider: >> 5, docs/11) */
+#define IN_PEAK        (*(volatile int16_t *)0xFF80108A)          /* input meter peak hold (docs/29) */
+#define SEL_TRACK      (*(volatile int32_t *)0xFF802964)          /* R246's selected track: where its recording goes */
 #define TAPE_VT        0x01911B5C                                 /* R246's TapeScreen vtable (docs/22) */
 #define TPOS           (*(volatile int32_t *)0xFF802974)          /* samples << 6 */
 #define LOCATE(s)      (((void (*)(int32_t))0x01A55024)(s))       /* tape_c::check_pos (0 .. 0xF2BFA0) */
@@ -145,6 +148,14 @@ static void tfs_update(void *scr, int dt)
     txt(r, T_TIME, b);
     fmt_speed(b, tm_tr[sel].speed); txt(r, T_SPEED, b);
     if (rev) txt(r, T_REV, "rev");
+    {                                                            /* right edge, as stock: record level + input meter */
+        const int32_t x = OP1_Q10(316), y0 = OP1_Q10(34), y1 = OP1_Q10(100), hgt = y1 - y0;
+        ln(r, x, y0, x, y1, 0x300, c_grey);
+        int32_t pk = IN_PEAK < 0 ? 0 : IN_PEAK; const int32_t py = y1 - (int32_t)((int64_t)hgt * pk >> 15);
+        if (py < y1) ln(r, x, py, x, y1, 0x600, c_white);
+        const int32_t ly = y1 - (int32_t)((int64_t)hgt * (REC_LEVEL < 0 ? 0 : REC_LEVEL) >> 15);
+        ln(r, x - OP1_Q10(3), ly, x + OP1_Q10(3), ly, OP1_Q10(5), c_red);   /* the level dot (a short thick line) */
+    }
     /* the active track around its head */
     {                                                            /* bar marks (from tape 0, R246's tempo) */
         const int64_t bar_q8 = (int64_t)4 * 60 * SR * 256 * 256 / bpm_q8();   /* samples per bar, Q8 */
@@ -223,7 +234,13 @@ int tfs_view_open(void) { return shown_now(); }               /* dispatcher.c ta
 int tfs_key(int code, int pressed)                               /* key thread: 1 = consumed */
 {
     if (!shown_now()) return 0;
-    if (code >= 0x06 && code <= 0x09) { if (pressed) sel = (uint8_t)(code - 0x06); return 1; }
+    if (code >= 0x06 && code <= 0x09) { if (pressed) { sel = (uint8_t)(code - 0x06); SEL_TRACK = sel; } return 1; }   /* (R246 records here) */
+    if (code == 0x11) {                                          /* Shift + s5: reverse the active track */
+        static uint8_t sw;
+        if (pressed && SHIFT) { tm_tr[sel].speed = -tm_tr[sel].speed; sw = 1; return 1; }
+        if (!pressed && sw) { sw = 0; return 1; }
+        return 0;
+    }
     if (code == 0x24 || code == 0x25) {                          /* < / >: our scrubbing (R246's would call TapeScreen
                                                                   * methods on this object); Shift: previous / next marker */
         if (pressed && SHIFT) {                                  /* Shift: previous / next bar (R246's tempo, from tape 0) */
@@ -263,9 +280,11 @@ int tfs_knob(int knob, int delta)                                /* key thread: 
     const int k = knob & 3, fine = knob > 3 || SHIFT;
     if (k != 2 && k != 3) return 0;                              /* blue / green: R246's */
     volatile tm_track *tr = &tm_tr[sel];
-    if (k == 3) {                                                /* red: direction; Shift + red: op1r's marker jump */
+    if (k == 3) {                                                /* red: record level, as stock; Shift + red: op1r's marker jump */
         if (fine) return 0;
-        if (step_of(3, delta, 2048)) tr->speed = -tr->speed;
+        const int st = step_of(3, delta, 1024); if (!st) return 1;
+        int32_t v = REC_LEVEL + st * 0x400;                      /* 32 clicks over the range */
+        REC_LEVEL = (int16_t)(v < 0 ? 0 : v > 0x7FFF ? 0x7FFF : v);
         return 1;
     }
     const int neg = tr->speed < 0;
