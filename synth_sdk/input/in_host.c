@@ -48,13 +48,14 @@ void in_clock(uint32_t now)                                  /* audio callback s
     if (++clock_count == 16) { rate = clock_sum > 13931968u ? 22050 : 44100; clock_sum = clock_count = 0; }
 }
 extern void in_highpass_stock(void);                         /* hook.S: the stock prologue, then 0x019674FE */
+void dc_run(void);                                           /* dsp/dc.c: the stock high-pass (or its check) */
 void in_bus(uint32_t *monitor, uint32_t caller)              /* hook.S in_highpass_entry (audio thread) */
 {
     extern int pc_mute(void), pc_split(void);                  /* pulse clock on the input follows (midi/pclk.c) */
     pc_split();                                                /* one clock channel: the input = the other channel */
     int mute = (caller == 0xFFA02896u || caller == 0xFFA02464u || caller == 0xFFA01EC2u) && pc_mute();
     int n = caller == 0xFFA02896u ? current() : 0;
-    if (!n) { in_highpass_stock(); if (mute) *monitor = 0; return; }
+    if (!n) { dc_run(); if (mute) *monitor = 0; return; }
     const op1_input_engine_t *d = op1_input_engines[n];
     int slot = (int)SLOT;
     if (d != active || slot != active_slot || active_rate != rate || active_source != INPUT_SOURCE || active_mode != INPUT_MODE) {
