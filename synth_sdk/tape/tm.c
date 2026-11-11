@@ -34,6 +34,8 @@ extern int host_tm_read(int t, int chunk, int16_t *dst);         /* fills 64 KB,
 #define OUT_L      host_tm_out[0]
 #define OUT_R      host_tm_out[1]
 #define MALLOC     host_tm_malloc
+static int16_t host_bus[64];
+#define BUS        host_bus
 #else
 #define X          ((volatile uint8_t *)0xFF802960)              /* R246's transport (docs/29) */
 #define LOOP_S     (*(volatile int32_t *)0x01B4EF34)
@@ -42,6 +44,7 @@ extern int host_tm_read(int t, int chunk, int16_t *dst);         /* fills 64 KB,
 #define OUT_L      ((volatile int16_t *)0xFF800D34)
 #define OUT_R      ((volatile int16_t *)0xFF800DB4)
 #define MALLOC     ((void *(*)(unsigned))0x01A9F348)             /* heap 0 */
+#define BUS        ((const volatile int16_t *)0xFF800BB4)        /* the instrument bus R246 records */
 #define Y_LSEEK    ((int (*)(int, int, int))0x01A9A0E4)
 #define Y_READ     ((int (*)(int, void *, unsigned))0x01A99C90)
 #define TAPE_FD    (*(volatile int *)0x01B4EF44)
@@ -61,7 +64,6 @@ typedef struct { int16_t *data; volatile int16_t t, chunk; volatile uint8_t stat
 static tm_slot slot[TM_SLOTS];                                   /* state 0 free, 1 wanted, 2 loaded */
 static int8_t map[4][TM_CHUNKS];                                 /* chunk -> slot + 1 (0 none) */
 static int64_t head[4];
-static int32_t last_pos = -1;
 static uint32_t blk;
 static uint8_t rec_seen;
 volatile int8_t tm_scrub;                                        /* -1 / +1: < / > held on our screen (tfscreen.c) */
@@ -121,89 +123,77 @@ static void tm_resync(int32_t pos)
     }
 }
 
-/* scrubbing: the active track's head at scrub_v (no loops), only it sounds; the others keep their heads */
-static void tm_scrub_block(void)
+static int32_t xlast = -1;                                       /* transport position last block (jump detection) */
+volatile int16_t tm_in_peak;                                     /* the recorded signal (the instrument bus) for the meter */
+void tm_set_head(int t, int32_t pos) { head[t & 3] = (int64_t)(pos < 0 ? 0 : pos) << 32; }   /* GUI: bar jumps */
+
+static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32_t *accL, int32_t *accR)
 {
-    int32_t accL[64], accR[64];
-    for (int i = 0; i < 64; i++) accL[i] = accR[i] = 0;
-    const int64_t step = (int64_t)scrub_v << 16;
-    {
-        const int t = tm_scrub_track & 3;
-        int64_t h = head[t];
-        const int16_t gl = GAIN_L(t), gr = GAIN_R(t);
-        const int16_t *cache = 0; int32_t cache_c = -1;
-        for (int i = 0; i < 64; i++) {
-            if (h < 0) h = 0;
-            const int32_t n = (int32_t)(h >> 32), f = (int32_t)((uint64_t)h >> 20 & 0xFFF);
-            const int32_t s0 = tm_sample(t, n, &cache, &cache_c), s1 = tm_sample(t, n + 1, &cache, &cache_c);
-            const int32_t s = s0 + ((s1 - s0) * f >> 12);        /* linear: scrubbing only */
-            accL[i] += s * gl >> 16; accR[i] += s * gr >> 16;     /* -6 dB, as winding is quieter */
-            h += step;
-        }
-        head[t] = h < 0 ? 0 : h;
-        const int32_t c = (int32_t)(h >> 32) >> 15, d = step < 0 ? -1 : 1;
-        for (int k = 1; k <= 3; k++) tm_chunk(t, c + k * d, 1);
+    int64_t h = head[t];
+    int64_t lo = 0, hi = (int64_t)(TM_CHUNKS * CHUNK) << 32;
+    if (loops && tm_tr[t].lon && tm_tr[t].lout > tm_tr[t].lin) {
+        lo = (int64_t)tm_tr[t].lin << 32; hi = (int64_t)tm_tr[t].lout << 32;
+        if (h < lo || h >= hi) { int64_t r = (h - lo) % (hi - lo); if (r < 0) r += hi - lo; h = lo + r; }   /* loop just set: fold in */
     }
+    const int16_t gl = GAIN_L(t), gr = GAIN_R(t);
+    const int16_t *cache = 0; int32_t cache_c = -1;
     for (int i = 0; i < 64; i++) {
-        OUT_L[i] = (int16_t)(accL[i] > 32767 ? 32767 : accL[i] < -32768 ? -32768 : accL[i]);
-        OUT_R[i] = (int16_t)(accR[i] > 32767 ? 32767 : accR[i] < -32768 ? -32768 : accR[i]);
+        if (h >= hi) h -= hi - lo; else if (h < lo) h += hi - lo;
+        const int32_t n = (int32_t)(h >> 32), f = (int32_t)((uint64_t)h >> 20 & 0xFFF);   /* fraction Q12 */
+        const int32_t sm = tm_sample(t, n - 1, &cache, &cache_c), s0 = tm_sample(t, n, &cache, &cache_c),
+                      s1 = tm_sample(t, n + 1, &cache, &cache_c), s2 = tm_sample(t, n + 2, &cache, &cache_c);
+        /* 4-point Hermite (Catmull-Rom): coefficients up to ~2^18, x Q12 stays in 32 bits */
+        const int32_t c1 = (s1 - sm) >> 1, c2 = sm - (5 * s0 >> 1) + 2 * s1 - (s2 >> 1),
+                      c3 = ((s2 - sm) >> 1) + (3 * (s0 - s1) >> 1);
+        int32_t s = ((((c3 * f >> 12) + c2) * f >> 12) + c1) * f >> 12;
+        s += s0; s = s > 32767 ? 32767 : s < -32768 ? -32768 : s;
+        accL[i] += s * gl >> gain_shift; accR[i] += s * gr >> gain_shift;
+        h += step;
+        if (h >= hi) h -= hi - lo; else if (h < lo) h += hi - lo;   /* the stored head stays inside its loop */
     }
+    if (h < 0) h = 0;
+    head[t] = h;
+    const int32_t c = (int32_t)(h >> 32) >> 15, d = step < 0 ? -1 : 1;   /* prefetch ahead, and the loop start */
+    for (int k = 1; k <= 3; k++) tm_chunk(t, c + k * d, 1);
+    if (hi - lo < ((int64_t)(TM_CHUNKS * CHUNK) << 32)) tm_chunk(t, (int32_t)((d > 0 ? lo : hi - 1) >> 32) >> 15, 1);
 }
 
 void tm_block(void)                                              /* audio ISR, after tape_play_mix */
 {
     blk++;
+    {                                                            /* the meter: the bus R246 records (last block's) */
+        int32_t pk = tm_in_peak * 31 >> 5;
+        const volatile int16_t *b = BUS;
+        for (int i = 0; i < 64; i++) { int32_t v = b[i] < 0 ? -b[i] : b[i]; if (v > pk) pk = v; }
+        tm_in_peak = (int16_t)(pk > 32767 ? 32767 : pk);
+    }
     if (!tm_on || !slot[0].data) return;                         /* memory comes from tm_service (main loop) */
-    const int32_t mode = MODE, pos = TPOS >> 6;
+    const int32_t mode = MODE, pos = TPOS >> 6, v = TSPEED;
     if (mode == 1) rec_seen = 1;                                 /* recording (R246's machine) changes chunks we may hold */
+    {                                                            /* the transport jumped (locate, marker): heads resync */
+        int32_t d = xlast < 0 ? 0x7FFFFFFF : pos - (xlast + ((mode == 1 || mode == 2) ? v >> 21 : 0));
+        if (d != 0x7FFFFFFF && LOOP_ON && LOOP_E > LOOP_S) {     /* the transport's own loop wrap is no jump */
+            const int32_t L = LOOP_E - LOOP_S;
+            d %= L; if (d > L / 2) d -= L; else if (d < -L / 2) d += L;
+        }
+        if (d > 1024 || d < -1024) tm_resync(pos);
+        xlast = pos;
+    }
     {                                                            /* scrubbing: spin up / down to +-8x like stock winding */
-        const int32_t target = tm_scrub * (8 << 16), dv = 0x2000;      /* 1/8x per block: ~90 ms to 8x */
+        const int32_t target = tm_scrub * (8 << 16), dv = 0x2000;
         scrub_v = scrub_v < target ? (target - scrub_v < dv ? target : scrub_v + dv) : (scrub_v - target < dv ? target : scrub_v - dv);
     }
-    if (scrub_v) { tm_scrub_block(); last_pos = -1; return; }
-    if (mode != 2) { tm_resync(pos); last_pos = -1; return; }    /* playing only; stopped / winding: the heads follow the transport */
-    if (rec_seen) {                                              /* first play after a recording: reload every chunk */
+    const int playing = mode == 1 || mode == 2, sc = tm_scrub_track & 3;
+    if (!playing && !scrub_v) return;                            /* stopped: R246's (silent) output stays */
+    if (playing && rec_seen && mode == 2) {                      /* first play after a recording: reload every chunk */
         rec_seen = 0;
         for (int i = 0; i < TM_SLOTS; i++) if (slot[i].t >= 0) { slot[i].state = 1; slot[i].gen++; }
     }
-    const int32_t v = TSPEED;
-    int32_t d = last_pos < 0 ? 0x7FFFFFFF : pos - last_pos;
-    if (d != 0x7FFFFFFF && LOOP_ON && LOOP_E > LOOP_S) {         /* the transport's own loop wrap is no locate */
-        const int32_t L = LOOP_E - LOOP_S;
-        d %= L; if (d > L / 2) d -= L; else if (d < -L / 2) d += L;
-    }
-    if (d > 1024 || d < -1024) tm_resync(pos);                   /* (re)start, locate */
-    last_pos = pos;
     int32_t accL[64], accR[64];
     for (int i = 0; i < 64; i++) accL[i] = accR[i] = 0;
     for (int t = 0; t < 4; t++) {
-        const int64_t step = ((int64_t)v * tm_tr[t].speed) >> 11;       /* (1x = 2^27) x Q16 -> Q32 */
-        int64_t h = head[t];
-        int64_t lo = 0, hi = (int64_t)(TM_CHUNKS * CHUNK) << 32;
-        if (tm_tr[t].lon && tm_tr[t].lout > tm_tr[t].lin) {
-            lo = (int64_t)tm_tr[t].lin << 32; hi = (int64_t)tm_tr[t].lout << 32;
-            if (h < lo || h >= hi) { int64_t r = (h - lo) % (hi - lo); if (r < 0) r += hi - lo; h = lo + r; }   /* loop just set: fold in */
-        }
-        const int16_t gl = GAIN_L(t), gr = GAIN_R(t);
-        const int16_t *cache = 0; int32_t cache_c = -1;
-        for (int i = 0; i < 64; i++) {
-            if (h >= hi) h -= hi - lo; else if (h < lo) h += hi - lo;
-            const int32_t n = (int32_t)(h >> 32), f = (int32_t)((uint64_t)h >> 20 & 0xFFF);   /* fraction Q12 */
-            const int32_t sm = tm_sample(t, n - 1, &cache, &cache_c), s0 = tm_sample(t, n, &cache, &cache_c),
-                          s1 = tm_sample(t, n + 1, &cache, &cache_c), s2 = tm_sample(t, n + 2, &cache, &cache_c);
-            /* 4-point Hermite (Catmull-Rom): coefficients up to ~2^18, x Q12 stays in 32 bits */
-            const int32_t c1 = (s1 - sm) >> 1, c2 = sm - (5 * s0 >> 1) + 2 * s1 - (s2 >> 1),
-                          c3 = ((s2 - sm) >> 1) + (3 * (s0 - s1) >> 1);
-            int32_t s = ((((c3 * f >> 12) + c2) * f >> 12) + c1) * f >> 12;
-            s += s0; s = s > 32767 ? 32767 : s < -32768 ? -32768 : s;
-            accL[i] += s * gl >> 15; accR[i] += s * gr >> 15;
-            h += step;
-            if (h >= hi) h -= hi - lo; else if (h < lo) h += hi - lo;   /* the stored head stays inside its loop */
-        }
-        head[t] = h;
-        const int32_t c = (int32_t)(h >> 32) >> 15, d = step < 0 ? -1 : 1;   /* prefetch ahead, and the loop start */
-        for (int k = 1; k <= 3; k++) tm_chunk(t, c + k * d, 1);
-        if (hi - lo < ((int64_t)(TM_CHUNKS * CHUNK) << 32)) tm_chunk(t, (int32_t)((d > 0 ? lo : hi - 1) >> 32) >> 15, 1);
+        if (scrub_v && t == sc) tm_track_block(t, (int64_t)scrub_v << 16, 0, 16, accL, accR);   /* -6 dB, no loops */
+        else if (playing) tm_track_block(t, ((int64_t)v * tm_tr[t].speed) >> 11, 1, 15, accL, accR);   /* (1x = 2^27) x Q16 -> Q32 */
     }
     for (int i = 0; i < 64; i++) {
         OUT_L[i] = (int16_t)(accL[i] > 32767 ? 32767 : accL[i] < -32768 ? -32768 : accL[i]);

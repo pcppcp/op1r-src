@@ -30,7 +30,11 @@ int32_t tm_head_pos(int t);
 #define NCLIPS         512
 #define SR             44100
 #define REC_LEVEL      (*(volatile int16_t *)0x01B4EF6E)          /* R246's tape record level (stock slider: >> 5, docs/11) */
-#define IN_PEAK        (*(volatile int16_t *)0xFF80108A)          /* input meter peak hold (docs/29) */
+extern volatile int16_t tm_in_peak;                              /* tape/tm.c: the bus R246 records (instrument / input) */
+#define IN_PEAK        tm_in_peak
+#define T_MODE         (*(volatile int32_t *)0xFF802960)          /* 0 stop, 1 rec, 2 play, 3 wind */
+#define UI_STATE       (*(volatile int32_t *)0x018C17D4)          /* 6 = record armed (docs/25) */
+void tm_set_head(int t, int32_t pos);
 #define SEL_TRACK      (*(volatile int32_t *)0xFF802964)          /* R246's selected track: where its recording goes */
 #define TAPE_VT        0x01911B5C                                 /* R246's TapeScreen vtable (docs/22) */
 #define TPOS           (*(volatile int32_t *)0xFF802974)          /* samples << 6 */
@@ -57,7 +61,7 @@ static const char *const ratio_txt[] = { "1/4", "1/3", "1/2", "2/3", "3/4", "1",
 static const uint8_t c_blue[4] = { 0x4D, 0x9E, 0xFF, 0xFF }, c_green[4] = { 0x00, 0xED, 0x95, 0xFF },
                      c_white[4] = { 0xFF, 0xFF, 0xFF, 0xFF }, c_red[4] = { 0xFF, 0x3A, 0x5D, 0xFF },
                      c_grey[4] = { 0x6F, 0x71, 0x73, 0xFF }, c_dim[4] = { 0x40, 0x42, 0x44, 0xFF },
-                     c_dgreen[4] = { 0x00, 0x77, 0x4A, 0xFF };
+                     c_dgreen[4] = { 0x00, 0x77, 0x4A, 0xFF }, c_dred[4] = { 0x80, 0x1D, 0x2E, 0xFF };
 
 static void ln(void *r, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t w, const uint8_t *c) { if (x0 != x1 || y0 != y1) sf_line(r, x0, y0, x1, y1, w, c); }
 static char *put(char *q, const char *s) { while (*s) *q++ = *s++; *q = 0; return q; }
@@ -95,6 +99,7 @@ static void make(void)
 }
 
 /* a track around its own head: clips, its loop; window +-win s over [x0, x1] */
+static uint8_t rec_red;                                          /* recording or armed: the active track red */
 static void lane(void *r, int t, int32_t y, int32_t x0, int32_t x1, int32_t head, int32_t win, int32_t thick, int on, int big)
 {
     const int32_t cx = (x0 + x1) / 2, half = (x1 - x0) / 2, span = win * SR;
@@ -105,7 +110,7 @@ static void lane(void *r, int t, int32_t y, int32_t x0, int32_t x1, int32_t head
         if (!CLIP_USED[i] || CLIPS[i * 3] != t) continue;
         const int32_t a = XOF(CLIPS[i * 3 + 1]), b = XOF(CLIPS[i * 3 + 2]);
         if (b <= x0 || a >= x1) continue;
-        ln(r, CLAMP(a), y, CLAMP(b), y, thick, on ? c_blue : c_grey);
+        ln(r, CLAMP(a), y, CLAMP(b), y, thick, on ? (rec_red ? c_red : c_blue) : c_grey);
     }
     const int lp = tm_tr[t].lon && tm_tr[t].lout > tm_tr[t].lin;
     if (lp || tm_tr[t].lset) {                                   /* loop in (also set but off): a line, a circle on top */
@@ -138,11 +143,28 @@ static void tfs_update(void *scr, int dt)
     void *r = op1_raster();
     if (!made) make();
     const int32_t head = tm_head_pos(sel) < 0 ? 0 : tm_head_pos(sel);
-    const int rev = tm_tr[sel].speed < 0;
+    const int rev = tm_tr[sel].speed < 0, mode = T_MODE, armed = UI_STATE == 6;
+    rec_red = (uint8_t)(mode == 1 || armed);
     /* boxed track number */
     ln(r, OP1_Q10(3), OP1_Q10(1), OP1_Q10(23), OP1_Q10(1), 0x500, c_white); ln(r, OP1_Q10(23), OP1_Q10(1), OP1_Q10(23), OP1_Q10(21), 0x500, c_white);
     ln(r, OP1_Q10(23), OP1_Q10(21), OP1_Q10(3), OP1_Q10(21), 0x500, c_white); ln(r, OP1_Q10(3), OP1_Q10(21), OP1_Q10(3), OP1_Q10(1), 0x500, c_white);
     char b[16]; b[0] = (char)('1' + sel); b[1] = 0; txt(r, T_NUM, b);
+    {                                                            /* state, right of the square (y 3..19) */
+        const int32_t x = OP1_Q10(28), y = OP1_Q10(11);
+        if (mode == 1 || armed) {                                /* recording: a red dot; armed: a red ring */
+            static const int8_t hw[7] = { 2, 3, 4, 4, 4, 3, 2 };
+            if (mode == 1) for (int k = 0; k < 7; k++) ln(r, x + OP1_Q10(4) - hw[k] * OP1_Q10(1), y + (k - 3) * OP1_Q10(1), x + OP1_Q10(4) + hw[k] * OP1_Q10(1), y + (k - 3) * OP1_Q10(1), 0x480, c_red);
+            else { static const int8_t ox[9] = { 4, 3, 0, -3, -4, -3, 0, 3, 4 }, oy[9] = { 0, 3, 4, 3, 0, -3, -4, -3, 0 };
+                for (int k = 0; k < 8; k++) ln(r, x + OP1_Q10(4) + ox[k] * OP1_Q10(1), y + oy[k] * OP1_Q10(1), x + OP1_Q10(4) + ox[k + 1] * OP1_Q10(1), y + oy[k + 1] * OP1_Q10(1), 0x400, c_red); }
+        } else if (mode == 2 || mode == 3) {                     /* playing: a triangle */
+            ln(r, x, y - OP1_Q10(5), x, y + OP1_Q10(5), 0x400, c_white);
+            ln(r, x, y - OP1_Q10(5), x + OP1_Q10(8), y, 0x400, c_white);
+            ln(r, x, y + OP1_Q10(5), x + OP1_Q10(8), y, 0x400, c_white);
+        } else {                                                 /* stopped: a square */
+            ln(r, x, y - OP1_Q10(4), x + OP1_Q10(8), y - OP1_Q10(4), 0x400, c_grey); ln(r, x + OP1_Q10(8), y - OP1_Q10(4), x + OP1_Q10(8), y + OP1_Q10(4), 0x400, c_grey);
+            ln(r, x + OP1_Q10(8), y + OP1_Q10(4), x, y + OP1_Q10(4), 0x400, c_grey); ln(r, x, y + OP1_Q10(4), x, y - OP1_Q10(4), 0x400, c_grey);
+        }
+    }
     const uint32_t sec = (uint32_t)head / SR;
     char *q = put_u(b, sec / 3600, 1); *q++ = ':'; q = put_u(q, sec / 60 % 60, 2); *q++ = ':'; put_u(q, sec % 60, 2);
     txt(r, T_TIME, b);
@@ -150,11 +172,12 @@ static void tfs_update(void *scr, int dt)
     if (rev) txt(r, T_REV, "rev");
     {                                                            /* right edge, as stock: record level + input meter */
         const int32_t x = OP1_Q10(316), y0 = OP1_Q10(34), y1 = OP1_Q10(100), hgt = y1 - y0;
-        ln(r, x, y0, x, y1, 0x300, c_grey);
+        ln(r, x, y0, x, y1, 0x300, c_dred);                      /* as stock: a red line, the signal red, the level a red dot */
         int32_t pk = IN_PEAK < 0 ? 0 : IN_PEAK; const int32_t py = y1 - (int32_t)((int64_t)hgt * pk >> 15);
-        if (py < y1) ln(r, x, py, x, y1, 0x600, c_white);
+        if (py < y1) ln(r, x, py, x, y1, 0x700, c_red);
         const int32_t ly = y1 - (int32_t)((int64_t)hgt * (REC_LEVEL < 0 ? 0 : REC_LEVEL) >> 15);
-        ln(r, x - OP1_Q10(3), ly, x + OP1_Q10(3), ly, OP1_Q10(5), c_red);   /* the level dot (a short thick line) */
+        static const int8_t hw[5] = { 1, 2, 2, 2, 1 };           /* the dot: stacked lines */
+        for (int k = 0; k < 5; k++) ln(r, x - hw[k] * OP1_Q10(1), ly + (k - 2) * OP1_Q10(1), x + hw[k] * OP1_Q10(1), ly + (k - 2) * OP1_Q10(1), 0x480, c_red);
     }
     /* the active track around its head */
     {                                                            /* bar marks (from tape 0, R246's tempo) */
@@ -179,8 +202,9 @@ static void tfs_update(void *scr, int dt)
             ln(r, x + OP1_Q10(3), OP1_Q10(50), x, OP1_Q10(55), 0x600, col);
         }
     }
-    ln(r, OP1_Q10(160), OP1_Q10(48), OP1_Q10(160), OP1_Q10(88), 0x600, c_white);
-    ln(r, OP1_Q10(160), OP1_Q10(48), OP1_Q10(rev ? 154 : 166), OP1_Q10(48), 0x600, rev ? c_red : c_white);
+    const uint8_t *hc = rec_red ? c_red : c_white;
+    ln(r, OP1_Q10(160), OP1_Q10(48), OP1_Q10(160), OP1_Q10(88), 0x600, hc);
+    ln(r, OP1_Q10(160), OP1_Q10(48), OP1_Q10(rev ? 154 : 166), OP1_Q10(48), 0x600, rev ? c_red : hc);
     /* all four tracks */
     for (int t = 0; t < 4; t++) {
         const int32_t y = OP1_Q10(108 + 8 * t), h = tm_head_pos(t) < 0 ? 0 : tm_head_pos(t);
@@ -220,13 +244,9 @@ void tfs_poll(void)                                              /* main loop, e
     else if (!tm_on && tfs_in) tfs_set(0);
     extern volatile int8_t tm_scrub; extern int tm_scrubbing(void);
     extern volatile uint8_t tm_scrub_track; tm_scrub_track = sel;
-    tm_scrub = wind;                                             /* the engine plays the active track at up to 8x (audible) */
-    if (!wind && !tm_scrubbing()) return;
-    const uint32_t t = now();
-    if (t - wind_t < 8000000u) return;                           /* every 20 ms the transport follows the active head */
-    wind_t = t;
-    const int32_t p = tm_head_pos(sel);
-    LOCATE(p < 0 ? 0 : p > TM_MAXPOS ? TM_MAXPOS : p);
+    tm_scrub = wind;                                             /* the engine moves (and plays) only the active track at up
+                                                                  * to 8x; the others keep their speed / position */
+    (void)tm_scrubbing;
 }
 static int shown_now(void) { return tfs_in && CUR_MODE_ID == 2 && tfs_id >= 0 && SCREEN_TABLE[tfs_id] == (void *)tfs_scr; }
 int tfs_view_open(void) { return shown_now(); }               /* dispatcher.c tape_page: op1r's tape markers work here too */
@@ -247,7 +267,7 @@ int tfs_key(int code, int pressed)                               /* key thread: 
             const int64_t bar_q8 = (int64_t)4 * 60 * SR * 256 * 256 / bpm_q8(), h = (int64_t)tm_head_pos(sel) << 8, m = 2000 << 8;
             int64_t k = code == 0x25 ? (h + m) / bar_q8 + 1 : (h - m <= 0 ? 0 : (h - m - 1) / bar_q8);
             const int32_t v = (int32_t)(k * bar_q8 >> 8);
-            LOCATE(v < 0 ? 0 : v > TM_MAXPOS ? TM_MAXPOS : v);
+            tm_set_head(sel, v < 0 ? 0 : v > TM_MAXPOS ? TM_MAXPOS : v);   /* the active track only */
             return 1;
         }
         wind = pressed && !SHIFT ? (code == 0x24 ? -1 : 1) : 0; wind_t = now();
