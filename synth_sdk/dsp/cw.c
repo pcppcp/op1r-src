@@ -40,10 +40,38 @@ int16_t cw_model(int32_t *out, int16_t cur, int16_t step, int sync)
     return cur;
 }
 
+/* speaker (B[0x018B621D] == 0, 0xFFA01698): x = sat(L/2 + R/2), v = mul32(c, sat(sat(x + v') - x')) (a high-pass,
+ * c = 0x7BB8CB8E, state 0x01AAAC50 { v', x' }), out[2i] = mul32(cur^2 << 16, v) (one channel, the odd words untouched) */
+static inline int32_t mul32(int32_t a, int32_t b)
+{
+    const int64_t al = (uint16_t)a, bl = (uint16_t)b, ah = (int16_t)(a >> 16), bh = (int16_t)(b >> 16);
+    int64_t a1 = (int64_t)((uint64_t)(al * bl) >> 16);
+    a1 += ah * bl + bh * al;
+    a1 >>= 15;
+    const int64_t a0 = (ah == -32768 && bh == -32768) ? 0x7FFFFFFF : 2 * ah * bh;
+    return sat32(a0 + a1);
+}
+#define SPK  ((volatile int32_t *)0x01AAAC50)
+int16_t spk_model(int32_t *out, int16_t cur, int16_t step, int32_t *st)
+{
+    int32_t v = st[0], xp = st[1];
+    for (int i = 0; i < 64; i++) {
+        cur = sat16(cur + step);
+        const int32_t x = sat32((int64_t)(ML[i] >> 1) + (MR[i] >> 1));
+        v = mul32(0x7BB8CB8E, sat32((int64_t)sat32((int64_t)x + v) - xp));
+        xp = x;
+        out[2 * i] = mul32((int32_t)((uint32_t)(uint16_t)mR(cur, cur) << 16), v);
+    }
+    st[0] = v; st[1] = xp;
+    return cur;
+}
+
 #ifdef CW_CHECK
 struct { uint32_t blocks, bad, first_i, first_orig, first_model, sync, nobuf, unmatched; } cw_check;   /* unmatched: the normal path calls both VU getters */
 static int32_t sh[128];
 static int16_t sh_cur;
+static int sh_spk;
+static int32_t sh_st[2];
 static volatile int32_t *sh_out;
 #ifdef CW_STRESS
 static uint32_t ws = 0xC0FFEE;
@@ -57,11 +85,19 @@ int cw_pre(volatile int32_t *out, int sync)                 /* after R246's volu
     CUR = (int16_t)wval(); STEP = (int16_t)(wrnd() & 1 ? wval() : (int32_t)(wrnd() % 13) - 6);
     sync = (int)(wrnd() & 1);
 #endif
+#ifndef CW_SPK
     *(volatile uint8_t *)0x018B621D = 1;                    /* check builds (op1emu has no jack): headphones, R246 reads it next */
-    sh_out = out;
+#endif
+    sh_spk = !*(volatile uint8_t *)0x018B621D;    sh_out = out;
     if (!out) { cw_check.nobuf++; return sync; }
-    sh_cur = cw_model(sh, CUR, STEP, sync);
+    if (sh_spk) {
+        for (int i = 0; i < 64; i++) sh[2 * i + 1] = out[2 * i + 1];
+        sh_st[0] = SPK[0]; sh_st[1] = SPK[1];
+        sh_cur = spk_model(sh, CUR, STEP, sh_st);
+    } else
+        sh_cur = cw_model(sh, CUR, STEP, sync);
     cw_check.sync += sync != 0;
+    cw_check.nobuf += (uint32_t)sh_spk << 16;   /* speaker blocks in the high half */
     return sync;
 }
 void cw_post(void)                                          /* the VU getter after the loops */
@@ -72,6 +108,7 @@ void cw_post(void)                                          /* the VU getter aft
     int bad = -1;
     for (int i = 0; i < 128 && bad < 0; i++) if (o[i] != sh[i]) bad = i;
     if (bad < 0 && CUR != sh_cur) bad = 128;
+    if (bad < 0 && sh_spk && (SPK[0] != sh_st[0] || SPK[1] != sh_st[1])) bad = 129;
     cw_check.blocks++;
     if (bad >= 0) {
         if (!cw_check.bad) { cw_check.first_i = (uint32_t)bad;

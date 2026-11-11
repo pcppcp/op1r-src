@@ -5,6 +5,14 @@
  * [SP + 0x2C] = R0, [SP + 0x38] = &flag 0xFF80103C, [FP - 8] = &peak 0xFF801084, W[FP + 0x10] = vl b,
  * [FP - 4] = &m 0x01B4EF6E and P3 = 0xFF800BB4 (both read by the master monitor 0xFFA013A0); the slot meter
  * (flag) follows at 0xFFA00FDC, R246's. */
+#ifdef MIX_FUNC					/* our master section (dsp/master_l1.c): a plain function, mm_mix() */
+	.section .l1master.2,"ax"
+	.global _mm_mix
+	.align 2
+_mm_mix:
+	[--SP] = (R7:4, P5:4);
+	P0.L = 0x103C; P0.H = 0xFF80;
+#else
 	.section .l1mix,"ax"
 	.global _l1_mix
 	.align 2
@@ -12,6 +20,7 @@ _l1_mix:
 	[SP + 0x2C] = R0;
 	P0.L = 0x103C; P0.H = 0xFF80; [SP + 0x38] = P0;
 	P1.L = 0x1084; P1.H = 0xFF80; [FP - 8] = P1;
+#endif
 	P2.L = 0x2964; P2.H = 0xFF80; P2 = [P2];		/* slot index */
 	P1.L = 0x1928; P1.H = 0xFF80; P1 = P1 + (P2 << 1);
 	R6 = W[P1] (X);				/* vol */
@@ -25,17 +34,19 @@ _l1_mix:
 	R2.H = R2.H << 1 (S);
 	R1.H = R4.H * R1.H;			/* vl a */
 	R2.H = R4.H * R2.H;			/* vl b */
+#ifndef MIX_FUNC
 	R7 = R2 >> 16;
 	W[FP + 0x10] = R7;
+#endif
 	P2.L = 0xEF6E; P2.H = 0x01B4; R6 = W[P2] (X);	/* m */
 	R0.L = R6.L * R1.H;			/* gL */
 	R0.H = R6.L * R2.H;			/* gR */
-	P2 = [FP - 8]; P2 += -4;		/* ramps: r2 0xFF801080, r1 +2, peak +4 */
+	P2.L = 0x1080; P2.H = 0xFF80;		/* ramps: r2 0xFF801080, r1 +2, peak +4 */
 	R5 = W[P2] (X);
 	R4 = W[P2 + 2] (X);
 	R1 = -0x80 (X);				/* s1 */
 	R2 = -0x80 (X);				/* s2 */
-	P0 = [SP + 0x38]; R3 = B[P0] (X);	/* flag */
+	P0.L = 0x103C; P0.H = 0xFF80; R3 = B[P0] (X);	/* flag */
 	CC = R3 == 0;
 	R3 = 0x80 (X);
 	R7 = 0;
@@ -74,7 +85,12 @@ _l1_mix:
 	W[P2] = R7;
 	W[P2 + 2] = R5;
 	W[P2 + 4] = R3;
+#ifdef MIX_FUNC
+	(R7:4, P5:4) = [SP++];
+	RTS;
+#else
 	P3.L = 0x0BB4; P3.H = 0xFF80;		/* R246's loops leave these for the master monitor (0xFFA013A0): */
 	P0.L = 0xEF6E; P0.H = 0x01B4;		/* P3 = the bus (its output), [FP - 4] = &m */
 	[FP - 4] = P0;
 	JUMP.L _mix_ret;
+#endif

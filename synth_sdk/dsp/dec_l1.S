@@ -59,7 +59,10 @@ _l1_dec:
 	RTS;
 
 /* hp[k] = (h[k], h[k-1]), k = 0..32, at SP (the caller's 132-byte area; CALL keeps RETS in a register) */
-	.section .l1mix.1,"ax"
+#ifndef DEC_HP_SEC
+#define DEC_HP_SEC .l1mix.1
+#endif
+	.section DEC_HP_SEC,"ax"
 	.global _l1_dec_hp
 	.align 2
 _l1_dec_hp:
