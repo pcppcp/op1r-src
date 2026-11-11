@@ -7,11 +7,15 @@
 #include <stdlib.h>
 int tape_safe_write(int fd, const void *src, unsigned n);
 int tape_service(int arg);
+extern volatile uint32_t tape_save_failures;
 static uint8_t out[65536]; static unsigned pos, calls; static const void *caller;
 static int seek_off, reads, writes_at[64], nwrites;
+static int fail_track = -1, fail_all, short_once;       /* write errors: one track's area, every write, one short write */
 int host_yaffs_write(int fd, const void *buf, unsigned n)
 {
     assert(fd == 7 && buf != caller && n <= 4096 && n % 2048 == 0);
+    if (!caller && (fail_all || (seek_off >> 24) == fail_track)) return -1;   /* e.g. YAFFS full / I/O error */
+    if (!caller && short_once) { short_once = 0; seek_off += 2048; calls++; return 2048; }
     if (caller) { memcpy(out + pos, buf, n); pos += n; }
     else { if (seek_off % 65536 == 0 && nwrites < 64) writes_at[nwrites++] = seek_off; seek_off += n; }
     calls++;
@@ -69,6 +73,48 @@ static void service_test(void)
     ent[4][0] = 0; ent[4][1] = 0; *(int16_t *)(ent[4] + 6) = -1;   /* unused entry: left alone */
     assert(tape_service(0) == 0);
 }
+/* a failed save keeps the clip dirty and is tried again (before: dirty cleared first, results ignored -> take lost) */
+static int track_writes(int clip, int k)                 /* 64 KB writes of clip index `clip`, track k, in writes_at */
+{
+    int n = 0;
+    for (int i = 0; i < nwrites; i++) n += writes_at[i] == host_track_base[k] + clip * 65536;
+    return n;
+}
+static void failure_test(void)
+{
+    caller = NULL;
+    list(24);
+    host_tape_mode = 2; host_now = 5000000;              /* tape stopped: a dirty clip is saved at once */
+    /* 1: every write fails: still dirty, counted; retried only after the hold, then saved */
+    dirty(3, 1); nwrites = 0; fail_all = 1; uint32_t f0 = tape_save_failures;
+    assert(tape_service(0) == 1);
+    assert(ent[3][2] == 1 && *(uint16_t *)(ent[3] + 4) == 2 && tape_save_failures == f0 + 1);
+    fail_all = 0;
+    assert(tape_service(0) == 0 && nwrites == 0);        /* backing off: the flash is not hammered */
+    host_now += 400000001u;
+    assert(tape_service(0) == 1 && track_writes(103, 1) == 1 && ent[3][2] == 0 && *(uint16_t *)(ent[3] + 4) == 0);
+    assert(tape_service(0) == 0);
+    /* 2: a short write is a failed save */
+    dirty(4, 0); nwrites = 0; short_once = 1;
+    assert(tape_service(0) == 1 && ent[4][2] == 1 && *(uint16_t *)(ent[4] + 4) == 1);
+    host_now += 400000001u;
+    assert(tape_service(0) == 1 && ent[4][2] == 0 && track_writes(104, 0) == 1);
+    /* 3: all four tracks dirty, track 2 fails: 1, 3 and 4 are written now, only track 2 stays dirty */
+    for (int k = 0; k < 4; k++) dirty(6, k);
+    nwrites = 0; fail_track = 1;
+    assert(tape_service(0) == 1);
+    assert(track_writes(106, 0) == 1 && track_writes(106, 2) == 1 && track_writes(106, 3) == 1 && track_writes(106, 1) == 0);
+    assert(ent[6][2] == 1 && *(uint16_t *)(ent[6] + 4) == 2);
+    fail_track = -1; host_now += 400000001u; nwrites = 0;
+    assert(tape_service(0) == 1 && nwrites == 1 && track_writes(106, 1) == 1 && ent[6][2] == 0);
+    /* 4: power-off flush with a flash that keeps failing ends (a few tries per clip), the others still saved */
+    dirty(7, 0); dirty(8, 2); fail_track = 0; nwrites = 0;
+    int n = 0; while (tape_service(1)) assert(++n < 50);
+    assert(n == 4 && track_writes(108, 2) == 1 && ent[8][2] == 0 && ent[7][2] == 1);   /* 3 tries of clip 7 + clip 8 */
+    fail_track = -1;
+    host_now += 400000001u;                              /* the flash recovers before the power goes: saved */
+    assert(tape_service(0) == 1 && track_writes(107, 0) == 1 && ent[7][2] == 0);
+}
 int main(void)
 {
     static uint32_t clip[16384];
@@ -77,6 +123,7 @@ int main(void)
     assert(tape_safe_write(7, clip, 65536) == 65536 && pos == 65536 && calls == 16);
     assert(!memcmp(out, clip, 65536));
     service_test();
+    failure_test();
     printf("safewrite_test: ok\n");
     return 0;
 }
