@@ -100,10 +100,9 @@ static int32_t tm_hit_samples(void)                       /* TM_HIT_PX at the cu
 {
     return (int32_t)((TM_HIT_PX * 1024 * 44100) / tm_zoom_q10());
 }
-void tm_add(void)
+void tm_add_at(int32_t c)                                   /* also the free tape machine (its active head) */
 {
     tm_ready();
-    int32_t c = TM_CURSOR();
     if (c < 0 || c > TM_MAXPOS || tm_n >= TM_MAX) return;
     int i = 0;
     while (i < tm_n && tm_pos[i] < c) i++;
@@ -112,10 +111,11 @@ void tm_add(void)
     tm_pos[i] = c; tm_n++;
     tm_save();
 }
-void tm_remove(void)
+void tm_add(void) { tm_add_at(TM_CURSOR()); }
+void tm_remove_at(int32_t c, int32_t tol)
 {
     tm_ready();
-    int32_t c = TM_CURSOR(), tol = tm_hit_samples(), best = -1, bd = 0;
+    int32_t best = -1, bd = 0;
     for (int i = 0; i < tm_n; i++) {
         int32_t d = tm_pos[i] > c ? tm_pos[i] - c : c - tm_pos[i];
         if (d <= tol && (best < 0 || d < bd)) { best = i; bd = d; }
@@ -125,6 +125,7 @@ void tm_remove(void)
     tm_n--;
     tm_save();
 }
+void tm_remove(void) { tm_remove_at(TM_CURSOR(), tm_hit_samples()); }
 static int32_t tm_acc;
 void tm_turn(int delta)                                    /* Shift + red: one jump per detent, wraps */
 {

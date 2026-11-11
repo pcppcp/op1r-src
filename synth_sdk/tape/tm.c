@@ -15,8 +15,8 @@
 #define TM_CHUNKS  0x1E5                                         /* chunks per track (R246) */
 #define CHUNK      0x8000                                        /* samples */
 
-typedef struct { int32_t speed; int32_t lin, lout; uint8_t lon, lset; } tm_track;   /* lset: in set (marker shown) */   /* speed Q16 (negative = reverse); own loop in / out (samples), on */
-volatile tm_track tm_tr[4] = { { 0x10000, 0, 0, 0, 0 }, { 0x10000, 0, 0, 0, 0 }, { 0x10000, 0, 0, 0, 0 }, { 0x10000, 0, 0, 0, 0 } };
+typedef struct { int32_t speed; int32_t lin, lout; uint8_t lon, lset, mute; } tm_track;   /* lset: in set (marker shown); mute: Shift + T */   /* speed Q16 (negative = reverse); own loop in / out (samples), on */
+volatile tm_track tm_tr[4] = { { 0x10000, 0, 0, 0, 0, 0 }, { 0x10000, 0, 0, 0, 0, 0 }, { 0x10000, 0, 0, 0, 0, 0 }, { 0x10000, 0, 0, 0, 0, 0 } };
 #ifdef TAPE_FREE
 volatile uint8_t tm_on = 1;                                      /* test builds (OP1R_TAPEFREE=1): on */
 #else
@@ -137,7 +137,7 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
         if (h < lo || h >= hi) { int64_t r = (h - lo) % (hi - lo); if (r < 0) r += hi - lo; h = lo + r; }   /* loop just set: fold in */
     }
     rec_h0[t] = h; rec_step[t] = step; rec_lo[t] = lo; rec_hi[t] = hi;
-    const int16_t gl = GAIN_L(t), gr = GAIN_R(t);
+    const int16_t gl = tm_tr[t].mute ? 0 : GAIN_L(t), gr = tm_tr[t].mute ? 0 : GAIN_R(t);   /* muted: silent, the head runs */
     const int16_t *cache = 0; int32_t cache_c = -1;
     for (int i = 0; i < 64; i++) {
         if (h >= hi) h -= hi - lo; else if (h < lo) h += hi - lo;
@@ -239,17 +239,29 @@ static void tm_record(const volatile int16_t *bus)
     const uint32_t inv = (uint32_t)((((uint64_t)1 << 47) / (uint64_t)ast));   /* 2^15 / |step| in samples, Q32 -> frac Q15 */
     int64_t h = rec_h0[t];
     int32_t first = -1, last = -1;
+    static int32_t box_sum; static int box_n;
+    static int16_t recip[33];                                    /* 2^15 / k */
+    if (!recip[1]) for (int k = 1; k <= 32; k++) recip[k] = (int16_t)(k == 1 ? 32767 : 32768 / k);
     const uint8_t *e = 0; int32_t ec = -1; int16_t *slot_d = 0;
     for (int i = 0; i < 64; i++) {
         const int64_t h1 = h + step;
         int32_t n = step > 0 ? (int32_t)((h + 0xFFFFFFFFLL) >> 32) : (int32_t)(h >> 32), nend = (int32_t)(h1 >> 32);
+        int crossed = 0;
         for (int g = 0; g < 8; g++) {                            /* the integer positions crossed (at most 8: up to 4x + slack) */
             if (step > 0 ? ((int64_t)n << 32) >= h1 : ((int64_t)n << 32) <= h1) break;
             int32_t pn = n;
+            crossed = 1;
             int64_t q = (int64_t)pn << 32;
             if (q >= hi) pn -= (int32_t)((hi - lo) >> 32); else if (q < lo) pn += (int32_t)((hi - lo) >> 32);
-            const uint32_t fr = (uint32_t)(((uint64_t)(step > 0 ? ((int64_t)n << 32) - h : h - ((int64_t)n << 32)) >> 17) * inv >> 15) & 0x7FFF;
-            const int32_t v = in[i] + ((in[i + 1] - in[i]) * (int32_t)fr >> 15);
+            int32_t v;
+            if (ast < ((int64_t)1 << 32)) {                      /* slower than 1x: the mean of the input since the last
+                                                                  * position (box filter: no aliasing from the compression) */
+                v = box_n ? (box_sum + in[i]) * recip[box_n + 1 > 32 ? 32 : box_n + 1] >> 15 : in[i];
+                box_sum = 0; box_n = 0;
+            } else {
+                const uint32_t fr = (uint32_t)(((uint64_t)(step > 0 ? ((int64_t)n << 32) - h : h - ((int64_t)n << 32)) >> 17) * inv >> 15) & 0x7FFF;
+                v = in[i] + ((in[i + 1] - in[i]) * (int32_t)fr >> 15);
+            }
             const int32_t c = pn >> 15;
             if (c != ec) {                                       /* R246's clip cache entry of this chunk, our slot */
                 ec = c; e = CLIP_IDX ? CLIP_IDX[c] : 0;
@@ -269,6 +281,7 @@ static void tm_record(const volatile int16_t *bus)
             } else tm_rec_missed++;
             n += step > 0 ? 1 : -1;
         }
+        if (!crossed && ast < ((int64_t)1 << 32)) { box_sum += in[i]; if (box_n < 31) box_n++; }   /* waits for the next position */
         (void)nend;
         h = h1;
         if (h >= hi) h -= hi - lo; else if (h < lo) h += hi - lo;

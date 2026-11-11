@@ -13,7 +13,7 @@
 #include "../op1_synth.h"
 #include "stroke_font.h"
 
-typedef struct { int32_t speed; int32_t lin, lout; uint8_t lon, lset; } tm_track;
+typedef struct { int32_t speed; int32_t lin, lout; uint8_t lon, lset, mute; } tm_track;
 extern volatile tm_track tm_tr[4];
 extern volatile uint8_t tm_on;
 int32_t tm_head_pos(int t);
@@ -36,6 +36,8 @@ extern volatile int16_t tm_in_peak;                              /* tape/tm.c: t
 #define UI_STATE       (*(volatile int32_t *)0x018C17D4)          /* 6 = record armed (docs/25) */
 void tm_set_head(int t, int32_t pos);
 #define SEL_TRACK      (*(volatile int32_t *)0xFF802964)          /* R246's selected track: where its recording goes */
+#define TAKE_A         (*(volatile int32_t *)0xFF8029E4)          /* the take being recorded (samples, tape_c range) */
+#define TAKE_B         (*(volatile int32_t *)0xFF8029E8)
 #define TAPE_VT        0x01911B5C                                 /* R246's TapeScreen vtable (docs/22) */
 #define TPOS           (*(volatile int32_t *)0xFF802974)          /* samples << 6 */
 #define LOCATE(s)      (((void (*)(int32_t))0x01A55024)(s))       /* tape_c::check_pos (0 .. 0xF2BFA0) */
@@ -111,7 +113,11 @@ static void lane(void *r, int t, int32_t y, int32_t x0, int32_t x1, int32_t head
         if (!CLIP_USED[i] || CLIPS[i * 3] != t) continue;
         const int32_t a = XOF(CLIPS[i * 3 + 1]), b = XOF(CLIPS[i * 3 + 2]);
         if (b <= x0 || a >= x1) continue;
-        ln(r, CLAMP(a), y, CLAMP(b), y, thick, on ? (rec_red ? c_red : c_blue) : c_grey);
+        ln(r, CLAMP(a), y, CLAMP(b), y, thick, tm_tr[t].mute ? c_dim : on ? (rec_red ? c_red : c_blue) : c_grey);
+    }
+    if (on && T_MODE == 1 && TAKE_B >= TAKE_A) {                 /* the take, while it is recorded */
+        const int32_t a = XOF(TAKE_A), b = XOF(TAKE_B);
+        if (b > x0 && a < x1) ln(r, CLAMP(a), y, CLAMP(b) == CLAMP(a) ? CLAMP(a) + OP1_Q10(1) : CLAMP(b), y, thick, c_red);
     }
     const int lp = tm_tr[t].lon && tm_tr[t].lout > tm_tr[t].lin;
     if (lp || tm_tr[t].lset) {                                   /* loop in (also set but off): a line, a circle on top */
@@ -254,7 +260,15 @@ int tfs_key(int code, int pressed)                               /* key thread: 
 {
     if (!shown_now()) return 0;
     if (code == 0x21) rec_held = (uint8_t)pressed;               /* REC: shown as armed while held; stock handles it */
-    if (code >= 0x06 && code <= 0x09) { if (pressed) { sel = (uint8_t)(code - 0x06); SEL_TRACK = sel; } return 1; }   /* (R246 records here) */
+    if (code >= 0x06 && code <= 0x09) {                          /* T: select (R246 records here); Shift + T: mute */
+        if (pressed) { if (SHIFT) tm_tr[code - 0x06].mute ^= 1; else { sel = (uint8_t)(code - 0x06); SEL_TRACK = sel; } }
+        return 1;
+    }
+    if (code == 0x3E) {                                          /* red press: a marker at the active head; Shift: remove */
+        extern void tm_add_at(int32_t), tm_remove_at(int32_t, int32_t);
+        if (pressed) { const int32_t h = tm_head_pos(sel); if (SHIFT) tm_remove_at(h, 6 * 2352); else tm_add_at(h); }   /* ~6 px */
+        return 1;
+    }
     if (code == 0x11) {                                          /* Shift + s5: reverse the active track */
         static uint8_t sw;
         if (pressed && SHIFT) { tm_tr[sel].speed = -tm_tr[sel].speed; sw = 1; return 1; }
