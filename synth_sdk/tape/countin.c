@@ -74,7 +74,9 @@ extern void tool_service(void);                            /* screens/overlay.c:
 extern void inst_fade_block(void);
 void ci_metro_render(void)
 {
+#ifndef OP1_HOST
     { extern void mix_post(void); mix_post(); }                     /* docs/81: instrument-into-master check */
+#endif
 #ifdef FORCE_MFX
     if (*(volatile int32_t *)0x01AAAD68) *(volatile uint8_t *)0x01AAAC40 = 1;   /* test builds: master FX on */
 #endif

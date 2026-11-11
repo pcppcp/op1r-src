@@ -404,6 +404,17 @@ static void sm_update(void *scr, int dt)
         } else if (sm_page == PG_BOOTD && l1rd[0]) {         /* diagnostic OP1R_L1READ: "9/10 l1 3c076007 1ad735c6" */
             q = put_s(q, "l1");
             for (int k = 1; k < 3; k++) { *q++ = ' '; for (int s = 28; s >= 0; s -= 4) *q++ = hx[(l1rd[k] >> s) & 15]; }
+#ifdef TAPE_IO
+        } else if (sm_page == PG_BOOTD) {                    /* OP1R_TAPEIO=1: "9/10 r 12.3 40.1 w 20.2 60.3 n 37" (ms per 64 KB) */
+            extern volatile uint32_t ts_io[6];
+            for (int w = 0; w < 2; w++) {
+                const uint32_t n = ts_io[3 * w], avg = n ? ts_io[3 * w + 1] / n : 0, mx = ts_io[3 * w + 2];
+                q = put_s(q, w ? " w " : "r ");
+                q = put_u(q, avg / 1000); *q++ = '.'; q = put_u(q, avg / 100 % 10);
+                q = put_u(put_s(q, " "), mx / 1000); *q++ = '.'; q = put_u(q, mx / 100 % 10);
+            }
+            q = put_u(put_s(q, " n "), ts_io[0]);
+#endif
         } else if (sm_page == PG_BOOTD) {
             q = put_sec(put_s(q, "open "), bt_split[0]); q = put_sec(put_s(q, " clips "), bt_split[1]);
             q = put_sec(put_s(q, " fat "), bt_split[2]);

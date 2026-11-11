@@ -348,6 +348,8 @@ def build(engs, fxs):
     flags['dsp/master_l1.c'] = ['-Os', '-mlong-calls'] + (['-DMASTER_CHECK'] + (['-DMASTER_STRESS'] if os.environ['OP1R_MASTER'] == 'stress' else []) if os.environ.get('OP1R_MASTER') in ('check', 'stress') else [])
     if os.environ.get('OP1R_FORCE_MFX') == '1': flags['tape/countin.c'] = flags.get('tape/countin.c', []) + ['-DFORCE_MFX']   # emulator: master FX on
     if os.environ.get('OP1R_FORCE_HP') == '1': flags['tape/countin.c'] = flags.get('tape/countin.c', []) + ['-DFORCE_HP']   # emulator: headphone path
+    if os.environ.get('OP1R_TAPEIO') == '1':          # docs/82: tape read / write times on page 9
+        for f in ('tape/safewrite.c', 'screens/sysmon.c'): flags[f] = flags.get(f, []) + ['-DTAPE_IO']
     flags['dsp/eq_l1.c'] = ['-Os']                                          # docs/81: the L1 room (1 204 bytes)
     if os.environ.get('OP1R_EQ') in ('check', 'stress'):                       # docs/81: master EQ model vs original, per block
         flags['dsp/eq.c'] = flags.get('dsp/eq.c', []) + ['-DEQ_CHECK', '-DSTAGE_DUMP'] + (['-DEQ_STRESS'] if os.environ['OP1R_EQ'] == 'stress' else [])

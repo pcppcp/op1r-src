@@ -71,6 +71,17 @@ int tape_safe_write(int fd, const void *src, unsigned n)
 #define TS_N     24
 
 static struct { const uint8_t *clip; uint32_t t; } ts_saved[TS_N];
+#ifdef TAPE_IO
+/* OP1R_TAPEIO=1 (docs/82): time of each 64 KB track read / write (lseek + call), us: reads n, sum, max, writes n,
+ * sum, max (resource monitor page 9) */
+volatile uint32_t ts_io[6];
+static inline void ts_io_add(int w, uint32_t c0) { uint32_t us = (NOW() - c0) / 400; volatile uint32_t *s = ts_io + 3 * w; s[0]++; s[1] += us; if (us > s[2]) s[2] = us; }
+#define IO_T0() uint32_t io_c0 = NOW()
+#define IO_ADD(w) ts_io_add(w, io_c0)
+#else
+#define IO_T0()
+#define IO_ADD(w)
+#endif
 
 static uint32_t *ts_slot(const uint8_t *c)
 {
@@ -98,8 +109,10 @@ int tape_service(int arg)
             for (int k = 0; k < 4; k++) {
                 if (!(*mask >> k & 1)) continue;
                 *mask &= (uint16_t)~(1u << k);
+                IO_T0();
                 Y_LSEEK(TAPE_FD, TRACK_BASE[k] + idx * 0x10000, 0);
                 tape_safe_write(TAPE_FD, CLIP_DATA(c) + k * 0x10000, 0x10000);
+                IO_ADD(1);
             }
             return 1;
         }
@@ -107,8 +120,10 @@ int tape_service(int arg)
         if (idx >= 0 && !c[0]) {                                    /* not loaded: load all 4 tracks */
             c[1] = 0;
             for (int k = 0; k < 4; k++) {
+                IO_T0();
                 Y_LSEEK(TAPE_FD, idx * 0x10000 + TRACK_BASE[k], 0);
                 Y_READ(TAPE_FD, CLIP_DATA(c) + k * 0x10000, 0x10000);
+                IO_ADD(0);
             }
             if (!c[1]) c[0] = *(volatile int16_t *)(c + 6) == idx;  /* invalidated meanwhile: stays unloaded */
             return 1;
