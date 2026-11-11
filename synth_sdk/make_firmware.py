@@ -182,7 +182,10 @@ L1_PCCALLS = {0xFFA0709C: ('l1_tramp_fwd', bytes.fromhex('06c41000')),   # mix l
               0xFFA017AE: ('l1_tramp_out', bytes.fromhex('00e36915')),   # core_block_process: CALL master_output_stage -> out_stage (dsp/outstage.c)
               0xFFA01118: ('l1_tramp_eq', bytes.fromhex('00e3ec0f')),
               0xFFA02116: ('l1_tramp_mix', bytes.fromhex('ffe39df6')),   # core_block_process: CALL Core_mix_master (OP1R_MIX=check)
-              0xFFA02DB2: ('l1_tramp_mix', bytes.fromhex('ffe34ff0'))}   # .. the other call site   # core_block_process: CALL master_eq -> eq_stage (dsp/eq.c)
+              0xFFA02DB2: ('l1_tramp_mix', bytes.fromhex('ffe34ff0')),
+              0xFFA01EB4: ('l1_tramp_dec', bytes.fromhex('ffe390f3')),   # CALL synth_bus_decimate (OP1R_DEC=check)
+              0xFFA02456: ('l1_tramp_dec', bytes.fromhex('ffe3bff0')),
+              0xFFA02888: ('l1_tramp_dec', bytes.fromhex('ffe3a6ee'))}   # .. the other call site   # core_block_process: CALL master_eq -> eq_stage (dsp/eq.c)
 L1_TRAMP, L1_TRAMP_MAX = 0xFFA0BFB4, 0xFFA0C000 - 0xFFA0BFB4
 # docs/81: our output stage in place of R246's master_output_stage (L1 0xFFA04280..0xFFA04804), a plain LDR block after
 # the encrypted L1; check builds (OP1R_OUTSTAGE=check / stress) keep the original there and go through the trampoline
@@ -193,9 +196,12 @@ EQ_IN_L1 = os.environ.get('OP1R_EQ') not in ('check', 'stress', 'stock')
 L1_MIX, L1_MIX_MAX = 0xFFA00E58, 0xFFA00FDC - 0xFFA00E58   # docs/81: the instrument-into-master loops (388 bytes)
 MIX_MODE = os.environ.get('OP1R_MIX', '')                 # check / stress: R246's loops vs the model; l1check / l1stress: ours
 MIX_IN_L1 = MIX_MODE not in ('check', 'stress', 'stock')
+L1_DEC, L1_DEC_MAX = 0xFFA005D4, 0xFFA00684 - 0xFFA005D4   # docs/81: synth_bus_decimate (176 bytes)
+DEC_IN_L1 = os.environ.get('OP1R_DEC') not in ('check', 'stress', 'stock')
+assert MIX_IN_L1 or not DEC_IN_L1, 'the L1 decimator needs the L1 mix (its hp builder is in .l1mix): OP1R_DEC=stock'
 # our stage copies in L1, each in place of R246's routine: (section binary, address, room, on, hook poke left out)
 L1_STAGES = [('l1out', L1_OUT, L1_OUT_MAX, OUTSTAGE_IN_L1, '0xffa017ae'), ('l1eq', L1_EQ, L1_EQ_MAX, EQ_IN_L1, '0xffa01118'),
-             ('l1mix', L1_MIX, L1_MIX_MAX, MIX_IN_L1, '')]
+             ('l1mix', L1_MIX, L1_MIX_MAX, MIX_IN_L1, ''), ('l1dec', L1_DEC, L1_DEC_MAX, DEC_IN_L1, '')]
 FX_SCREEN_SVG = 'fxgeneric.svg'
 QUAD_LFO_SVG = 'display/quadlfo.svg'
 SYSMON_SVG = 'display/sysmon.svg'
@@ -317,13 +323,14 @@ def gen_table(engs, fxs):
 def build(engs, fxs):
     os.makedirs(os.path.join(HERE, 'build'), exist_ok=True)
     gen_table(engs, fxs)
-    srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'seq/tombola.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/pcpage.c', 'screens/usbtrack.c', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'boottime.c', 'build/l1_runtime.c', 'dsp/outstage.c', 'dsp/outstage_l1.c', 'dsp/eq.c', 'dsp/fir.S', 'dsp/eq_l1.c', 'dsp/fir_l1.S', 'dsp/mix.c', 'dsp/mix_l1.S', 'plugload/op1p_load.c', 'screens/settings.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/mixdrop.c', 'crash.c', 'patchjob.c', 'l1pool.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxgroups.c', 'screens/guiskip.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c', 'input/in_host.c'] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
+    srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'seq/tombola.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/pcpage.c', 'screens/usbtrack.c', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'boottime.c', 'build/l1_runtime.c', 'dsp/outstage.c', 'dsp/outstage_l1.c', 'dsp/eq.c', 'dsp/fir.S', 'dsp/eq_l1.c', 'dsp/fir_l1.S', 'dsp/mix.c', 'dsp/mix_l1.S', 'dsp/dec.c', 'dsp/dec_l1.S', 'plugload/op1p_load.c', 'screens/settings.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/mixdrop.c', 'crash.c', 'patchjob.c', 'l1pool.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxgroups.c', 'screens/guiskip.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c', 'input/in_host.c'] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
     objs = []
     cmds = []
     flags = {}                                       # plugin.json "source_cflags": e.g. -O3 after the default -O2
     for e in engs + fxs:
         flags.update(plugins.source_flags(e, [e['source']] + e.get('extra_sources', [])))
     if MIX_MODE in ('check', 'stress', 'l1check', 'l1stress'): flags['dsp/mix.c'] = ['-DMIX_CHECK'] + (['-DMIX_STRESS'] if MIX_MODE.endswith('stress') else [])   # docs/81: stage 3a check
+    if os.environ.get('OP1R_DEC') in ('check', 'stress', 'l1check', 'l1stress'): flags['dsp/dec.c'] = ['-DDEC_CHECK'] + (['-DDEC_STRESS'] if os.environ['OP1R_DEC'].endswith('stress') else [])
     flags['dsp/eq_l1.c'] = ['-Os']                                          # docs/81: the L1 room (1 204 bytes)
     if os.environ.get('OP1R_EQ') in ('check', 'stress'):                       # docs/81: master EQ model vs original, per block
         flags['dsp/eq.c'] = flags.get('dsp/eq.c', []) + ['-DEQ_CHECK', '-DSTAGE_DUMP'] + (['-DEQ_STRESS'] if os.environ['OP1R_EQ'] == 'stress' else [])
@@ -355,6 +362,7 @@ def build(engs, fxs):
     cmds.append('bfin-elf-objcopy -O binary -j .l1out build/synth.elf build/l1out.bin')
     cmds.append('bfin-elf-objcopy -O binary -j .l1eq build/synth.elf build/l1eq.bin')
     cmds.append('bfin-elf-objcopy -O binary -j .l1mix build/synth.elf build/l1mix.bin')
+    cmds.append('bfin-elf-objcopy -O binary -j .l1dec build/synth.elf build/l1dec.bin')
     cmds.append('bfin-elf-nm build/synth.elf > build/synth.sym')
     cmds.append('bfin-elf-objdump -d build/synth.elf > build/synth.lst && bfin-elf-size build/synth.elf')
     ncc = len(srcs)                                  # the compiles run in parallel (all cores), then link etc. in order
@@ -418,6 +426,7 @@ def write_l1_runtime_table():
             'const l1_poke_t l1_pokes[] = {']
     drop = {poke for _, _, _, on, poke in L1_STAGES if on}           # docs/81: a stage in L1 needs no trampoline
     if MIX_MODE not in ('check', 'stress', 'l1check', 'l1stress'): drop |= {'0xffa02116', '0xffa02db2'}   # docs/81: the mix check's hooks
+    if os.environ.get('OP1R_DEC') not in ('check', 'stress', 'l1check', 'l1stress'): drop |= {'0xffa01eb4', '0xffa02456', '0xffa02888'}
     pokes = [p for p in rec['pokes'] if p[0] not in drop]
     for a, new, orig in pokes:
         n = len(new) // 2
@@ -544,11 +553,11 @@ def patch_ldr(src, dst, code, hooks, syms, opz=False, release=True):
         assert 0 < len(l1o) <= room, f'.{sec}: {len(l1o)} bytes, {room} fit'
         for m in re.finditer(r'^ *([0-9a-f]+):.*?\b(CALL|JUMP(?:\.[LS])?)\s+(0x(?:0x)?[0-9a-f]+|\([A-Z0-9]+\))', lst, re.M):
             at = int(m.group(1), 16)
-            if base <= at < base + len(l1o) and not syms.get('l1_tramp_mix', -1) <= at < syms.get('l1_tramp_mix', -1) + 40:  # the mix check's trampoline calls out on purpose
+            if base <= at < base + len(l1o) and not syms.get('l1_tramp_mix', -1) <= at < syms.get('l1_tramp_end', -1):  # the mix check's trampoline calls out on purpose
                 t = m.group(3)
                 assert t.startswith('0x'), f'.{sec}: indirect {m.group(2)} {t} at {at:#x}'
                 tv = int(t.replace('0x0x', '0x'), 16)
-                assert base <= tv < base + len(l1o) or (sec, tv) == ('l1mix', 0xFFA00FDC), f'.{sec}: {m.group(2)} to {tv:#x} (outside) at {at:#x}'
+                assert base <= tv < base + len(l1o) or (sec, tv) == ('l1mix', 0xFFA00FDC) or (sec, tv) == ('l1dec', syms.get('l1_dec_hp')), f'.{sec}: {m.group(2)} to {tv:#x} (outside) at {at:#x}'
         l1o += b'\0' * (-len(l1o) % 4)
         blk += ldr_hdr(0x0006, base, len(l1o), 0) + l1o
         print(f'  L1 {sec}: {len(l1o)} of {room} bytes at {base:#x}')

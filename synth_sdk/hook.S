@@ -733,3 +733,9 @@ _l1_tramp_mix:
 	SP += 12;
 	RETS = [SP++];
 	rts;
+	.global _l1_tramp_dec			/* OP1R_DEC=check|stress: CALL synth_bus_decimate -> dec_stage (dsp/dec.c) */
+_l1_tramp_dec:
+	P1.L = _dec_stage; P1.H = _dec_stage;
+	jump.l _l1_tramp_call;
+	.global _l1_tramp_end
+_l1_tramp_end:
