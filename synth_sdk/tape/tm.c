@@ -50,7 +50,7 @@ extern int host_tm_read(int t, int chunk, int16_t *dst);         /* fills 64 KB,
 #define CLIP_IDX   (*(uint8_t **volatile *)0x01B4EF48)           /* chunk -> R246 clip entry */
 #endif
 #define MODE       (*(volatile int32_t *)(X + 0x00))             /* 0 stop, 1 rec, 2 play, 3 wind */
-#define TSPEED     (*(volatile int32_t *)(X + 0x08))             /* Q2.30, 1x = 0x40000000 */
+#define TSPEED     (*(volatile int32_t *)(X + 0x08))             /* 1x = 0x08000000 (emulator: 64 samples per block); winding 0x40000000 = 8x */
 #define TPOS       (*(volatile int32_t *)(X + 0x14))             /* samples << 6 */
 #define GAIN_L(t)  (((volatile int16_t *)(X + 0x38))[t])
 #define GAIN_R(t)  (((volatile int16_t *)(X + 0x40))[t])
@@ -137,7 +137,7 @@ void tm_block(void)                                              /* audio ISR, a
     int32_t accL[64], accR[64];
     for (int i = 0; i < 64; i++) accL[i] = accR[i] = 0;
     for (int t = 0; t < 4; t++) {
-        const int64_t step = ((int64_t)v * tm_tr[t].speed) >> 14;       /* Q30 x Q16 -> Q32 */
+        const int64_t step = ((int64_t)v * tm_tr[t].speed) >> 11;       /* (1x = 2^27) x Q16 -> Q32 */
         int64_t h = head[t];
         int64_t lo = 0, hi = (int64_t)(TM_CHUNKS * CHUNK) << 32;
         if (LOOP_ON && LOOP_E > LOOP_S) {

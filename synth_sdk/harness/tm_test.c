@@ -29,7 +29,7 @@ static void run(int32_t start, int blocks, int pos_step)          /* pos_step: t
 int main(void)
 {
     tm_on = 1;
-    SET32(0x00, 2); SET32(0x08, 0x40000000);
+    SET32(0x00, 2); SET32(0x08, 0x08000000);
     memset(host_tm_xport + 0x38, 0, 16); GL(0) = 0x7FFF; GR(0) = 0x7FFF;
     tm_service();                                                 /* allocates */
     run(100000, 8, 64);                                           /* 1x, track 1: warms the cache */
