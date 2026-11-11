@@ -95,7 +95,7 @@ static void make(void)
 {
     TXT_CTOR(tx[T_NUM], OP1_Q10(13), 4, 12, c_white, 1);       /* as the MIDI sequencer view's track square */
     TXT_CTOR(tx[T_TIME], OP1_Q10(160), 4, 20, c_white, 1);
-    TXT_CTOR(tx[T_SPEED], OP1_Q10(315), 4, 12, c_white, 2);
+    TXT_CTOR(tx[T_SPEED], OP1_Q10(300), 4, 12, c_white, 2);   /* left of the meter */
     TXT_CTOR(tx[T_REV], OP1_Q10(315), 18, 12, c_red, 2);
     made = 1;
 }
@@ -162,9 +162,10 @@ static void tfs_update(void *scr, int dt)
             static const int8_t hw[7] = { 2, 3, 4, 4, 4, 3, 2 };
             for (int k = 0; k < 7; k++) ln(r, x + OP1_Q10(4) - hw[k] * OP1_Q10(1), y + (k - 3) * OP1_Q10(1), x + OP1_Q10(4) + hw[k] * OP1_Q10(1), y + (k - 3) * OP1_Q10(1), 0x480, c_red);
         } else if (mode == 2 || mode == 3) {                     /* playing: a triangle */
-            ln(r, x, y - OP1_Q10(5), x, y + OP1_Q10(5), 0x400, c_white);
-            ln(r, x, y - OP1_Q10(5), x + OP1_Q10(8), y, 0x400, c_white);
-            ln(r, x, y + OP1_Q10(5), x + OP1_Q10(8), y, 0x400, c_white);
+            const int32_t xb = rev ? x + OP1_Q10(8) : x, xt = rev ? x : x + OP1_Q10(8);   /* reverse: flipped */
+            ln(r, xb, y - OP1_Q10(5), xb, y + OP1_Q10(5), 0x400, c_white);
+            ln(r, xb, y - OP1_Q10(5), xt, y, 0x400, c_white);
+            ln(r, xb, y + OP1_Q10(5), xt, y, 0x400, c_white);
         } else {                                                 /* stopped: a square */
             ln(r, x, y - OP1_Q10(4), x + OP1_Q10(8), y - OP1_Q10(4), 0x700, c_grey); ln(r, x + OP1_Q10(8), y - OP1_Q10(4), x + OP1_Q10(8), y + OP1_Q10(4), 0x700, c_grey);
             ln(r, x + OP1_Q10(8), y + OP1_Q10(4), x, y + OP1_Q10(4), 0x700, c_grey); ln(r, x, y + OP1_Q10(4), x, y - OP1_Q10(4), 0x700, c_grey);
@@ -174,32 +175,31 @@ static void tfs_update(void *scr, int dt)
     char *q = put_u(b, sec / 3600, 1); *q++ = ':'; q = put_u(q, sec / 60 % 60, 2); *q++ = ':'; put_u(q, sec % 60, 2);
     txt(r, T_TIME, b);
     fmt_speed(b, tm_tr[sel].speed); txt(r, T_SPEED, b);
-    if (rev) txt(r, T_REV, "rev");
     {                                                            /* right edge, as stock: record level + input meter */
-        const int32_t x = OP1_Q10(316), y0 = OP1_Q10(34), y1 = OP1_Q10(100), hgt = y1 - y0;
-        ln(r, x, y0, x, y1, 0x300, c_dred);                      /* as stock: a red line, the signal red, the level a red dot */
+        const int32_t x = OP1_Q10(310), y0 = OP1_Q10(8), y1 = OP1_Q10(100), hgt = y1 - y0;   /* above the tracks to the top */
+        ln(r, x, y0, x, y1, 0x500, c_dred);                      /* as stock: a red line, the signal red, the level a red dot */
         int32_t pk = IN_PEAK < 0 ? 0 : IN_PEAK; const int32_t py = y1 - (int32_t)((int64_t)hgt * pk >> 15);
-        if (py < y1) ln(r, x, py, x, y1, 0x700, c_red);
+        if (py < y1) ln(r, x, py, x, y1, 0xA00, c_red);
         const int32_t ly = y1 - (int32_t)((int64_t)hgt * (REC_LEVEL < 0 ? 0 : REC_LEVEL) >> 15);
-        static const int8_t hw[5] = { 1, 2, 2, 2, 1 };           /* the dot: stacked lines */
-        for (int k = 0; k < 5; k++) ln(r, x - hw[k] * OP1_Q10(1), ly + (k - 2) * OP1_Q10(1), x + hw[k] * OP1_Q10(1), ly + (k - 2) * OP1_Q10(1), 0x480, c_red);
+        static const int8_t hw[7] = { 2, 3, 4, 4, 4, 3, 2 };     /* the dot: stacked lines */
+        for (int k = 0; k < 7; k++) ln(r, x - hw[k] * OP1_Q10(1), ly + (k - 3) * OP1_Q10(1), x + hw[k] * OP1_Q10(1), ly + (k - 3) * OP1_Q10(1), 0x480, c_red);
     }
     /* the active track around its head */
     {                                                            /* bar marks (from tape 0, R246's tempo) */
         const int64_t bar_q8 = (int64_t)4 * 60 * SR * 256 * 256 / bpm_q8();   /* samples per bar, Q8 */
         const int64_t a = (int64_t)(head - 8 * SR) << 8, b = (int64_t)(head + 8 * SR) << 8;
         for (int64_t k = a <= 0 ? 0 : (a + bar_q8 - 1) / bar_q8; k * bar_q8 <= b && k < 4096; k++) {
-            const int32_t x = OP1_Q10(160) + (int32_t)(((k * bar_q8 >> 8) - head) * OP1_Q10(150) / (8 * SR));
+            const int32_t x = OP1_Q10(155) + (int32_t)(((k * bar_q8 >> 8) - head) * OP1_Q10(145) / (8 * SR));
             ln(r, x, OP1_Q10(76), x, OP1_Q10(82), 0x800, c_grey);
         }
     }
-    lane(r, sel, OP1_Q10(68), OP1_Q10(10), OP1_Q10(310), head, 8, OP1_Q10(9), 1, 1);
+    lane(r, sel, OP1_Q10(68), OP1_Q10(10), OP1_Q10(300), head, 8, OP1_Q10(9), 1, 1);
     {                                                            /* op1r tape markers (tape/markers.c): the active track only */
         extern int32_t tm_pos[]; extern int tm_n;
         for (int i = 0; i < tm_n; i++) {
-            const int64_t d = (int64_t)(tm_pos[i] - head) * OP1_Q10(150) / (8 * SR);
-            if (d < -OP1_Q10(150) || d > OP1_Q10(150)) continue;
-            const int32_t x = OP1_Q10(160) + (int32_t)d;         /* as on the stock tape screen (tape/markers.c): a grey
+            const int64_t d = (int64_t)(tm_pos[i] - head) * OP1_Q10(145) / (8 * SR);
+            if (d < -OP1_Q10(145) || d > OP1_Q10(145)) continue;
+            const int32_t x = OP1_Q10(155) + (int32_t)d;         /* as on the stock tape screen (tape/markers.c): a grey
                                                                   * line through the track, a green v above (white at the head) */
             const uint8_t *col = d > -OP1_Q10(2) && d < OP1_Q10(2) ? c_white : c_green;
             ln(r, x, OP1_Q10(58), x, OP1_Q10(78), 0x400, c_grey);
@@ -208,13 +208,13 @@ static void tfs_update(void *scr, int dt)
         }
     }
     const uint8_t *hc = rec_red ? c_red : c_white;
-    ln(r, OP1_Q10(160), OP1_Q10(48), OP1_Q10(160), OP1_Q10(88), 0x600, hc);
-    ln(r, OP1_Q10(160), OP1_Q10(48), OP1_Q10(rev ? 154 : 166), OP1_Q10(48), 0x600, rev ? c_red : hc);
+    ln(r, OP1_Q10(155), OP1_Q10(48), OP1_Q10(155), OP1_Q10(88), 0x600, hc);
+    ln(r, OP1_Q10(155), OP1_Q10(48), OP1_Q10(rev ? 149 : 161), OP1_Q10(48), 0x600, hc);   /* the flag: the play direction */
     /* all four tracks */
     for (int t = 0; t < 4; t++) {
         const int32_t y = OP1_Q10(108 + 8 * t), h = tm_head_pos(t) < 0 ? 0 : tm_head_pos(t);
-        lane(r, t, y, OP1_Q10(10), OP1_Q10(310), h, 20, OP1_Q10(3), t == sel, 0);
-        ln(r, OP1_Q10(160), y - OP1_Q10(3), OP1_Q10(160), y + OP1_Q10(3), 0x400, t == sel ? c_white : c_grey);
+        lane(r, t, y, OP1_Q10(10), OP1_Q10(300), h, 20, OP1_Q10(3), t == sel, 0);
+        ln(r, OP1_Q10(155), y - OP1_Q10(3), OP1_Q10(155), y + OP1_Q10(3), 0x400, t == sel ? c_white : c_grey);
     }
 }
 static void tfs_init(void *scr) { (void)scr; }
