@@ -183,6 +183,11 @@ int main(int argc, char **argv)
             ql_turn(cw, 0, 1, 1024, 1); pond_get(cw, &g); CHECK(g.retrig, "pond: Shift + green: retrig");
             ql_press(0, 0);
         }
+        {   /* pond words under the quad screen's Shift table (waves 10..13): no Lorenz glyph past its table */
+            int16_t pw2[8] = { 0 }; pond_put(&f, pw2); memcpy(host_lfo_words, pw2, 16); host_pos = 0; host_shift = 1;
+            ql_screen_update(0, 16); host_shift = 0;
+            CHECK(nlines > 0, "pond words on the quad Shift table: drawn");
+        }
         memset(sh_st, 0, sizeof sh_st);
     }
 

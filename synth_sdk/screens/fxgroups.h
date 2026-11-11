@@ -10,6 +10,7 @@ enum { FG_FX, FG_SYNTH, FG_KINDS };
 extern const char *const *const fg_names[FG_KINDS];
 extern const uint8_t fg_ngroups[FG_KINDS];
 extern int fg_cur, fg_kind;
+extern void *volatile fg_drawn;
 int  fg_group_of(int kind, const char *name, int n);
 int  fg_count(int kind, const void *src, int g);
 void *fg_list(int kind, const void *src, int g);
