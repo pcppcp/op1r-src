@@ -28,6 +28,7 @@ int op1_sc_source(int src, int16_t *out) { (void)src; (void)out; return 0; }   /
 
 #include <assert.h>
 #include <string.h>
+#include <unistd.h>
 static _Alignas(32) uint8_t test_l1[8192];
 static int pool_enabled,pool_fresh=1;
 void *op1_l1_claim(int part,const void *owner,uint32_t bytes,int *fresh){
@@ -135,6 +136,16 @@ static void test_samples(void){
     host_slot=0;scan();assert(sample_len(1)==0);
     puts("PASS: empty, short, replaced, maximum-length and per-slot sample buffers");
 }
+static void test_empty_key(void){
+    /* a preset with words 1 and 3 = -1 (0xFFFF): their size key equals "none yet"; the first note hung the audio */
+    short p[8]={4000,-1,3000,-1,0x5303,8192,0,8192},out[128];
+    host_slot=0;ENGINE_granular.sync[0]=0;scan();
+    memset(&native_voices[0],0,sizeof native_voices[0]);v_init(&native_voices[0],0);   /* as at boot */
+    native_note_on(OP1_VOICE(0),p);
+    alarm(10);for(int b=0;b<100;b++)native_render(OP1_VOICE(0),out,p);alarm(0);
+    assert(native_voices[0].size>0&&native_voices[0].interval>=64);
+    puts("PASS: size / overlap words 0xFFFF on a fresh voice");
+}
 static void press(int c){key(c,1);key(c,0);}
 static void test_controls(void){
     dn=qn=0;gr_host_mode=0;host_slot=0;context();
@@ -159,4 +170,4 @@ static void test_controls(void){
     dn=0;press(0x3E);key(0x0D,1);key(0x0D,0);gr_host_mode=1;control_service();drain();assert(!ENGINE_granular.frozen&&!os_down[0]);
     puts("PASS: freeze, retrigger, queue races/retries, browser passthrough, sync persistence, slot/preset/mode cleanup");
 }
-int main(void){setup();test_grain_reference();test_audio();test_l1_fallback();test_samples();test_controls();return 0;}
+int main(void){setup();test_grain_reference();test_audio();test_l1_fallback();test_samples();test_empty_key();test_controls();return 0;}

@@ -622,7 +622,7 @@ void plug_boot(void)
  * Wrappers around the patch-apply methods (synth vtable 0x01910FB0 / FB8, drum vtable 0x01910F80, direct CALLs of
  * apply_synth) and the boot's MasterController::load. The original runs first (it writes the stored params, under its
  * VoiceCtl lock); then the selector word is set if the name is a loaded plugin (else left as stored: stock types,
- * unknown names). One 16-bit store: the audio thread reads it per block. ---- */
+ * unknown names, unless it names a file plugin). One 16-bit store: the audio thread reads it per block. ---- */
 #define JSON_GET    ((const void *(*)(const void *, const char *))0x019BEB70)   /* const operator[](key) */
 #define JSON_STR    ((void (*)(const void *, pl_dstr *))0x019BE00C)             /* asString -> TE string */
 #define APPLY_SYNTH ((void (*)(int *))0x01A010F8)
@@ -630,7 +630,8 @@ void plug_boot(void)
 #define APPLY_DFX   ((void (*)(int *))0x01A0010C)
 #define MASTER_LOAD ((void (*)(void))0x019D79BC)
 #define MASTER_FX_TYPE ((void (*)(pl_dstr *))0x0196EF20)                     /* db2::get_master_fx_type */
-static int number_of(int kind, pl_dstr *s)                /* 0: not a plugin; frees the string */
+int stock_type_name(int fx, const char *p, uint32_t n);   /* dispatcher.c */
+static int number_of(int kind, pl_dstr *s)                /* 0: not a plugin, -1: unknown name; frees the string */
 {
     char nm[16];
     const char *p = s->cap > 15 ? s->u.ptr : s->u.buf;
@@ -640,8 +641,17 @@ static int number_of(int kind, pl_dstr *s)                /* 0: not a plugin; fr
         nm[s->size] = 0;
         n = find_number(kind, nm);
     }
+    if (!n && s->size && !stock_type_name(kind == OP1P_FX, p, s->size)) n = -1;
     if (s->cap > 15 && s->u.ptr) OP_DELETE(s->u.ptr);
     return n;
+}
+/* an unknown name (plugin not installed here) keeps a built-in's number (the same everywhere: none here -> iter /
+ * filter) but not a file plugin's: those are numbered per device, another one may have it */
+static void put_selector(volatile int16_t *w, int n)
+{
+    if (n > 0) *w = (int16_t)(OP1_ENGINE_MAGIC + n);
+    else if (n < 0 && *w >= OP1_ENGINE_MAGIC + OP1_FILE_FIRST && *w <= OP1_ENGINE_MAGIC + OP1_MAX_ORDER)
+        *w = (int16_t)OP1_ENGINE_MAGIC;
 }
 static void set_selector(int kind, const int *patch, const char *key, uint32_t base)
 {
@@ -649,8 +659,7 @@ static void set_selector(int kind, const int *patch, const char *key, uint32_t b
     if (slot < 0 || slot > 7) return;
     pl_dstr s; dstr_init(&s);
     JSON_STR(JSON_GET(patch + 1, key), &s);
-    int n = number_of(kind, &s);
-    if (n) ((volatile int16_t *)(base + slot * 16))[4] = (int16_t)(OP1_ENGINE_MAGIC + n);
+    put_selector((volatile int16_t *)(base + slot * 16) + 4, number_of(kind, &s));
 }
 void plug_apply_synth(int *patch)    { APPLY_SYNTH(patch); set_selector(OP1P_SYNTH, patch, "type", 0xFF8013C4); }
 void plug_apply_synth_fx(int *patch) { APPLY_SFX(patch); set_selector(OP1P_FX, patch, "fx_type", 0xFF801444); }
@@ -660,8 +669,7 @@ void plug_master_load(void)                               /* CALL @0x019F054A (b
     MASTER_LOAD();
     pl_dstr s; dstr_init(&s);
     MASTER_FX_TYPE(&s);
-    int n = number_of(OP1P_FX, &s);
-    if (n) ((volatile int16_t *)0xFF8016C4)[4] = (int16_t)(OP1_ENGINE_MAGIC + n);
+    put_selector((volatile int16_t *)0xFF8016C4 + 4, number_of(OP1P_FX, &s));
 }
 
 /* CALL @0x019F02EE (Clips::load(clips) in R0, return value unused) */

@@ -163,6 +163,7 @@ void sp_plus_velocity(sp_voice *v, sp_xvoice *s, const int16_t *k, const sp_extr
     if (x->rand_start) off += (int32_t)(sp_rand() % (uint32_t)(x->rand_start * 64 + 1));
     if (off) {
         int32_t room = (sp_bound(k[3], 0) - sp_bound(k[0], 0)) >> 12;
+        if (room < 0) room = 0;                                   /* start after end: no offset */
         if (off > room) off = room;
         v->pos += s->dir > 0 ? off << 12 : -(off << 12);
     }

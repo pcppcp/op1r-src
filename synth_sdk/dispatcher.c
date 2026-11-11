@@ -489,6 +489,12 @@ int fx_name_eq(const char *name, const dstring *s)
     }
     return 0;
 }
+int stock_type_name(int fx, const char *p, uint32_t n)       /* plugload.c: a stock synth / FX type (or iter / filter) */
+{
+    if (streq_n(p, fx ? "filter" : "iter", n)) return 1;
+    for (const char *const *s = fx ? stock_fx_names : stock_synth_names; *s; s++) if (streq_n(p, *s, n)) return 1;
+    return 0;
+}
 
 /* ============ FX screen: iter-style generic screen (own SVG) for custom FX ============
  * Screens live in a fixed table of 0x44 objects (0x01DF4E54[id]); ScreenId::for_fx(type) maps fx
