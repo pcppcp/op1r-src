@@ -329,6 +329,55 @@ int main(int argc, char **argv)
         assert(se_paste(&e)); assert(buf[5000] == host_clip[0] && buf[20000] == at20000);
         e.drum = 0; se_n = SE_N_SYNTH;
     }
+    /* trim, then an edit that moves audio: the kept audio survives closing (paste pushed it right) */
+    {
+        srand(1); make_sample(); memcpy(ref, buf, SE_N * sizeof *buf);
+        memcpy(w, w0, sizeof w); se_open(&e, buf, w);
+        w[0] = 3000; w[3] = 7000; a = se_w2s(3000); b = se_w2s(7000);
+        assert(se_trim(&e));
+        int32_t f = e.tr_fade, len = b - a, n = 10000;
+        for (int i = 0; i < n; i++) host_clip[i] = 1234;
+        host_clip_len = n; host_clip_kind = 1;
+        w[3] = (int16_t)se_s2w(len, 1);                                /* drop at the start: the trim moves right */
+        assert(se_paste(&e) && buf[0] == 1234 && buf[n - 1] == 1234);
+        se_finalize(&e);                                               /* closing */
+        assert(!memcmp(buf + n + f, ref + a + f, (size_t)(len - 2 * f - 8) * 2));
+        /* trim, end marker moved, undo: bit-exact (the fades are undone where they were made) */
+        memcpy(buf, ref, SE_N * sizeof *buf); memcpy(w, w0, sizeof w); se_open(&e, buf, w);
+        w[0] = 3000; w[3] = 7000;
+        assert(se_trim(&e));
+        se_move(&e, 1, -300, 1);
+        assert(se_undo(&e) && !memcmp(buf, ref, SE_N * sizeof *buf) && w[0] == 3000 && w[3] == 7000);
+        /* trim, cut, undo: the cut made the trim final, undo cannot rotate the shifted audio */
+        memcpy(buf, ref, SE_N * sizeof *buf); memcpy(w, w0, sizeof w); se_open(&e, buf, w);
+        w[0] = 3000; w[3] = 7000;
+        assert(se_trim(&e));
+        int32_t cw = (int16_t)se_s2w(len / 2, 1);
+        w[0] = (int16_t)cw; w[3] = (int16_t)se_s2w(len, 1);            /* cut the second half of the kept audio */
+        int32_t ca = se_w2s(cw);
+        assert(se_cut(&e) && !e.trimmed && !se_undo(&e));
+        assert(!memcmp(buf + f, ref + a + f, (size_t)(ca - f) * 2));    /* the first half stays at the front */
+        for (int i = len; i < SE_N; i++) assert(buf[i] == 0);          /* the trimmed-away audio is gone */
+    }
+    /* drum drop: a long clip stops at the next pad (other pads keep their audio) */
+    {
+        static int16_t tab[24 * 8];
+        memset(buf_all, 0, sizeof buf_all);
+        for (int i = 0; i < SE_N_DRUM; i++) buf[i] = (int16_t)(i % 1000 + 1);
+        memcpy(ref, buf, SE_N_DRUM * sizeof *buf);
+        memset(tab, 0, sizeof tab);
+        for (int p = 0; p < 24; p++) { e.pad = (uint8_t)p; e.pt = tab; e.drum = 1; se_n = SE_N_DRUM;
+                                       se_pad_set(&e, 0, 100000 + p * 10000); se_pad_set(&e, 1, 100000 + p * 10000 + 5000); }
+        se_open_drum(&e, buf, tab, 3);                                 /* pad 3: [130000, 135000) */
+        for (int i = 0; i < 100000; i++) host_clip[i] = -7;
+        host_clip_len = 100000; host_clip_kind = 1;
+        assert(se_paste(&e));
+        for (int i = 130000; i < 140000; i++) assert(buf[i] == -7);    /* up to pad 4's start */
+        assert(!memcmp(buf + 140000, ref + 140000, (size_t)(SE_N_DRUM - 140000) * 2));
+        assert(se_pad_get(&e, 1) == 140000);
+        e.pad = 4; assert(se_pad_get(&e, 0) == 140000 && se_pad_get(&e, 1) == 145000);
+        e.drum = 0; se_n = SE_N_SYNTH;
+    }
     /* rotation on odd sizes */
     for (int n = 1; n < 50; n++) for (int k = 0; k <= n; k++) {
         int16_t v[64]; for (int i = 0; i < n; i++) v[i] = (int16_t)i;

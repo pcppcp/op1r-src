@@ -1123,6 +1123,8 @@ void key_event_hook(int code, int pressed)
     { extern void cc_fb_key(int, int); cc_fb_key(code, pressed); }   /* CC feedback (midi/ccmap.c) */
     if (du_prompt_key(code, pressed)) return;                    /* dev update prompt: T1 restart / T2 cancel */
     extern int ms_key(int code, int pressed, int on_tape);
+    if (code == 0x15 && pressed && se_ready && se_is_open()) { se_open_close(0); se_swap(); }   /* SEQ leaves the sample
+                                                                 * editor (below; ms_key takes SEQ when the MIDI sequencer is on) */
     if (ms_key(code, pressed, tape_page())) return;              /* MIDI sequencer device: SEQ + TAPE (docs/39) */
     se_swap();                                                   /* drum+ / stock pages follow the drum slot */
     if (dpu_key(code, pressed)) return;                          /* drum+: encoder presses */
@@ -1151,7 +1153,8 @@ void key_event_hook(int code, int pressed)
             if ((code >= 0x06 && code <= 0x09) || (code >= 0x0A && code <= 0x0C && !synth_held && !drum_held) || code == 0x3E || code == 0x3B || (code == 0x24 && *(volatile uint8_t *)0x01DD7F78)) {
                 se_key(code); se_swallow[code] = 1; return;
             }
-            if ((code >= 0x04 && code <= 0x05) || code == 0x00 || code == 0x01 || code == 0x15 || code == 0x2C) {
+            if ((code >= 0x04 && code <= 0x05) || code == 0x00 || code == 0x01 || code == 0x15 || code == 0x2C ||
+                code == 0x21 || code == 0x2B) {                         /* (REC / input: a new recording into this buffer) */
                 se_open_close(0); se_swap();                            /* leaving: close, the key acts as usual */
             }
         }

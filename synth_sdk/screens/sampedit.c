@@ -1,7 +1,8 @@
 /* Sample editor for the synth sampler (docs/27). Synth key + scissors opens it for the current slot.
  * Markers = the stock sampler's knob words (0 start, 3 end; fractions of the whole 6 s buffer, 32768 = 1.0), so keys
  * play the edited range at once. Optional snap to zero crossings. Trim rotates the kept region to the front of the
- * buffer (in place, no copy): undo (Shift + left) rotates back until the editor closes; closing zeroes the rest. */
+ * buffer (in place, no copy): undo (Shift + left) rotates back until the editor closes or the audio is edited again;
+ * closing (or that edit) zeroes the rest. */
 #include "../op1_synth.h"
 
 #define SE_N_SYNTH  (264600 - 8)             /* audio samples after the 8 guard samples (capacity 264600) */
@@ -32,7 +33,7 @@ typedef struct {
     int32_t tr_a, tr_b;                      /* trim: kept range [a, b) before the rotation */
     int16_t tr_w[8];                         /* knob words before the trim */
     int16_t tr_edge[2][132];                 /* samples under the de-click fades (restored by undo) */
-    int32_t tr_fade;
+    int32_t tr_fade, tr_pe;                  /* fade length; the end (samples) the fades were made at */
     int32_t acc[4];
     int16_t col_min[SE_COLS], col_max[SE_COLS];
     int32_t shown_cs;                        /* length text currently set (centiseconds, -1: none) */
@@ -80,6 +81,20 @@ static void se_pad_set(sampedit *e, int k, int32_t s)
     int64_t v = (((int64_t)s << 31) + SE_CAP_DRUM / 2) / SE_CAP_DRUM;
     if (v > 0x7FFFFFFF) v = 0x7FFFFFFF;
     p[k ? 2 : 1] = (int16_t)(v >> 16); p[k ? 6 : 5] = (int16_t)((v & 0xFFFF) >> 1);
+}
+/* drum: room for a paste at a: up to the next other pad that starts after a (the pad's own end, if later) */
+static int32_t se_pad_room(sampedit *e, int32_t a)
+{
+    int keep = e->pad;
+    int32_t lim = SE_N, own = se_pad_get(e, 1);
+    for (int i = 0; i < 24; i++) {
+        if (i == keep) continue;
+        e->pad = (uint8_t)i;
+        int32_t s = se_pad_get(e, 0), t = se_pad_get(e, 1);
+        if (t > s && s > a && s < lim) lim = s;
+    }
+    e->pad = (uint8_t)keep;
+    return (own > lim ? own : lim) - a;
 }
 static int32_t SE_GET(const sampedit *e, int k) { return e->drum ? se_pad_get(e, k == 3) : e->w[k]; }
 static void SE_SET(sampedit *e, int k, int32_t v) { if (e->drum) se_pad_set(e, k == 3, v); else e->w[k] = (int16_t)v; }
@@ -138,7 +153,7 @@ int se_trim(sampedit *e)
     /* de-click: 3 ms linear fade in / out at the new edges (the end at the played end word) */
     int32_t pe = U2S(e, endw), f = 132;
     if (f > pe / 4) f = pe / 4;
-    e->tr_fade = f;
+    e->tr_fade = f; e->tr_pe = pe;
     for (int32_t i = 0; i < f; i++) {
         e->tr_edge[0][i] = e->d[i]; e->tr_edge[1][i] = e->d[pe - 1 - i];
         e->d[i] = (int16_t)(e->d[i] * i / f);
@@ -151,7 +166,7 @@ int se_trim(sampedit *e)
 int se_undo(sampedit *e)
 {
     if (!e->trimmed) return 0;
-    int32_t pe = U2S(e, SE_GET(e, 3));                                 /* (the end word the fades were made at) */
+    int32_t pe = e->tr_pe;                                        /* where the fades were made (the end marker may have moved) */
     for (int32_t i = 0; i < e->tr_fade; i++) { e->d[i] = e->tr_edge[0][i]; e->d[pe - 1 - i] = e->tr_edge[1][i]; }
     se_rotate(e->d, e->tr_b, e->tr_b - e->tr_a);                  /* right by a = left by b - a */
     for (int i = 0; i < 8; i++) e->w[i] = e->tr_w[i];
@@ -165,6 +180,9 @@ void se_finalize(sampedit *e)
     for (int32_t i = e->tr_b - e->tr_a; i < SE_N; i++) e->d[i] = 0;
     e->trimmed = 0; e->cache_len = -1;
 }
+/* an audio edit after a trim: the trim becomes final first (undo would rotate audio the edit moved or changed, and
+ * closing would zero from the old end, over pasted audio) */
+static void se_edit(sampedit *e) { se_finalize(e); }
 
 /* red: gain of the whole sample, -60 .. +24 dB in 0.5 dB steps. Preview: the stock sampler gain (word 7; playback
  * gain ~ word^2, SamplerScreen shows 20 log10(16 p^2) dB) set to w7 * sqrt(A) (capped at the word's maximum);
@@ -255,6 +273,7 @@ int se_dc(sampedit *e)
     for (int32_t i = a; i < b; i++) sum += e->d[i];
     int32_t m = (int32_t)(sum / (b - a));
     if (!m) return 0;
+    se_edit(e);
     for (int32_t i = a; i < b; i++) { int32_t v = e->d[i] - m; e->d[i] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v); }
     e->cache_len = -1; e->on_dirty = 1;
     return 1;
@@ -296,6 +315,7 @@ int se_fade_apply(sampedit *e)
 {
     int32_t a = U2S(e, SE_GET(e, 0)), b = U2S(e, SE_GET(e, 3));
     if (b - a < 2) return 0;
+    se_edit(e);
     for (int32_t i = a; i < b; i++) e->d[i] = (int16_t)((e->d[i] * se_fade_gain(e, i, a, b)) >> 15);
     e->cache_len = -1; e->on_dirty = 1;
     return 1;
@@ -350,6 +370,7 @@ int se_copy(sampedit *e)                                          /* lift */
 int se_cut(sampedit *e)                                           /* scissors: copy, remove, close the gap */
 {
     if (!se_copy(e)) return 0;
+    se_edit(e);
     int32_t a = U2S(e, SE_GET(e, 0)), b = U2S(e, SE_GET(e, 3));
     if (e->drum) {                                                /* drum: the other pads stay where they are: zero */
         for (int32_t i = a; i < b; i++) e->d[i] = 0;
@@ -369,6 +390,9 @@ int se_paste(sampedit *e)                                         /* drop: inser
     int32_t a = U2S(e, SE_GET(e, 0));
     if (!c || n <= 0 || !CLIP_READY()) return 0;
     if (n > SE_N - a) n = SE_N - a;
+    if (e->drum) { int32_t m = se_pad_room(e, a); if (n > m) n = m; }   /* drum: overwrite up to the next pad */
+    if (n <= 0) return 0;
+    se_edit(e);
     if (!e->drum)                                                 /* drum: overwrite (other pads keep their audio) */
         for (int32_t i = SE_N - 1; i >= a + n; i--) e->d[i] = e->d[i - n];   /* push the rest right (cut off at 6 s) */
     for (int32_t i = 0; i < n; i++) e->d[a + i] = c[i];
@@ -487,6 +511,7 @@ int se_reverse_sel(sampedit *e)
 {
     int32_t a = U2S(e, SE_GET(e, 0)), b = U2S(e, SE_GET(e, 3));
     if (b - a < 2) return 0;
+    se_edit(e);
     se_reverse(e->d, a, b);
     e->cache_len = -1; e->on_dirty = 1;
     return 1;
@@ -497,6 +522,7 @@ int se_zero(sampedit *e)
 {
     int32_t a = U2S(e, SE_GET(e, 0)), b = U2S(e, SE_GET(e, 3));
     if (b <= a) return 0;
+    se_edit(e);
     for (int32_t i = a; i < b; i++) e->d[i] = 0;
     e->cache_len = -1; e->on_dirty = 1;
     return 1;
@@ -507,6 +533,7 @@ int se_normalize(sampedit *e)
     int32_t a = U2S(e, SE_GET(e, 0)), b = U2S(e, SE_GET(e, 3)), peak = 0;
     for (int32_t i = a; i < b; i++) { int32_t v = e->d[i] < 0 ? -e->d[i] : e->d[i]; if (v > peak) peak = v; }
     if (peak == 0 || peak >= 32767) return 0;
+    se_edit(e);
     int32_t g = (int32_t)(((int64_t)32767 << 16) / peak);
     for (int32_t i = a; i < b; i++) {
         int32_t v = (int32_t)(((int64_t)e->d[i] * g + 0x8000) >> 16);
