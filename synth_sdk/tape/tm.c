@@ -222,9 +222,14 @@ void tm_block(void)                                              /* audio ISR, a
         if (scrub_v && t == sc) tm_track_block(t, (int64_t)scrub_v << 16, 0, 16, accL, accR);   /* -6 dB, no loops */
         else if (playing) tm_track_block(t, ((int64_t)v * tm_tr[t].speed) >> 11, 1, 15, accL, accR);   /* (1x = 2^27) x Q16 -> Q32 */
     }
+    int32_t fade = 0x7FFF;                                       /* stopping: below 1/4x the volume follows the speed to 0, so
+                                                                  * the held near-DC of an almost stopped tape does not pop when
+                                                                  * it ends (R246's W[0x01B4EF78] stays 0x7FFF: not its fade) */
+    if (mode == 0 && !(scrub_v && !playing)) { const int32_t av = v < 0 ? -v : v; fade = av >> 10 > 0x7FFF ? 0x7FFF : av >> 10; }
     for (int i = 0; i < 64; i++) {
-        OUT_L[i] = (int16_t)(accL[i] > 32767 ? 32767 : accL[i] < -32768 ? -32768 : accL[i]);
-        OUT_R[i] = (int16_t)(accR[i] > 32767 ? 32767 : accR[i] < -32768 ? -32768 : accR[i]);
+        const int32_t l = accL[i] * fade >> 15, r = accR[i] * fade >> 15;
+        OUT_L[i] = (int16_t)(l > 32767 ? 32767 : l < -32768 ? -32768 : l);
+        OUT_R[i] = (int16_t)(r > 32767 ? 32767 : r < -32768 ? -32768 : r);
     }
 }
 
