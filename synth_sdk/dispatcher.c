@@ -1153,12 +1153,14 @@ void *lander_stub(void)
     return lander_obj;
 }
 static uint8_t mode_keys;                                               /* synth drum tape mixer held (bits) */
+static uint8_t swallowed[0x40];                                         /* presses taken below the page flushes */
 
 void key_event_hook(int code, int pressed)
 {
     lz_input++;                                                  /* lazy screens: no background parse while playing */
     plk_poll();                                                  /* parameter-lock clips: load / save (seq/plk.c) */
     if (pressed && pressed != 0xA5) { extern void bgs_flush(void); bgs_flush(); }   /* delayed saves (bgsave.c): a key may change mode / start disk mode (not MX_KEY below: MIDI CCs keep the debounce) */
+    if (pressed && code < 0x40) swallowed[code] = 0;             /* (its last release may have been taken above) */
     { extern void in_screen_sync(void), in_flush(void); extern int in_press(int); in_flush(); in_screen_sync();   /* input engines: T2 tuner */
       if (in_press(code)) return; }
     if (code >= 0x02 && code <= 0x05) {                          /* the Lander combo: all four held -> swallowed */
@@ -1253,9 +1255,13 @@ void key_event_hook(int code, int pressed)
     { extern void scale_flush(void), fxroute_flush(void), settings_flush(void);   /* page settings, likewise */
       scale_flush(); fxroute_flush(); settings_flush(); ml_flush();
       { extern void tfs_state_flush(void); tfs_state_flush(); } }   /* FREE tracks (screens/tfscreen.c) */
+    /* below, a release is swallowed iff its press was: not decided again from the state at the release (a page or
+     * mode may have changed in between; a release swallowed after a press that reached the stock code leaves that
+     * key held there) */
+    if (code < 0x40 && !pressed && swallowed[code]) { swallowed[code] = 0; return; }
     if (code >= 0x3B && code <= 0x3E && fr_src == 2 && CUR_SCREEN_ID == MIXER_SCREEN_ID) {   /* press: pan / aux */
         if (pressed) mx_pan[press_knob[code - 0x3B]] ^= 1;
-        return;
+        if (pressed) { swallowed[code] = 1; return; }
     }
     if (ml_fxctx) {                                             /* master FX opened from the master LFO page (mixer mode 3) */
         if (CUR_MODE_ID != 3 || (pressed && code == 0x05) || (pressed && (code == 0x06 || code == 0x07))) ml_fxctx = 0;   /* left */
@@ -1268,7 +1274,7 @@ void key_event_hook(int code, int pressed)
                     SCREEN_TABLE[MIXOV_SCREEN_ID] = ml_type_shown() ? (void *)mlp_scr : (void *)mlq_scr;
                 }
             }
-            return;
+            if (pressed) { swallowed[code] = 1; return; }
         }
     }
     if (fr_ready) {                                             /* Shift + mixer: T1 overview (default), T2 FX source, T4 master LFO */
@@ -1280,11 +1286,11 @@ void key_event_hook(int code, int pressed)
                 KEY_DISPATCH(0x08, 1); KEY_DISPATCH(0x08, 0);
                 ml_fxctx = CUR_MODE_ID == 3;
             }
-            return;
+            if (pressed) { swallowed[code] = 1; return; }
         }
         if (CUR_MODE_ID == 0x0D && (code == 0x06 || code == 0x07)) {
             if (pressed) { fr_on = code == 0x07; ml_leave(); SCREEN_TABLE[MIXOV_SCREEN_ID] = fr_on ? (void *)fr_scr : mixov_screen; }
-            return;
+            if (pressed) { swallowed[code] = 1; return; }
         }
         if (CUR_MODE_ID == 0x0D && code == 0x09 && ml_ready) {   /* T4: page / on-off; Shift + T4: type list */
             if (pressed) {
@@ -1292,21 +1298,21 @@ void key_event_hook(int code, int pressed)
                 int v = ml_t4(*(volatile uint8_t *)0x01DD7F78);
                 SCREEN_TABLE[MIXOV_SCREEN_ID] = v == 2 ? (void *)mll_scr : ml_type_shown() ? (void *)mlp_scr : (void *)mlq_scr;
             }
-            return;
+            if (pressed) { swallowed[code] = 1; return; }
         }
         if (ml_view && CUR_MODE_ID == 0x0D && code >= 0x3B && code <= 0x3E) {   /* master LFO: press selects LFO 1..4 */
             if (pressed) ml_press(press_knob[code - 0x3B]);
-            return;
+            if (pressed) { swallowed[code] = 1; return; }
         }
         if ((fr_on || ml_view) && CUR_MODE_ID != 0x0D) { fr_on = 0; ml_leave(); SCREEN_TABLE[MIXOV_SCREEN_ID] = mixov_screen; }
     }
     if (code == 0x07 && pcp_ready && CUR_MODE_ID == 4) {          /* metronome + T2: pulse sync page, again: back */
         if (pressed) { pcp_on = !pcp_on; SCREEN_TABLE[TEMPO_SCREEN_ID] = pcp_on ? (void *)pcp_scr : pcp_base; }
-        return;
+        if (pressed) { swallowed[code] = 1; return; }
     }
     if (code == 0x06 && pcp_on && CUR_MODE_ID == 4) {            /* on the page, T1: back to the metronome */
         if (pressed) { pcp_on = 0; SCREEN_TABLE[TEMPO_SCREEN_ID] = pcp_base; }
-        return;
+        if (pressed) { swallowed[code] = 1; return; }
     }
     if (code == 0x01 && pcp_on && pressed) { pcp_on = 0; SCREEN_TABLE[TEMPO_SCREEN_ID] = pcp_base; }   /* the metronome key opens the metronome */
     if (((code == 0x06 && sm_ready) || (code == 0x07 && us_ready) || (code == 0x08 && st_ready) || (code == 0x09 && sc_ready)) && CUR_MODE_ID == 0x0C) {  /* clock + T1 / T2 / T3 */
@@ -1315,16 +1321,15 @@ void key_event_hook(int code, int pressed)
             sm_on = sm_on == want ? 0 : want;
             SCREEN_TABLE[CLOCK_SCREEN_ID] = sm_on == 1 ? (void *)sm_scr : sm_on == 2 ? (void *)us_scr : sm_on == 3 ? (void *)st_scr : sm_on == 4 ? (void *)sc_scr : clock_base();
         }
-        return;
+        if (pressed) { swallowed[code] = 1; return; }
     }
-    if (code == 0x00 && ob_ready && *(volatile uint8_t *)0x01DD7F78) {   /* Shift+help: card / clock */
-        if (!pressed) return;
+    if (pressed && code == 0x00 && ob_ready && *(volatile uint8_t *)0x01DD7F78) {   /* Shift+help: card / clock */
         if (CUR_MODE_ID == 0x0C) {                              /* in clock mode: toggle (stock would do nothing) */
             ob_view ^= 1;
             if (ob_view) ob_new_card();
             sm_on = 0;
             SCREEN_TABLE[CLOCK_SCREEN_ID] = clock_base();
-            return;
+            swallowed[code] = 1; return;
         }
         if (ob_view) ob_new_card();                             /* entering clock mode: the remembered view */
         sm_on = 0;
@@ -1333,14 +1338,16 @@ void key_event_hook(int code, int pressed)
     {                                                            /* sequencer plugin page (docs/44) */
         const op1_seq_t *q = seq_page();
         if (q) {
-            if (code == 0x24 || code == 0x25) { if (pressed) eu_octave(code == 0x25 ? 1 : -1); return; }   /* octave */
-            if (code == 0x06 || code == 0x07) { if (pressed) { plk_view = code == 0x07; eu_sync_screen(); } return; }   /* T1 / T2 */
+            if (code == 0x24 || code == 0x25) { if (pressed) { eu_octave(code == 0x25 ? 1 : -1); swallowed[code] = 1; return; } }   /* octave */
+            if (code == 0x06 || code == 0x07) { if (pressed) { plk_view = code == 0x07; eu_sync_screen(); swallowed[code] = 1; return; } }   /* T1 / T2 */
             int knob = code >= 0x3B && code <= 0x3E ? press_knob[code - 0x3B] : -1;
-            if (plk_view && plk_page_key(*(volatile int *)0x01DE4C40 == 1, code, pressed, knob, *(volatile uint8_t *)0x01DD7F78)) return;
-            if (q->key(*(volatile int *)0x01DE4C40 == 1, code, pressed, knob, *(volatile uint8_t *)0x01DD7F78)) return;
+            if (code != 0x24 && code != 0x25 && code != 0x06 && code != 0x07) {
+                if (plk_view && plk_page_key(*(volatile int *)0x01DE4C40 == 1, code, pressed, knob, *(volatile uint8_t *)0x01DD7F78)) return;
+                if (q->key(*(volatile int *)0x01DE4C40 == 1, code, pressed, knob, *(volatile uint8_t *)0x01DD7F78)) return;
+            }
         }
     }
-    if (sb_key(custom_engine_page(), code, pressed)) return;     /* engine sample browser (screens/sbrowse.c) */
+    if (sb_key(custom_engine_page(), code, pressed) && pressed) { swallowed[code] = 1; return; }     /* engine sample browser (screens/sbrowse.c) */
     if (code >= 0x3B && code <= 0x3E && quad_lfo_page()) {      /* quad LFO: press selects LFO 1..4 */
         if (pressed && *(volatile uint8_t *)0x01DD7F78) {        /* Shift + push: mute / unmute that LFO */
             int pos = lfo_page_pos();
@@ -1349,17 +1356,17 @@ void key_event_hook(int code, int pressed)
             for (int i = 0; i < 8; i++) before[i] = w[i];
             ql_turn(w, pos, press_knob[code - 0x3B], 0, 2);
             for (int i = 0; i < 8; i++) if (w[i] != before[i]) { PATCH_SET_LFO(PATCH_OBJ(pos, lfo_page_slot(pos)), w); break; }
-            return;
+            swallowed[code] = 1; return;
         }
         if (pressed) ql_press(lfo_page_pos(), press_knob[code - 0x3B]);
-        return;
+        if (pressed) { swallowed[code] = 1; return; }
     }
     if (code >= 0x3B && code <= 0x3E) {
         int n = custom_engine_page();
         if (n && (op1_engines[n]->press[press_knob[code - 0x3B]] == OP1_PRESS_PAGE ||
                   op1_press_steps(op1_engines[n]->press[press_knob[code - 0x3B]]))) {   /* engine page 2 */
             if (pressed) op1_eng_page[press_knob[code - 0x3B]] ^= 1;
-            return;
+            if (pressed) { swallowed[code] = 1; return; }
         }
         int e = custom_fx_page();
         if (e) {
@@ -1367,7 +1374,7 @@ void key_event_hook(int code, int pressed)
             const int pos = op1_fx_screen_pos();
             int16_t *w = (int16_t *)op1_fx_knobs(pos);
             { extern int fxx_layers_of(int e);                    /* Shift + press: the second Shift layer (fxshiftx.c) */
-              if (*(volatile uint8_t *)0x01DD7F78 && fxx_layers_of(e) > 1) { if (pressed) { extern int fxx_press(int, int); fxx_press(e, pos); } return; } }
+              if (pressed && *(volatile uint8_t *)0x01DD7F78 && fxx_layers_of(e) > 1) { extern int fxx_press(int, int); fxx_press(e, pos); swallowed[code] = 1; return; } }
             if (fxs_push(op1_fxs[e], w, k, pressed)) {          /* op1_fx_push_bit: a saved flag in word 7 */
                 if (pressed && pos != OP1_FX_MASTER) PATCH_SET_FX(PATCH_OBJ(pos, *(volatile int *)(pos ? 0xFF8016D8 : 0xFF8016D4)), w);
                 return;
@@ -1375,7 +1382,7 @@ void key_event_hook(int code, int pressed)
             uint8_t mode = op1_fxs[e]->press[k];
             if (mode) {                                  /* handled: swallow press and release */
                 if (pressed && !OP1_PRESS_IS_EXTEND(mode) && !OP1_PRESS_IS_LIST(mode) && !op1_fx_steps(mode)) op1_fx_page[op1_fx_screen_pos()][k] ^= 1;
-                return;
+                if (pressed) { swallowed[code] = 1; return; }
             }
         }
     }

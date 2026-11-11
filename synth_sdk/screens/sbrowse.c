@@ -72,7 +72,7 @@ int sb_pick(void)                                                    /* white pr
     return br_n ? -br_idx[br_sel] : 1;
 }
 
-/* key on the engine screen of engine n (0: not shown); 1 = handled */
+/* key on the engine screen of engine n (0: not shown); 1 = handled (for a press: the dispatcher swallows its release) */
 int sb_key(int n, int code, int pressed)
 {
     if (sb_open_n && sb_open_n < SB_SAMPLERPLUS && sb_open_n != n) sb_open_n = 0;   /* an engine's: left its page */
