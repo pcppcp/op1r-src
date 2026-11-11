@@ -315,8 +315,20 @@ int tm_span(int t, int32_t *lo, int32_t *hi)                     /* GUI: the tra
     return 1;
 }
 
+volatile uint8_t tm_reload_after_clip;                           /* lift / drop on our screen: reload once the clipboard is done */
 int tm_service(void)                                             /* main loop (tape_service): one chunk per call */
 {
+#ifndef OP1_HOST
+    {                                                            /* the clipboard queue empty for 0.5 s (the worker may still
+                                                                  * run the job it popped): reload our chunks */
+        static uint32_t idle_t; uint32_t c; __asm__ volatile ("%0 = CYCLES;" : "=d"(c));
+        if (!tm_reload_after_clip || !((int (*)(void))0x0191C750)()) idle_t = c;
+        else if (c - idle_t > 200000000u) {
+            tm_reload_after_clip = 0;
+            for (int i = 0; i < TM_SLOTS; i++) if (slot[i].t >= 0) { slot[i].state = 1; slot[i].gen++; }
+        }
+    }
+#endif
     if (!tm_on) return 0;
     if (!tm_alloc()) return 0;
     for (int i = 0; i < TM_SLOTS; i++) {

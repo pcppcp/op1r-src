@@ -30,8 +30,7 @@ int32_t tm_head_pos(int t);
 #define NCLIPS         512
 #define SR             44100
 #define REC_LEVEL      (*(volatile int16_t *)0x01B4EF6E)          /* R246's tape record level (stock slider: >> 5, docs/11) */
-extern volatile int16_t tm_in_peak;                              /* tape/tm.c: the bus R246 records (instrument / input) */
-#define IN_PEAK        tm_in_peak
+#define IN_PEAK        (*(volatile int16_t *)0xFF801088)          /* R246's tape input meter source (getter 0x01A2A064) */
 #define T_MODE         (*(volatile int32_t *)0xFF802960)          /* 0 stop, 1 rec, 2 play, 3 wind */
 #define TSPEED_RAW     (*(volatile int32_t *)0xFF802968)          /* transport speed (0: stood still) */
 #define UI_STATE       (*(volatile int32_t *)0x018C17D4)          /* 6 = record armed (docs/25) */
@@ -179,7 +178,16 @@ static void tfs_update(void *scr, int dt)
     {                                                            /* right edge, as stock: record level + input meter */
         const int32_t x = OP1_Q10(310), y0 = OP1_Q10(8), y1 = OP1_Q10(100), hgt = y1 - y0;   /* above the tracks to the top */
         ln(r, x, y0, x, y1, 0x500, c_dred);                      /* as stock: a red line, the signal red, the level a red dot */
-        int32_t pk = IN_PEAK < 0 ? 0 : IN_PEAK; const int32_t py = y1 - (int32_t)((int64_t)hgt * pk >> 15);
+        /* as stock: a dB scale (R246's getter: log, clamped to -24 dB); here -24 .. 0 dB over the height */
+        int32_t pk = IN_PEAK < 0 ? -IN_PEAK : IN_PEAK, db8 = -24 * 256;           /* dB, Q8 */
+        if (pk > 0) {                                            /* 20 log10(pk / 32768) = 6.0206 (log2 pk - 15) */
+            int e = 0; while ((pk >> e) > 1) e++;
+            const int32_t fr = ((pk << 8) >> e) - 256;            /* the mantissa above 1, Q8 */
+            const int32_t l2 = (e - 15) * 256 + (fr * (362 - (fr * 106 >> 8)) >> 8);   /* log2(1 + x) ~ x (1.414 - 0.414 x) */
+            db8 = l2 * 1541 >> 8;                                /* x 6.0206 */
+            if (db8 < -24 * 256) db8 = -24 * 256;
+        }
+        const int32_t py = y1 - (int32_t)((int64_t)hgt * (db8 + 24 * 256) / (24 * 256));
         if (py < y1) ln(r, x, py, x, y1, 0xA00, c_red);
         const int32_t ly = y1 - (int32_t)((int64_t)hgt * (REC_LEVEL < 0 ? 0 : REC_LEVEL) >> 15);
         static const int8_t hw[7] = { 2, 3, 4, 4, 4, 3, 2 };     /* the dot: stacked lines */
@@ -268,6 +276,19 @@ int tfs_key(int code, int pressed)                               /* key thread: 
     }
     if (code >= 0x06 && code <= 0x09) {                          /* T: select (R246 records here); Shift + T: mute */
         if (pressed) { if (SHIFT) tm_tr[code - 0x06].mute ^= 1; else { extern volatile uint8_t tm_sel; sel = (uint8_t)(code - 0x06); tm_sel = sel; SEL_TRACK = sel; } }
+        return 1;
+    }
+    if ((code == 0x0A || code == 0x0B) && !SHIFT) {              /* lift / drop: the active track at its head (R246's clipboard) */
+        if (pressed) {
+            const int32_t h = tm_head_pos(sel);
+            if (code == 0x0B) ((void (*)(int, int32_t, int))0x0191BEA8)(sel, h, 0);   /* drop (as the tape key handler) */
+            else for (int i = 0; i < NCLIPS; i++)                /* lift: the clip under the head */
+                if (CLIP_USED[i] && CLIPS[i * 3] == sel && CLIPS[i * 3 + 1] <= h && h < CLIPS[i * 3 + 2]) {
+                    ((void (*)(int, int32_t, int32_t, int))0x0191BBD0)(sel, CLIPS[i * 3 + 1], CLIPS[i * 3 + 2], i);   /* audio_clipboard::copy */
+                    break;
+                }
+            extern volatile uint8_t tm_reload_after_clip; tm_reload_after_clip = 1;
+        }
         return 1;
     }
     if (code == 0x3E) {                                          /* red press: a marker at the active head; Shift: remove */
