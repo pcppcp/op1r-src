@@ -57,7 +57,7 @@ static int tfs_id = -1;
 static uint8_t tfs_in, sel;
 
 static const int32_t ratios[] = { 0x4000, 0x5555, 0x8000, 0xAAAB, 0xC000, 0x10000, 0x15555, 0x18000, 0x20000, 0x30000, 0x40000 };
-static const char *const ratio_txt[] = { "1/4", "1/3", "1/2", "2/3", "3/4", "1", "4/3", "3/2", "2", "3", "4" };
+static const char *const ratio_txt[] = { "1:4", "1:3", "1:2", "2:3", "3:4", "1:1", "4:3", "3:2", "2:1", "3:1", "4:1" };
 #define NR ((int)(sizeof ratios / sizeof ratios[0]))
 
 static const uint8_t c_blue[4] = { 0x4D, 0x9E, 0xFF, 0xFF }, c_green[4] = { 0x00, 0xED, 0x95, 0xFF },
@@ -71,9 +71,9 @@ static char *put_u(char *q, uint32_t v, int w) { char b[10]; int n = 0; do b[n++
 static void fmt_speed(char *q, int32_t sp)                       /* "1/2x", "1.37x" */
 {
     if (sp < 0) sp = -sp;
-    for (int i = 0; i < NR; i++) if (ratios[i] == sp) { q = put(q, ratio_txt[i]); put(q, "x"); return; }
+    for (int i = 0; i < NR; i++) if (ratios[i] == sp) { put(q, ratio_txt[i]); return; }
     const uint32_t c = (uint32_t)(((int64_t)sp * 100 + 0x8000) >> 16);
-    q = put_u(q, c / 100, 1); *q++ = '.'; q = put_u(q, c % 100, 2); put(q, "x");
+    q = put_u(q, c / 100, 1); *q++ = '.'; put_u(q, c % 100, 2);
 }
 
 /* stock-font texts: built once, redrawn; set only when the string changes */

@@ -100,6 +100,31 @@ int tape_service(int arg)
 #ifndef OP1_HOST
     if (!arg) { extern void tfs_poll(void); tfs_poll(); }     /* free tape machine screen: setting, scrubbing (every pass) */
 #endif
+#ifndef OP1_HOST
+    /* incremental save (main loop): one 4 KB piece per pass instead of a whole 64 KB track (38 .. 136 ms on the device,
+     * docs/82): keys / UI stay responsive while recording. A clip reassigned meanwhile drops the rest (it stays /
+     * becomes dirty again: saved again). The power-off flush (arg != 0) finishes it and writes whole tracks.
+     * shortcut: not covered by the host test (OP1_HOST keeps whole-track writes) */
+    static uint8_t *sv_c; static int sv_idx, sv_k, sv_off; static uint16_t sv_mask;
+    if (sv_c) {
+        if (*(volatile int16_t *)(sv_c + 6) != sv_idx) sv_c = 0;
+        else {
+            const int n = arg ? 0x10000 - sv_off : SW_PIECE;
+            IO_T0();
+            Y_LSEEK(TAPE_FD, TRACK_BASE[sv_k] + sv_idx * 0x10000 + sv_off, 0);
+            tape_safe_write(TAPE_FD, CLIP_DATA(sv_c) + sv_k * 0x10000 + sv_off, (unsigned)n);
+            IO_ADD(1);
+            sv_off += n;
+            if (sv_off >= 0x10000) {
+                sv_off = 0; sv_mask &= (uint16_t)~(1u << sv_k);
+                while (sv_k < 4 && !(sv_mask >> sv_k & 1)) sv_k++;
+                if (sv_k >= 4) sv_c = 0;
+            }
+            if (!arg || !sv_c) return 1;
+            return tape_service(arg);
+        }
+    }
+#endif
     int pos = 0;
     for (uint8_t *c = CLIP_HEAD; c; c = CLIP_NEXT(c), pos++) {
         int idx = *(volatile int16_t *)(c + 6);
@@ -109,6 +134,14 @@ int tape_service(int arg)
             *t = now;
             c[2] = 0;
             volatile uint16_t *mask = (volatile uint16_t *)(c + 4);
+#ifndef OP1_HOST
+            if (!arg && *mask & 0xF) {                             /* start an incremental save (above) */
+                sv_mask = (uint16_t)(*mask & 0xF); *mask &= (uint16_t)~0xFu;
+                sv_c = c; sv_idx = idx; sv_off = 0; sv_k = 0;
+                while (!(sv_mask >> sv_k & 1)) sv_k++;
+                return 1;
+            }
+#endif
             for (int k = 0; k < 4; k++) {
                 if (!(*mask >> k & 1)) continue;
                 *mask &= (uint16_t)~(1u << k);

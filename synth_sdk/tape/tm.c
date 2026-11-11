@@ -185,7 +185,7 @@ void tm_block(void)                                              /* audio ISR, a
         const int32_t target = tm_scrub * (8 << 16), dv = 0x2000;
         scrub_v = scrub_v < target ? (target - scrub_v < dv ? target : scrub_v + dv) : (scrub_v - target < dv ? target : scrub_v - dv);
     }
-    const int playing = mode == 1 || mode == 2, sc = tm_scrub_track & 3;
+    const int playing = mode == 1 || mode == 2 || (mode == 0 && v != 0), sc = tm_scrub_track & 3;   /* stop: spin down as stock */
     if (!playing && !scrub_v) return;                            /* stopped: R246's (silent) output stays */
     if (playing && rec_seen && mode == 2) {                      /* first play after a recording: reload every chunk */
         rec_seen = 0;
