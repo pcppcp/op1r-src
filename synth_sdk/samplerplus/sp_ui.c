@@ -15,7 +15,7 @@
 #define SLOT_TYPE       ((const volatile int32_t *)0xFF8016E4)
 #define VOICE_ON        ((const volatile uint8_t *)0xFF80105C)
 #define BEAT_LEN        (*(const volatile int32_t *)0x01AADAD8)
-#define SAMPLER_OBJ(s)  (((uint32_t *const *)0x01DF6F78)[(s) * 2])   /* {SampleBuffer *sb, rate} per slot: obj */
+#define SAMPLER_OBJ(s)  (((uint32_t *const *)0x01DF6F78)[(s) & 7])   /* {SampleBuffer *sb, rate} per slot: obj */
 #define PATCH_OBJ(s)    ((void *)(0x01DDD7E8 + (s) * 0x38))
 #define PATCH_SET_KNOBS ((void (*)(void *, const int16_t *))0x01A00D14)   /* knob words -> JSON, patch changed */
 #define QUEUE_TYPE_JOB  ((void (*)(int, int))0x01940FD0)                /* (selection, slot): synth type job */

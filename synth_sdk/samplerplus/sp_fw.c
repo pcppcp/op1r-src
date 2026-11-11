@@ -137,6 +137,8 @@ static void xfade(void *self, int16_t *out, const int16_t *k, const sp_extra *x,
     int16_t tmp[SP_BLOCK];
     if (!mode_b) {
         if (pe <= z0 || p0 >= le) return;                         /* block does not touch the fade zone */
+        if (p0 < span) return;      /* p0 - span would be before the buffer (start marker past the end marker with
+                                     * velocity / random start, or a very fast block) */
         stock_at(self, tmp, k, p0 - span, 0, 0);                  /* the audio one loop earlier */
     } else {
         if (!was && !wrap) return;                                /* first pass: nothing to continue yet */
