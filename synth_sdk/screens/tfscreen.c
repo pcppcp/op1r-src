@@ -33,6 +33,7 @@ int32_t tm_head_pos(int t);
 extern volatile int16_t tm_in_peak;                              /* tape/tm.c: the bus R246 records (instrument / input) */
 #define IN_PEAK        tm_in_peak
 #define T_MODE         (*(volatile int32_t *)0xFF802960)          /* 0 stop, 1 rec, 2 play, 3 wind */
+#define TSPEED_RAW     (*(volatile int32_t *)0xFF802968)          /* transport speed (0: stood still) */
 #define UI_STATE       (*(volatile int32_t *)0x018C17D4)          /* 6 = record armed (docs/25) */
 void tm_set_head(int t, int32_t pos);
 #define SEL_TRACK      (*(volatile int32_t *)0xFF802964)          /* R246's selected track: where its recording goes */
@@ -148,7 +149,7 @@ static void tfs_update(void *scr, int dt)
 {
     op1_screen_draw(scr, dt);
     void *r = op1_raster();
-    if (!made) make();
+    if (!made) { make(); extern void tm_ready(void); tm_ready(); }   /* op1r tape markers: loaded once (GUI thread, as stock) */
     const int32_t head = tm_head_pos(sel) < 0 ? 0 : tm_head_pos(sel);
     const int rev = tm_tr[sel].speed < 0, mode = T_MODE, armed = UI_STATE == 6 || rec_held;
     rec_red = (uint8_t)(mode == 1 || armed);
@@ -260,6 +261,11 @@ int tfs_key(int code, int pressed)                               /* key thread: 
 {
     if (!shown_now()) return 0;
     if (code == 0x21) rec_held = (uint8_t)pressed;               /* REC: shown as armed while held; stock handles it */
+    if (code == 0x23 && T_MODE == 0 && TSPEED_RAW == 0) {        /* STOP while stopped: the active track to its loop in
+                                                                  * (R246's would jump the transport: all tracks resync) */
+        if (pressed) tm_set_head(sel, tm_tr[sel].lset ? tm_tr[sel].lin : 0);
+        return 1;
+    }
     if (code >= 0x06 && code <= 0x09) {                          /* T: select (R246 records here); Shift + T: mute */
         if (pressed) { if (SHIFT) tm_tr[code - 0x06].mute ^= 1; else { sel = (uint8_t)(code - 0x06); SEL_TRACK = sel; } }
         return 1;
