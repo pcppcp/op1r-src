@@ -142,6 +142,8 @@ static inline int32_t tm_herm(int t, int64_t h, const int16_t **cache, int32_t *
     int32_t s = (((((c3 * f >> 12) + c2) * f >> 12) + c1) * f >> 12) + s0;
     return s > 32767 ? 32767 : s < -32768 ? -32768 : s;
 }
+static int32_t fade_prev;                                        /* output gain of the last block (tm_block) */
+#define TM_SEAM 512                                              /* seam jump threshold (sum of both sides, ~-36 dBFS) */
 #define TM_XF 256                                                /* loop crossfade, samples (power of 2) */
 static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32_t *accL, int32_t *accR)
 {
@@ -154,7 +156,15 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
     rec_h0[t] = h; rec_step[t] = step; rec_lo[t] = lo; rec_hi[t] = hi;
     const int16_t gl = tm_tr[t].mute ? 0 : GAIN_L(t), gr = tm_tr[t].mute ? 0 : GAIN_R(t);   /* muted: silent, the head runs */
     const int16_t *cache = 0, *cache2 = 0; int32_t cache_c = -1, cache2_c = -1;
-    const int looped = hi - lo < ((int64_t)(TM_CHUNKS * CHUNK) << 32) && hi - lo > ((int64_t)(2 * TM_XF) << 32);
+    int looped = hi - lo < ((int64_t)(TM_CHUNKS * CHUNK) << 32) && hi - lo > ((int64_t)(2 * TM_XF) << 32);
+    if (looped) {                                                /* as stock: only a seam that jumps is smoothed; test = each
+                                                                  * side's linear extrapolation against the other's sample */
+        const int32_t a = (int32_t)(lo >> 32), b = (int32_t)(hi >> 32) - 1;
+        const int32_t sa = tm_sample(t, a, &cache2, &cache2_c), sa1 = tm_sample(t, a + 1, &cache2, &cache2_c),
+                      sb = tm_sample(t, b, &cache2, &cache2_c), sb1 = tm_sample(t, b - 1, &cache2, &cache2_c);
+        const int32_t j1 = sa - (2 * sb - sb1), j2 = sb - (2 * sa - sa1);
+        looped = (j1 < 0 ? -j1 : j1) + (j2 < 0 ? -j2 : j2) > TM_SEAM;
+    }
     for (int i = 0; i < 64; i++) {
         if (h >= hi) h -= hi - lo; else if (h < lo) h += hi - lo;
         int32_t s = tm_herm(t, h, &cache, &cache_c);
@@ -211,7 +221,7 @@ void tm_block(void)                                              /* audio ISR, a
         scrub_v = scrub_v < target ? (target - scrub_v < dv ? target : scrub_v + dv) : (scrub_v - target < dv ? target : scrub_v - dv);
     }
     const int playing = mode == 1 || mode == 2 || (mode == 0 && v != 0), sc = tm_scrub_track & 3;   /* stop: spin down as stock */
-    if (!playing && !scrub_v) return;                            /* stopped: R246's (silent) output stays */
+    if (!playing && !scrub_v) { fade_prev = 0; return; }         /* stopped: R246's (silent) output stays; next start ramps from 0 */
     if (playing && rec_seen && mode == 2) {                      /* first play after a recording: reload every chunk */
         rec_seen = 0;
         for (int i = 0; i < TM_SLOTS; i++) if (slot[i].t >= 0) { slot[i].state = 1; slot[i].gen++; }
@@ -222,12 +232,14 @@ void tm_block(void)                                              /* audio ISR, a
         if (scrub_v && t == sc) tm_track_block(t, (int64_t)scrub_v << 16, 0, 16, accL, accR);   /* -6 dB, no loops */
         else if (playing) tm_track_block(t, ((int64_t)v * tm_tr[t].speed) >> 11, 1, 15, accL, accR);   /* (1x = 2^27) x Q16 -> Q32 */
     }
-    int32_t fade = 0x7FFF;                                       /* stopping: below 1/4x the volume follows the speed to 0, so
-                                                                  * the held near-DC of an almost stopped tape does not pop when
-                                                                  * it ends (R246's W[0x01B4EF78] stays 0x7FFF: not its fade) */
-    if (mode == 0 && !(scrub_v && !playing)) { const int32_t av = v < 0 ? -v : v; fade = av >> 10 > 0x7FFF ? 0x7FFF : av >> 10; }
+    int32_t fade = 0x7FFF;                                       /* starting / stopping: below 1/4x the volume follows the speed,
+                                                                  * so neither the first sample nor the held near-DC of an almost
+                                                                  * stopped tape pops (R246's W[0x01B4EF78] is no fade) */
+    if (!(scrub_v && !playing)) { const int32_t av = v < 0 ? -v : v; fade = av >> 10 > 0x7FFF ? 0x7FFF : av >> 10; }
+    const int32_t f0 = fade_prev; fade_prev = fade;
     for (int i = 0; i < 64; i++) {
-        const int32_t l = accL[i] * fade >> 15, r = accR[i] * fade >> 15;
+        const int32_t g = f0 + ((fade - f0) * (i + 1) >> 6);
+        const int32_t l = accL[i] * g >> 15, r = accR[i] * g >> 15;
         OUT_L[i] = (int16_t)(l > 32767 ? 32767 : l < -32768 ? -32768 : l);
         OUT_R[i] = (int16_t)(r > 32767 ? 32767 : r < -32768 ? -32768 : r);
     }
