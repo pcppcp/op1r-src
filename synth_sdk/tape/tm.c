@@ -132,6 +132,17 @@ volatile int16_t tm_in_peak;                                     /* the recorded
 void tm_set_head(int t, int32_t pos) { head[t & 3] = (int64_t)(pos < 0 ? 0 : pos) << 32; }   /* GUI: bar jumps */
 
 static int64_t rec_h0[4], rec_step[4], rec_lo[4], rec_hi[4];    /* this block's head path per track (for recording) */
+/* one interpolated sample at h (Q32): 4-point Hermite (Catmull-Rom), coefficients ~2^18, x Q12 stays in 32 bits */
+static inline int32_t tm_herm(int t, int64_t h, const int16_t **cache, int32_t *cache_c)
+{
+    const int32_t n = (int32_t)(h >> 32), f = (int32_t)((uint64_t)h >> 20 & 0xFFF);
+    const int32_t sm = tm_sample(t, n - 1, cache, cache_c), s0 = tm_sample(t, n, cache, cache_c),
+                  s1 = tm_sample(t, n + 1, cache, cache_c), s2 = tm_sample(t, n + 2, cache, cache_c);
+    const int32_t c1 = (s1 - sm) >> 1, c2 = sm - (5 * s0 >> 1) + 2 * s1 - (s2 >> 1), c3 = ((s2 - sm) >> 1) + (3 * (s0 - s1) >> 1);
+    int32_t s = (((((c3 * f >> 12) + c2) * f >> 12) + c1) * f >> 12) + s0;
+    return s > 32767 ? 32767 : s < -32768 ? -32768 : s;
+}
+#define TM_XF 256                                                /* loop crossfade, samples (power of 2) */
 static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32_t *accL, int32_t *accR)
 {
     int64_t h = head[t];
@@ -142,17 +153,22 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
     }
     rec_h0[t] = h; rec_step[t] = step; rec_lo[t] = lo; rec_hi[t] = hi;
     const int16_t gl = tm_tr[t].mute ? 0 : GAIN_L(t), gr = tm_tr[t].mute ? 0 : GAIN_R(t);   /* muted: silent, the head runs */
-    const int16_t *cache = 0; int32_t cache_c = -1;
+    const int16_t *cache = 0, *cache2 = 0; int32_t cache_c = -1, cache2_c = -1;
+    const int looped = hi - lo < ((int64_t)(TM_CHUNKS * CHUNK) << 32) && hi - lo > ((int64_t)(2 * TM_XF) << 32);
     for (int i = 0; i < 64; i++) {
         if (h >= hi) h -= hi - lo; else if (h < lo) h += hi - lo;
-        const int32_t n = (int32_t)(h >> 32), f = (int32_t)((uint64_t)h >> 20 & 0xFFF);   /* fraction Q12 */
-        const int32_t sm = tm_sample(t, n - 1, &cache, &cache_c), s0 = tm_sample(t, n, &cache, &cache_c),
-                      s1 = tm_sample(t, n + 1, &cache, &cache_c), s2 = tm_sample(t, n + 2, &cache, &cache_c);
-        /* 4-point Hermite (Catmull-Rom): coefficients up to ~2^18, x Q12 stays in 32 bits */
-        const int32_t c1 = (s1 - sm) >> 1, c2 = sm - (5 * s0 >> 1) + 2 * s1 - (s2 >> 1),
-                      c3 = ((s2 - sm) >> 1) + (3 * (s0 - s1) >> 1);
-        int32_t s = ((((c3 * f >> 12) + c2) * f >> 12) + c1) * f >> 12;
-        s += s0; s = s > 32767 ? 32767 : s < -32768 ? -32768 : s;
+        int32_t s = tm_herm(t, h, &cache, &cache_c);
+        if (looped) {                                            /* near the wrap: crossfade into what follows it */
+            const int64_t xf = (int64_t)TM_XF << 32;
+            int64_t d = -1, other = 0;
+            if (step > 0 && h > hi - xf) { d = h - (hi - xf); other = h - (hi - lo); }        /* forward: before loop in */
+            else if (step < 0 && h < lo + xf) { d = lo + xf - h; other = h + (hi - lo); }     /* reverse: after loop out */
+            if (d >= 0) {
+                const int32_t a = (int32_t)(d >> 25) & 0x7FFF;   /* d / TM_XF in Q15 (TM_XF = 2^8: >> 32 - 15 + 8) */
+                const int32_t o = tm_herm(t, other < 0 ? 0 : other, &cache2, &cache2_c);
+                s += (o - s) * a >> 15;
+            }
+        }
         accL[i] += s * gl >> gain_shift; accR[i] += s * gr >> gain_shift;
         h += step;
         if (h >= hi) h -= hi - lo; else if (h < lo) h += hi - lo;   /* the stored head stays inside its loop */
@@ -162,6 +178,7 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
     const int32_t c = (int32_t)(h >> 32) >> 15, d = step < 0 ? -1 : 1;   /* prefetch ahead, and the loop start */
     for (int k = 1; k <= 3; k++) tm_chunk(t, c + k * d, 1);
     if (hi - lo < ((int64_t)(TM_CHUNKS * CHUNK) << 32)) tm_chunk(t, (int32_t)((d > 0 ? lo : hi - 1) >> 32) >> 15, 1);
+    if (looped) tm_chunk(t, (int32_t)((d > 0 ? lo - ((int64_t)TM_XF << 32) : hi + ((int64_t)TM_XF << 32)) >> 32) >> 15, 1);   /* the crossfade's other side */
 }
 
 void tm_block(void)                                              /* audio ISR, after tape_play_mix */
