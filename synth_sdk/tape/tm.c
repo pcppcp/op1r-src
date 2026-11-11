@@ -219,10 +219,19 @@ void tm_block(void)                                              /* audio ISR, a
 #define REC_STOCK  ((void (*)(void *))0xFFA06334)
 volatile uint32_t tm_rec_written, tm_rec_missed;
 static uint8_t rec_on;
+/* our read copy gets the recorded samples one block late: the record track's own playback (4-point, reads n - 1 .. n + 2)
+ * would otherwise hear the live input a few samples late (a comb: "resonance" at speeds != 1x); the next loop pass
+ * hears them, R246's cache has them at once */
+/* shortcut: a slot reassigned between two blocks gets one block of stray samples in our copy (reloaded later);
+ * store slot + gen if that ever shows */
+#define PEND_MAX 520
+static int16_t *pend_d[PEND_MAX]; static int16_t pend_v[PEND_MAX]; static int pend_n;
 static int16_t rec_fade;
 static void tm_record(const volatile int16_t *bus)
 {
     const int t = SEL_TRACK & 3;
+    for (int k = 0; k < pend_n; k++) *pend_d[k] = pend_v[k];    /* last block's samples into our copy (after this block's playback) */
+    pend_n = 0;
     if (MODE != 1) { rec_on = 0; return; }
     if (!rec_on) { rec_on = 1; rec_fade = 0; RANGE_RST(); }
     const int64_t step = rec_step[t], lo = rec_lo[t], hi = rec_hi[t];
@@ -273,7 +282,7 @@ static void tm_record(const volatile int16_t *bus)
                 int16_t *d = (int16_t *)(*(uint8_t *const *)(e + 0x10) + t * 0x10000) + (pn & (CHUNK - 1));
                 int32_t o = *d + v; o = o > 32767 ? 32767 : o < -32768 ? -32768 : o;
                 *d = (int16_t)o;
-                if (slot_d) slot_d[pn & (CHUNK - 1)] = (int16_t)o;
+                if (slot_d && pend_n < PEND_MAX) { pend_d[pend_n] = &slot_d[pn & (CHUNK - 1)]; pend_v[pend_n++] = (int16_t)o; }
                 ((volatile uint8_t *)e)[2] = 1; *(volatile uint16_t *)(e + 4) |= (uint16_t)(1u << t);
                 if (first < 0) first = pn;
                 last = pn;
