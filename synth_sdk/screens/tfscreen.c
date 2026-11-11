@@ -79,7 +79,7 @@ static void fmt_speed(char *q, int32_t sp)                       /* "1/2x", "1.3
 }
 
 /* stock-font texts: built once, redrawn; set only when the string changes */
-enum { T_NUM, T_TIME, T_SPEED, T_REV, T_N };
+enum { T_NUM, T_TIME, T_SPEED, T_REV, T_DIAG, T_N };
 static uint32_t tx[T_N][OP1_TEXT_SIZE / 4];
 static char shown[T_N][16];
 static uint8_t made;
@@ -99,6 +99,9 @@ static void make(void)
     TXT_CTOR(tx[T_TIME], OP1_Q10(160), 4, 20, c_white, 1);
     TXT_CTOR(tx[T_SPEED], OP1_Q10(300), 4, 12, c_white, 2);   /* left of the meter */
     TXT_CTOR(tx[T_REV], OP1_Q10(315), 18, 12, c_red, 2);
+#ifdef TF_DIAG
+    TXT_CTOR(tx[T_DIAG], OP1_Q10(4), 92, 12, c_grey, 0);
+#endif
     made = 1;
 }
 
@@ -196,6 +199,18 @@ static void tfs_update(void *scr, int dt)
         static const int8_t hw[7] = { 2, 3, 4, 4, 4, 3, 2 };     /* the dot: stacked lines */
         for (int k = 0; k < 7; k++) ln(r, x - hw[k] * OP1_Q10(1), ly + (k - 3) * OP1_Q10(1), x + hw[k] * OP1_Q10(1), ly + (k - 3) * OP1_Q10(1), 0x480, c_red);
     }
+#ifdef TF_DIAG
+    {                                                            /* OP1R_TFDIAG=1: why REC may be refused (docs/82) */
+        extern volatile uint8_t pu_mode;
+        char d[32], *q = d;
+        q = put(q, "s"); q = put_u(q, (uint32_t)UI_STATE, 1);
+        q = put(q, " q"); q = put_u(q, *(volatile uint32_t *)0x01AA7330 == *(volatile uint32_t *)0x01AA7334, 1);
+        q = put(q, " a"); q = put_u(q, *(volatile uint32_t *)0xFF9002B4, 1);
+        q = put(q, " c"); q = put_u(q, (uint32_t)*(volatile int32_t *)(0x01AA8D70 + 0x1A00), 1);
+        q = put(q, " p"); put_u(q, pu_mode, 1);
+        txt(r, T_DIAG, d);
+    }
+#endif
     /* the active track around its head */
     {                                                            /* bar marks (from tape 0, R246's tempo) */
         const int64_t bar_q8 = (int64_t)4 * 60 * SR * 256 * 256 / bpm_q8();   /* samples per bar, Q8 */
@@ -274,7 +289,11 @@ int tfs_key(int code, int pressed)                               /* key thread: 
     if (code == 0x21) rec_held = (uint8_t)pressed;               /* REC: shown as armed while held; stock handles it */
     if (code == 0x23 && T_MODE == 0) {                           /* STOP while stopped (also spinning down): the active track to its loop in
                                                                   * (R246's would jump the transport: all tracks resync) */
-        if (pressed) tm_set_head(sel, tm_tr[sel].lset ? tm_tr[sel].lin : 0);
+        if (pressed) {
+            tm_set_head(sel, tm_tr[sel].lset ? tm_tr[sel].lin : 0);
+            if (UI_STATE == 1) { UI_STATE = 0; ((void (*)(void))0x01A581F4)(); }   /* R246's second STOP: state 1 -> 0 (only
+                                                                  * from 0 does REC arm); its transport jump is left out */
+        }
         return 1;
     }
     if (code >= 0x06 && code <= 0x09) {                          /* T: select (R246 records here); Shift + T: mute */

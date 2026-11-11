@@ -350,6 +350,7 @@ def build(engs, fxs):
     flags['dsp/master_l1.c'] = ['-Os', '-mlong-calls'] + (['-DMASTER_CHECK'] + (['-DMASTER_STRESS'] if os.environ['OP1R_MASTER'] == 'stress' else []) if os.environ.get('OP1R_MASTER') in ('check', 'stress') else [])
     if os.environ.get('OP1R_FORCE_MFX') == '1': flags['tape/countin.c'] = flags.get('tape/countin.c', []) + ['-DFORCE_MFX']   # emulator: master FX on
     if os.environ.get('OP1R_FORCE_HP') == '1': flags['tape/countin.c'] = flags.get('tape/countin.c', []) + ['-DFORCE_HP']   # emulator: headphone path
+    if os.environ.get('OP1R_TFDIAG') == '1': flags['screens/tfscreen.c'] = flags.get('screens/tfscreen.c', []) + ['-DTF_DIAG']   # free tape: REC gates
     if os.environ.get('OP1R_SPKDIAG') == '1': flags['screens/sysmon.c'] = flags.get('screens/sysmon.c', []) + ['-DSPK_DIAG']   # speaker amp state on page 9
     if os.environ.get('OP1R_TAPEFREE') == '1': flags['tape/tm.c'] = ['-DTAPE_FREE']   # test: the free tape machine on (docs/82)
     if os.environ.get('OP1R_TAPEIO') == '1':          # docs/82: tape read / write times on page 9
