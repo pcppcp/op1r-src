@@ -4,9 +4,9 @@
  * Data: our own single-track chunk cache (TM_SLOTS x 64 KB from heap 0, only while free is on), filled by tm_service
  * from op1r's tape_service (main loop): a chunk R246's clip cache holds is copied from there (fresh recordings),
  * else read from tape_c.raw (R246's layout: track t, chunk c at TRACK_BASE[t] + c * 0x10000).
- * Heads: Q32.32 samples. With R246's loop on, track t loops in [Ls + off_t L, + loop_t L) of the global loop
- * [Ls, Le) (L = Le - Ls); without it the heads run free from the transport position. Each block every head moves
- * by the transport speed x the track's speed; a locate or a (re)start resyncs them to the transport.
+ * Heads: Q32.32 samples. Each track has its own loop (in / out in samples, on / off: s1 / s2 / s3 on the screen,
+ * screens/tfscreen.c); without it the head runs free from the transport position. Each block every head moves by the
+ * transport speed x the track's speed; a locate or a (re)start resyncs them to the transport.
  * Mix: 4-point Hermite interpolation, R246's per-block track gains (tm_g, from its mix loops), saturating sums.
  * shortcut: no output filter / start-stop ramp of R246's player yet; upgrade if start / stop clicks on the device. */
 #include <stdint.h>
@@ -15,8 +15,8 @@
 #define TM_CHUNKS  0x1E5                                         /* chunks per track (R246) */
 #define CHUNK      0x8000                                        /* samples */
 
-typedef struct { int32_t speed; uint16_t loop, off; } tm_track;   /* speed Q16 (negative = reverse); loop / off Q16 of the global loop */
-volatile tm_track tm_tr[4] = { { 0x10000, 0xFFFF, 0 }, { 0x10000, 0xFFFF, 0 }, { 0x10000, 0xFFFF, 0 }, { 0x10000, 0xFFFF, 0 } };
+typedef struct { int32_t speed; int32_t lin, lout; uint8_t lon; } tm_track;   /* speed Q16 (negative = reverse); own loop in / out (samples), on */
+volatile tm_track tm_tr[4] = { { 0x10000, 0, 0, 0 }, { 0x10000, 0, 0, 0 }, { 0x10000, 0, 0, 0 }, { 0x10000, 0, 0, 0 } };
 #ifdef TAPE_FREE
 volatile uint8_t tm_on = 1;                                      /* test builds (OP1R_TAPEFREE=1): on */
 #else
@@ -107,11 +107,11 @@ static void tm_resync(int32_t pos)
 {
     for (int t = 0; t < 4; t++) {
         int32_t h = pos;
-        if (LOOP_ON && LOOP_E > LOOP_S) {
-            const int32_t L = LOOP_E - LOOP_S, base = LOOP_S + (int32_t)((int64_t)L * tm_tr[t].off >> 16);
-            const int32_t len = (int32_t)((int64_t)L * tm_tr[t].loop >> 16) + 1;
-            int32_t r = (pos - LOOP_S) % len; if (r < 0) r += len;
-            h = base + r;
+        const volatile tm_track *tr = &tm_tr[t];
+        if (tr->lon && tr->lout > tr->lin && (pos < tr->lin || pos >= tr->lout)) {
+            const int32_t len = tr->lout - tr->lin;
+            int32_t r = (pos - tr->lin) % len; if (r < 0) r += len;
+            h = tr->lin + r;
         }
         head[t] = (int64_t)h << 32;
     }
@@ -142,9 +142,9 @@ void tm_block(void)                                              /* audio ISR, a
         const int64_t step = ((int64_t)v * tm_tr[t].speed) >> 11;       /* (1x = 2^27) x Q16 -> Q32 */
         int64_t h = head[t];
         int64_t lo = 0, hi = (int64_t)(TM_CHUNKS * CHUNK) << 32;
-        if (LOOP_ON && LOOP_E > LOOP_S) {
-            const int32_t L = LOOP_E - LOOP_S, base = LOOP_S + (int32_t)((int64_t)L * tm_tr[t].off >> 16);
-            lo = (int64_t)base << 32; hi = lo + (((int64_t)L * tm_tr[t].loop >> 16) + 1 << 32);
+        if (tm_tr[t].lon && tm_tr[t].lout > tm_tr[t].lin) {
+            lo = (int64_t)tm_tr[t].lin << 32; hi = (int64_t)tm_tr[t].lout << 32;
+            if (h < lo || h >= hi) { int64_t r = (h - lo) % (hi - lo); if (r < 0) r += hi - lo; h = lo + r; }   /* loop just set: fold in */
         }
         const int16_t gl = GAIN_L(t), gr = GAIN_R(t);
         const int16_t *cache = 0; int32_t cache_c = -1;
@@ -160,6 +160,7 @@ void tm_block(void)                                              /* audio ISR, a
             s += s0; s = s > 32767 ? 32767 : s < -32768 ? -32768 : s;
             accL[i] += s * gl >> 15; accR[i] += s * gr >> 15;
             h += step;
+            if (h >= hi) h -= hi - lo; else if (h < lo) h += hi - lo;   /* the stored head stays inside its loop */
         }
         head[t] = h;
         const int32_t c = (int32_t)(h >> 32) >> 15, d = step < 0 ? -1 : 1;   /* prefetch ahead, and the loop start */
@@ -173,12 +174,10 @@ void tm_block(void)                                              /* audio ISR, a
 }
 
 int32_t tm_head_pos(int t) { return (int32_t)(head[t] >> 32); }   /* GUI: head in samples */
-int tm_span(int t, int32_t *lo, int32_t *hi)                     /* GUI: the track's own loop (1 if R246's loop is on) */
+int tm_span(int t, int32_t *lo, int32_t *hi)                     /* GUI: the track's own loop (1 if on) */
 {
-    if (!(LOOP_ON && LOOP_E > LOOP_S)) return 0;
-    const int32_t L = LOOP_E - LOOP_S;
-    *lo = LOOP_S + (int32_t)((int64_t)L * tm_tr[t].off >> 16);
-    *hi = *lo + (int32_t)((int64_t)L * tm_tr[t].loop >> 16) + 1;
+    if (!(tm_tr[t].lon && tm_tr[t].lout > tm_tr[t].lin)) return 0;
+    *lo = tm_tr[t].lin; *hi = tm_tr[t].lout;
     return 1;
 }
 

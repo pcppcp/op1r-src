@@ -1,19 +1,22 @@
-/* Free tape machine screen (docs/82, approved preview display/tapemachine_preview.py): replaces R246's tape screen
- * while the free machine is on (op1r settings, white: TAPE STOCK / FREE). Four lanes: the dark line is R246's
- * global loop (or, without a loop, a 20 s window around the transport), the bright segment the track's own loop,
- * a tick its head (flag = direction). The selected track's values below, in encoder colours:
- *   blue speed (ratios; Shift: fine), green loop (fraction of the global loop), white offset (Shift: fine),
- *   red direction (fwd / rev). Track keys T1..T4 select; every other key stays R246's (transport, record, lift ..).
- * Swap like the MIDI sequencer view (seqdev/ms_fw.c): an iter-class screen object (empty usbout.svg) put into the
- * tape screen's slot of the screen table; R246's object back when the machine is off. */
+/* Free tape machine screen (docs/82, approved preview display/tapemachine_preview2.py): replaces R246's tape screen
+ * while the free machine is on (op1r settings, white: TAPE STOCK / FREE).
+ *   top-left: the active track's number in a box (as stock); top: its head as h:mm:ss; top-right: its speed (blue)
+ *   and "rev" (red); middle: a window of +-8 s around its own head (fixed in the middle), clips blue, its loop green;
+ *   bottom: the four tracks as thin lanes around their own heads, the active one's clips blue, the others grey.
+ * Keys (consumed on this screen): T1..T4 select; s1 / s2 / s3 (0x2D / 0x2E / 0x2F) set the active track's loop in /
+ * out at its head and toggle it (out also switches it on), as stock does for the global loop. Knobs: blue speed
+ * (ratios; Shift: fine), red direction; green / white stay R246's. Every other key stays R246's.
+ * Text in the stock font (op1_text_*, lowercase); lines with Raster::line. Clips from db2::Clips (0x01AA8D70:
+ * 512 x { track, start, stop } in samples, used flags at + 0x1800).
+ * Swap like the MIDI sequencer view (seqdev/ms_fw.c): an iter-class screen object (empty usbout.svg) in the tape
+ * screen's slot of the screen table; R246's object back when the machine is off. */
 #include "../op1_synth.h"
 #include "stroke_font.h"
 
-typedef struct { int32_t speed; uint16_t loop, off; } tm_track;
+typedef struct { int32_t speed; int32_t lin, lout; uint8_t lon; } tm_track;
 extern volatile tm_track tm_tr[4];
 extern volatile uint8_t tm_on;
 int32_t tm_head_pos(int t);
-int tm_span(int t, int32_t *lo, int32_t *hi);
 
 #define SCREEN_TABLE   ((void **)0x01DF4E54)
 #define CUR_MODE_ID    (*(volatile int *)0xFF907D58)              /* tape = 2 */
@@ -22,10 +25,10 @@ int tm_span(int t, int32_t *lo, int32_t *hi);
 #define ITER_SCREEN_VT ((const uint32_t *)0x019103FC)
 #define SVG_LOAD       ((void *(*)(void *))0x01A503D8)
 #define SHIFT          (*(volatile uint8_t *)0x01DD7F78)
-#define TPOS           (*(volatile int32_t *)0xFF802974)          /* samples << 6 */
-#define LOOP_S         (*(volatile int32_t *)0x01B4EF34)
-#define LOOP_E         (*(volatile int32_t *)0x01B4EF38)
-#define LOOP_ON        (*(volatile uint8_t *)0xFF8029C5)
+#define CLIPS          ((const volatile int32_t *)0x01AA8D70)     /* [i * 3 + 0] track, + 1 start, + 2 stop */
+#define CLIP_USED      ((const volatile uint8_t *)0x01AAA570)
+#define NCLIPS         512
+#define SR             44100
 
 static uint32_t tfs_scr[32], tfs_vt[10];
 static void *tape_obj;
@@ -35,77 +38,99 @@ static uint8_t tfs_in, sel;
 static const int32_t ratios[] = { 0x4000, 0x5555, 0x8000, 0xAAAB, 0xC000, 0x10000, 0x15555, 0x18000, 0x20000, 0x30000, 0x40000 };
 static const char *const ratio_txt[] = { "1/4", "1/3", "1/2", "2/3", "3/4", "1", "4/3", "3/2", "2", "3", "4" };
 #define NR ((int)(sizeof ratios / sizeof ratios[0]))
-static const uint16_t loops[] = { 0x2000, 0x2AAB, 0x4000, 0x5555, 0x8000, 0xAAAB, 0xC000, 0xFFFF };
-static const char *const loop_txt[] = { "1/8", "1/6", "1/4", "1/3", "1/2", "2/3", "3/4", "1" };
-#define NL ((int)(sizeof loops / sizeof loops[0]))
 
 static const uint8_t c_blue[4] = { 0x4D, 0x9E, 0xFF, 0xFF }, c_green[4] = { 0x00, 0xED, 0x95, 0xFF },
                      c_white[4] = { 0xFF, 0xFF, 0xFF, 0xFF }, c_red[4] = { 0xFF, 0x3A, 0x5D, 0xFF },
-                     c_grey[4] = { 0x6F, 0x71, 0x73, 0xFF }, c_dim[4] = { 0x40, 0x42, 0x44, 0xFF };
+                     c_grey[4] = { 0x6F, 0x71, 0x73, 0xFF }, c_dim[4] = { 0x40, 0x42, 0x44, 0xFF },
+                     c_dgreen[4] = { 0x00, 0x77, 0x4A, 0xFF };
 
 static void ln(void *r, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t w, const uint8_t *c) { if (x0 != x1 || y0 != y1) sf_line(r, x0, y0, x1, y1, w, c); }
-static char *put_u(char *q, uint32_t v) { char b[10]; int n = 0; do b[n++] = (char)('0' + v % 10); while (v /= 10); while (n) *q++ = b[--n]; return q; }
-static void fmt_speed(char *q, int32_t sp)                       /* "1/2X", "1.37X" */
+static char *put(char *q, const char *s) { while (*s) *q++ = *s++; *q = 0; return q; }
+static char *put_u(char *q, uint32_t v, int w) { char b[10]; int n = 0; do b[n++] = (char)('0' + v % 10); while ((v /= 10) || n < w); while (n) *q++ = b[--n]; *q = 0; return q; }
+static void fmt_speed(char *q, int32_t sp)                       /* "1/2x", "1.37x" */
 {
     if (sp < 0) sp = -sp;
-    for (int i = 0; i < NR; i++) if (ratios[i] == sp) { const char *s = ratio_txt[i]; while (*s) *q++ = *s++; *q++ = 'X'; *q = 0; return; }
+    for (int i = 0; i < NR; i++) if (ratios[i] == sp) { q = put(q, ratio_txt[i]); put(q, "x"); return; }
     const uint32_t c = (uint32_t)(((int64_t)sp * 100 + 0x8000) >> 16);
-    q = put_u(q, c / 100); *q++ = '.'; *q++ = (char)('0' + c / 10 % 10); *q++ = (char)('0' + c % 10); *q++ = 'X'; *q = 0;
-}
-static void fmt_frac(char *q, uint16_t v, int loop)
-{
-    if (loop) for (int i = 0; i < NL; i++) if (loops[i] == v) { const char *s = loop_txt[i]; while (*s) *q++ = *s++; *q = 0; return; }
-    if (!v) { *q++ = '0'; *q = 0; return; }
-    const uint32_t c = ((uint32_t)v * 100 + 0x8000) >> 16;       /* .xx of the loop */
-    *q++ = '.'; *q++ = (char)('0' + c / 10 % 10); *q++ = (char)('0' + c % 10); *q = 0;
+    q = put_u(q, c / 100, 1); *q++ = '.'; q = put_u(q, c % 100, 2); put(q, "x");
 }
 
-#define X0  OP1_Q10(44)
-#define X1  OP1_Q10(268)
-#define LY(i) OP1_Q10(18 + 22 * (i))
-#define TS  (OP1_Q10(5) / 2)
+/* stock-font texts: built once, redrawn; set only when the string changes */
+enum { T_NUM, T_TIME, T_SPEED, T_REV, T_N };
+static uint32_t tx[T_N][OP1_TEXT_SIZE / 4];
+static char shown[T_N][16];
+static uint8_t made;
+static void txt(void *r, int i, const char *s)
+{
+    static const int32_t ident[9] = { 1024, 0, 0, 0, 1024, 0, 0, 0, 1024 };
+    int same = 1;
+    for (int j = 0; j < 16; j++) { if (shown[i][j] != s[j]) { same = 0; break; } if (!s[j]) break; }
+    if (!same) { op1_text_set(tx[i], s); int j = 0; for (; j < 15 && s[j]; j++) shown[i][j] = s[j]; shown[i][j] = 0; }
+    op1_text_draw(tx[i], r, ident);
+}
+static void make(void)
+{
+    op1_text_ctor(tx[T_NUM], OP1_Q10(11), 7, 20, c_white);
+    op1_text_ctor(tx[T_TIME], OP1_Q10(112), 6, 24, c_white);
+    op1_text_ctor(tx[T_SPEED], OP1_Q10(272), 6, 12, c_blue);
+    op1_text_ctor(tx[T_REV], OP1_Q10(290), 20, 12, c_red);
+    made = 1;
+}
+
+/* a track around its own head: clips, its loop; window +-win s over [x0, x1] */
+static void lane(void *r, int t, int32_t y, int32_t x0, int32_t x1, int32_t head, int32_t win, int32_t thick, int on, int big)
+{
+    const int32_t cx = (x0 + x1) / 2, half = (x1 - x0) / 2, span = win * SR;
+    #define XOF(v) (cx + (int32_t)((int64_t)((v) - head) * half / span))
+    #define CLAMP(v) ((v) < x0 ? x0 : (v) > x1 ? x1 : (v))
+    ln(r, x0, y, x1, y, 0x400, c_dim);
+    for (int i = 0; i < NCLIPS; i++) {
+        if (!CLIP_USED[i] || CLIPS[i * 3] != t) continue;
+        const int32_t a = XOF(CLIPS[i * 3 + 1]), b = XOF(CLIPS[i * 3 + 2]);
+        if (b <= x0 || a >= x1) continue;
+        ln(r, CLAMP(a), y, CLAMP(b), y, thick, on ? c_blue : c_grey);
+    }
+    if (tm_tr[t].lon && tm_tr[t].lout > tm_tr[t].lin) {
+        const int32_t a = XOF(tm_tr[t].lin), b = XOF(tm_tr[t].lout), h = thick / 2 + OP1_Q10(big ? 3 : 2), g = 0x4CC;
+        const uint8_t *c = on ? c_green : c_dgreen;
+        if (a >= x0 && a <= x1) ln(r, a, y - h, a, y + h, g, c);
+        if (b >= x0 && b <= x1) ln(r, b, y - h, b, y + h, g, c);
+        if (big && b > x0 && a < x1) ln(r, CLAMP(a), y - h, CLAMP(b), y - h, g, c);
+    }
+    #undef XOF
+    #undef CLAMP
+}
+
 static void tfs_update(void *scr, int dt)
 {
     op1_screen_draw(scr, dt);
     void *r = op1_raster();
-    const int looped = LOOP_ON && LOOP_E > LOOP_S;
-    const int32_t pos = TPOS >> 6, gs = looped ? LOOP_S : pos - 441000, gl = looped ? LOOP_E - LOOP_S : 882000;
+    if (!made) make();
+    const int32_t head = tm_head_pos(sel) < 0 ? 0 : tm_head_pos(sel);
+    const int rev = tm_tr[sel].speed < 0;
+    /* boxed track number */
+    ln(r, OP1_Q10(6), OP1_Q10(5), OP1_Q10(28), OP1_Q10(5), 0x4CC, c_white); ln(r, OP1_Q10(28), OP1_Q10(5), OP1_Q10(28), OP1_Q10(27), 0x4CC, c_white);
+    ln(r, OP1_Q10(28), OP1_Q10(27), OP1_Q10(6), OP1_Q10(27), 0x4CC, c_white); ln(r, OP1_Q10(6), OP1_Q10(27), OP1_Q10(6), OP1_Q10(5), 0x4CC, c_white);
+    char b[16]; b[0] = (char)('1' + sel); b[1] = 0; txt(r, T_NUM, b);
+    const uint32_t sec = (uint32_t)head / SR;
+    char *q = put_u(b, sec / 3600, 1); *q++ = ':'; q = put_u(q, sec / 60 % 60, 2); *q++ = ':'; put_u(q, sec % 60, 2);
+    txt(r, T_TIME, b);
+    fmt_speed(b, tm_tr[sel].speed); txt(r, T_SPEED, b);
+    if (rev) txt(r, T_REV, "rev");
+    /* the active track around its head */
+    lane(r, sel, OP1_Q10(68), OP1_Q10(10), OP1_Q10(310), head, 8, OP1_Q10(9), 1, 1);
+    ln(r, OP1_Q10(160), OP1_Q10(48), OP1_Q10(160), OP1_Q10(88), 0x600, c_white);
+    ln(r, OP1_Q10(160), OP1_Q10(48), OP1_Q10(rev ? 154 : 166), OP1_Q10(48), 0x600, rev ? c_red : c_white);
+    /* all four tracks */
     for (int t = 0; t < 4; t++) {
-        const int on = t == sel; const int32_t y = LY(t);
-        char b[12]; b[0] = (char)('1' + t); b[1] = 0;
-        sf_text(r, OP1_Q10(14), y - OP1_Q10(7), TS, b, 0x500, on ? c_white : c_grey);
-        ln(r, X0, y, X1, y, 0x400, c_dim);
-        int32_t lo, hi;
-        if (tm_span(t, &lo, &hi)) {                              /* own loop */
-            const int32_t a = X0 + (int32_t)((int64_t)(X1 - X0) * (lo - gs) / gl), e = X0 + (int32_t)((int64_t)(X1 - X0) * (hi - gs) / gl);
-            ln(r, a, y, e, y, 0x800, on ? c_white : c_grey);
-            ln(r, a, y - OP1_Q10(3), a, y + OP1_Q10(3), 0x400, on ? c_white : c_grey);
-            ln(r, e, y - OP1_Q10(3), e, y + OP1_Q10(3), 0x400, on ? c_white : c_grey);
-        }
-        const int32_t h = tm_head_pos(t);
-        int64_t px = X0 + (int64_t)(X1 - X0) * (h - gs) / gl;
-        if (px >= X0 && px <= X1) {
-            const uint8_t *c = on ? c_red : c_white; const int32_t p = (int32_t)px, d = tm_tr[t].speed < 0 ? -OP1_Q10(5) : OP1_Q10(5);
-            ln(r, p, y - OP1_Q10(7), p, y + OP1_Q10(7), 0x800, c);
-            ln(r, p, y - OP1_Q10(7), p + d, y - OP1_Q10(7), 0x800, c);
-        }
-        fmt_speed(b, tm_tr[t].speed);
-        int32_t w = 0; for (const char *s = b; *s; s++) w += OP1_Q10(5) * 5 / 2 * 5 / 4;   /* about one cell per char */
-        sf_text(r, OP1_Q10(306) - w, y - OP1_Q10(7), TS, b, 0x500, on ? c_blue : c_grey);
-    }
-    char v[4][12];
-    fmt_speed(v[0], tm_tr[sel].speed); fmt_frac(v[1], tm_tr[sel].loop, 1); fmt_frac(v[2], tm_tr[sel].off, 0);
-    v[3][0] = 0; { const char *s = tm_tr[sel].speed < 0 ? "REV" : "FWD"; char *q = v[3]; while (*s) *q++ = *s++; *q = 0; }
-    static const char *const nm[4] = { "SPEED", "LOOP", "OFFSET", "DIR" };
-    const uint8_t *col[4] = { c_blue, c_green, c_white, c_red };
-    for (int k = 0; k < 4; k++) {
-        sf_text(r, OP1_Q10(18 + 76 * k), OP1_Q10(102), OP1_Q10(2), nm[k], 0x400, col[k]);   /* 8 px caps: OFFSET fits the column */
-        sf_text(r, OP1_Q10(18 + 76 * k), OP1_Q10(118), TS, v[k], 0x500, col[k]);
+        const int32_t y = OP1_Q10(108 + 8 * t), h = tm_head_pos(t) < 0 ? 0 : tm_head_pos(t);
+        lane(r, t, y, OP1_Q10(10), OP1_Q10(310), h, 20, OP1_Q10(3), t == sel, 0);
+        ln(r, OP1_Q10(160), y - OP1_Q10(3), OP1_Q10(160), y + OP1_Q10(3), 0x400, t == sel ? c_white : c_grey);
     }
 }
 static void tfs_init(void *scr) { (void)scr; }
 
-static void tfs_set(int on)                                      /* main loop / key thread */
+static void tfs_set(int on)                                      /* main loop */
 {
     if (on && tfs_id < 0) {                                      /* first time: the tape screen is the current one */
         const int id = CUR_SCREEN;
@@ -131,12 +156,22 @@ void tfs_poll(void)                                              /* main loop: f
     if (tm_on && !tfs_in && CUR_MODE_ID == 2) tfs_set(1);
     else if (!tm_on && tfs_in) tfs_set(0);
 }
-static int shown(void) { return tfs_in && CUR_MODE_ID == 2 && tfs_id >= 0 && SCREEN_TABLE[tfs_id] == (void *)tfs_scr; }
+static int shown_now(void) { return tfs_in && CUR_MODE_ID == 2 && tfs_id >= 0 && SCREEN_TABLE[tfs_id] == (void *)tfs_scr; }
 
 int tfs_key(int code, int pressed)                               /* key thread: 1 = consumed */
 {
-    if (!shown() || code < 0x06 || code > 0x09) return 0;
-    if (pressed) sel = (uint8_t)(code - 0x06);
+    if (!shown_now()) return 0;
+    if (code >= 0x06 && code <= 0x09) { if (pressed) sel = (uint8_t)(code - 0x06); return 1; }
+    if (code < 0x2D || code > 0x2F) return 0;
+    if (!pressed) return 1;
+    volatile tm_track *tr = &tm_tr[sel];
+    const int32_t h = tm_head_pos(sel);
+    if (code == 0x2D) tr->lin = h;                               /* s1: in */
+    else if (code == 0x2E) {                                     /* s2: out, the loop on */
+        tr->lout = h;
+        if (tr->lout < tr->lin) { const int32_t x = tr->lin; tr->lin = tr->lout; tr->lout = x; }
+        tr->lon = tr->lout > tr->lin;
+    } else tr->lon = (uint8_t)(!tr->lon && tr->lout > tr->lin);   /* s3: on / off */
     return 1;
 }
 
@@ -148,32 +183,21 @@ static int step_of(int k, int delta, int per)                    /* detents (204
     const int st = acc[k] / per; acc[k] -= st * per;
     return st;
 }
-int tfs_knob(int knob, int delta)                                /* key thread: 1 = consumed */
+int tfs_knob(int knob, int delta)                                /* key thread: 1 = consumed (blue, red) */
 {
-    if (!shown() || knob < 0 || knob > 7) return 0;
+    if (!shown_now() || knob < 0 || knob > 7) return 0;
     const int k = knob & 3, fine = knob > 3 || SHIFT;
+    if (k != 0 && k != 3) return 0;                              /* green / white: R246's */
     volatile tm_track *tr = &tm_tr[sel];
+    if (k == 3) { if (step_of(3, delta, 2048)) tr->speed = -tr->speed; return 1; }   /* red: direction */
     const int neg = tr->speed < 0;
     int32_t sp = neg ? -tr->speed : tr->speed;
-    if (k == 0) {
-        if (fine) { const int st = step_of(4, delta, 512); if (!st) return 1;
-            sp += st * (sp >> 7); if (sp < 0x2000) sp = 0x2000; if (sp > 0x40000) sp = 0x40000; }
-        else { const int st = step_of(0, delta, 2048); if (!st) return 1;
-            int i = 0; while (i < NR - 1 && ratios[i] < sp) i++;      /* nearest ratio at or above */
-            if (ratios[i] != sp && st < 0) i++;
-            i += st; i = i < 0 ? 0 : i >= NR ? NR - 1 : i; sp = ratios[i]; }
-        tr->speed = neg ? -sp : sp;
-    } else if (k == 1) {
-        const int st = step_of(1, delta, 2048); if (!st) return 1;
-        int i = 0; while (i < NL - 1 && loops[i] < tr->loop) i++;
-        i += st; i = i < 0 ? 0 : i >= NL ? NL - 1 : i; tr->loop = loops[i];
-    } else if (k == 2) {
-        const int st = step_of(fine ? 6 : 2, delta, fine ? 512 : 2048); if (!st) return 1;
-        int32_t o = tr->off + st * (fine ? 0x100 : 0x1000);
-        tr->off = (uint16_t)(o < 0 ? 0 : o > 0xFFFF ? 0xFFFF : o);
-    } else {
-        const int st = step_of(3, delta, 2048); if (!st) return 1;
-        tr->speed = -tr->speed;                                  /* any detent flips the direction */
-    }
+    if (fine) { const int st = step_of(4, delta, 512); if (!st) return 1;
+        sp += st * (sp >> 7); if (sp < 0x2000) sp = 0x2000; if (sp > 0x40000) sp = 0x40000; }
+    else { const int st = step_of(0, delta, 2048); if (!st) return 1;
+        int i = 0; while (i < NR - 1 && ratios[i] < sp) i++;    /* nearest ratio at or above */
+        if (ratios[i] != sp && st < 0) i++;
+        i += st; i = i < 0 ? 0 : i >= NR ? NR - 1 : i; sp = ratios[i]; }
+    tr->speed = neg ? -sp : sp;
     return 1;
 }

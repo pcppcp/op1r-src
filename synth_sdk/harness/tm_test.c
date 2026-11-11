@@ -44,24 +44,24 @@ int main(void)
     SET32(0x14, (200000 + 8 * 64) << 6); tm_block();
     h = (int32_t)(head[1] >> 32) - 128;
     for (int i = 0; i < 64; i++) { int e = val(1, h + 2 * i) * 0x7FFF >> 15; assert(abs(host_tm_out[0][i] - e) <= 1); }
-    /* loop: global [0, 8192), track 3 loops half of it from offset 1/4: stays in [2048, 6144) */
+    /* track 3 loops its own [2048, 6144) while the transport loops [0, 8192) */
     GL(1) = GR(1) = 0; GL(2) = GR(2) = 0x7FFF; tm_tr[1].speed = 0x10000;
-    host_tm_loop[0] = 0; host_tm_loop[1] = 8192; host_tm_loopon = 1; tm_tr[2].loop = 0x8000; tm_tr[2].off = 0x4000;
+    host_tm_loop[0] = 0; host_tm_loop[1] = 8192; host_tm_loopon = 1; tm_tr[2].lin = 2048; tm_tr[2].lout = 6144; tm_tr[2].lon = 1;
     for (int b = 0; b < 300; b++) {                               /* the transport loops too (wraps are no locate) */
         SET32(0x14, ((b * 64) % 8192) << 6);
         tm_block(); while (tm_service()) {}
         const int32_t n = (int32_t)(head[2] >> 32);
-        assert(n >= 2048 && n < 2048 + 4097);
+        assert(n >= 2048 && n < 6144);
     }
     /* a recording (mode 1) in between: the next play reloads what we hold (stale chunks) */
-    host_tm_loopon = 0; tm_tr[2].loop = 0xFFFF; tm_tr[2].off = 0;
+    host_tm_loopon = 0; tm_tr[2].lon = 0;
     run(300000, 4, 64);
     const uint32_t before = tm_loads;
     SET32(0x00, 1); tm_block(); SET32(0x00, 2);
     run(300000 + 5 * 64, 2, 64);
     assert(tm_loads > before);
     /* 1/2x on a straight ramp: the Hermite interpolation hits the midpoints exactly (no dulling of a line) */
-    host_tm_loopon = 0; tm_tr[2].loop = 0xFFFF; tm_tr[2].off = 0; tm_tr[2].speed = 0x8000;
+    host_tm_loopon = 0; tm_tr[2].lon = 0; tm_tr[2].speed = 0x8000;
     run(400000, 6, 32);
     SET32(0x14, (400000 + 6 * 32) << 6); tm_block();
     h = (int32_t)(head[2] >> 32) - 32;
