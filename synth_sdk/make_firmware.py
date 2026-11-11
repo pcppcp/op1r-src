@@ -189,7 +189,9 @@ L1_PCCALLS = {0xFFA0709C: ('l1_tramp_fwd', bytes.fromhex('06c41000')),   # mix l
               0xFFA02DB2: ('l1_tramp_mix', bytes.fromhex('ffe34ff0')),
               0xFFA01EB4: ('l1_tramp_dec', bytes.fromhex('ffe390f3')),   # CALL synth_bus_decimate (OP1R_DEC=check)
               0xFFA02456: ('l1_tramp_dec', bytes.fromhex('ffe3bff0')),
-              0xFFA02888: ('l1_tramp_dec', bytes.fromhex('ffe3a6ee'))}   # .. the other call site   # core_block_process: CALL master_eq -> eq_stage (dsp/eq.c)
+              0xFFA02888: ('l1_tramp_dec', bytes.fromhex('ffe3a6ee')),
+              0xFFA0217A: ('l1_tramp_rec', bytes.fromhex('00e3dd20')),   # CALL tape_record_block -> tm_rec_entry (free tape machine, docs/82)
+              0xFFA02DCA: ('l1_tramp_rec', bytes.fromhex('00e3b51a'))}   # .. the other call site   # core_block_process: CALL master_eq -> eq_stage (dsp/eq.c)
 L1_TRAMP, L1_TRAMP_MAX = 0xFFA0BFB4, 0xFFA0C000 - 0xFFA0BFB4
 # docs/81: our output stage in place of R246's master_output_stage (L1 0xFFA04280..0xFFA04804), a plain LDR block after
 # the encrypted L1; check builds (OP1R_OUTSTAGE=check / stress) keep the original there and go through the trampoline

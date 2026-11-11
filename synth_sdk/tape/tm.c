@@ -127,6 +127,7 @@ static int32_t xlast = -1;                                       /* transport po
 volatile int16_t tm_in_peak;                                     /* the recorded signal (the instrument bus) for the meter */
 void tm_set_head(int t, int32_t pos) { head[t & 3] = (int64_t)(pos < 0 ? 0 : pos) << 32; }   /* GUI: bar jumps */
 
+static int64_t rec_h0[4], rec_step[4], rec_lo[4], rec_hi[4];    /* this block's head path per track (for recording) */
 static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32_t *accL, int32_t *accR)
 {
     int64_t h = head[t];
@@ -135,6 +136,7 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
         lo = (int64_t)tm_tr[t].lin << 32; hi = (int64_t)tm_tr[t].lout << 32;
         if (h < lo || h >= hi) { int64_t r = (h - lo) % (hi - lo); if (r < 0) r += hi - lo; h = lo + r; }   /* loop just set: fold in */
     }
+    rec_h0[t] = h; rec_step[t] = step; rec_lo[t] = lo; rec_hi[t] = hi;
     const int16_t gl = GAIN_L(t), gr = GAIN_R(t);
     const int16_t *cache = 0; int32_t cache_c = -1;
     for (int i = 0; i < 64; i++) {
@@ -200,6 +202,86 @@ void tm_block(void)                                              /* audio ISR, a
         OUT_R[i] = (int16_t)(accR[i] > 32767 ? 32767 : accR[i] < -32768 ? -32768 : accR[i]);
     }
 }
+
+/* ---- recording (FREE): the active track at its own head / speed / loop (docs/82) ----
+ * In place of R246's tape_record_block (both CALLs -> hook.S l1_tramp_rec -> tm_rec_entry): the bus x the record level
+ * onto the tape positions the head crossed this block (as played, tm_track_block), linear between the bus samples,
+ * overdub sat16(old + new), into R246's clip cache entry of the chunk (dirty + track bit: tape_c::service saves it)
+ * and our read slot. A chunk not in R246's cache is queued and that part skipped (as R246 does). The take: range
+ * reset at record start (0x01A54C1C), widened per block (0x01A54BB4): R246 closes it (Clips) on stop, onto its
+ * selected track (= ours: tfscreen.c sets it). */
+#ifndef OP1_HOST
+#define REC_LEVEL  (*(volatile int16_t *)0x01B4EF6E)
+#define SEL_TRACK  (*(volatile int32_t *)0xFF802964)
+#define QUEUE_CLIP ((void (*)(int))0x01A54CD4)
+#define RANGE_ADD  ((void (*)(int32_t))0x01A54BB4)
+#define RANGE_RST  ((void (*)(void))0x01A54C1C)
+#define REC_STOCK  ((void (*)(void *))0xFFA06334)
+volatile uint32_t tm_rec_written, tm_rec_missed;
+static uint8_t rec_on;
+static int16_t rec_fade;
+static void tm_record(const volatile int16_t *bus)
+{
+    const int t = SEL_TRACK & 3;
+    if (MODE != 1) { rec_on = 0; return; }
+    if (!rec_on) { rec_on = 1; rec_fade = 0; RANGE_RST(); }
+    const int64_t step = rec_step[t], lo = rec_lo[t], hi = rec_hi[t];
+    if (!step) return;
+    const int32_t lvl = REC_LEVEL < 0 ? 0 : REC_LEVEL;
+    int32_t in[65];
+    for (int i = 0; i < 64; i++) {                               /* level, fade-in over the first block */
+        int32_t s = bus[i] * lvl >> 15;
+        if (rec_fade < 0x7FFF) { s = s * rec_fade >> 15; rec_fade = (int16_t)(rec_fade + 512 > 0x7FFF ? 0x7FFF : rec_fade + 512); }
+        in[i] = s;
+    }
+    in[64] = in[63];
+    const int64_t ast = step < 0 ? -step : step;
+    const uint32_t inv = (uint32_t)((((uint64_t)1 << 47) / (uint64_t)ast));   /* 2^15 / |step| in samples, Q32 -> frac Q15 */
+    int64_t h = rec_h0[t];
+    int32_t first = -1, last = -1;
+    const uint8_t *e = 0; int32_t ec = -1; int16_t *slot_d = 0;
+    for (int i = 0; i < 64; i++) {
+        const int64_t h1 = h + step;
+        int32_t n = step > 0 ? (int32_t)((h + 0xFFFFFFFFLL) >> 32) : (int32_t)(h >> 32), nend = (int32_t)(h1 >> 32);
+        for (int g = 0; g < 8; g++) {                            /* the integer positions crossed (at most 8: up to 4x + slack) */
+            if (step > 0 ? ((int64_t)n << 32) >= h1 : ((int64_t)n << 32) <= h1) break;
+            int32_t pn = n;
+            int64_t q = (int64_t)pn << 32;
+            if (q >= hi) pn -= (int32_t)((hi - lo) >> 32); else if (q < lo) pn += (int32_t)((hi - lo) >> 32);
+            const uint32_t fr = (uint32_t)(((uint64_t)(step > 0 ? ((int64_t)n << 32) - h : h - ((int64_t)n << 32)) >> 17) * inv >> 15) & 0x7FFF;
+            const int32_t v = in[i] + ((in[i + 1] - in[i]) * (int32_t)fr >> 15);
+            const int32_t c = pn >> 15;
+            if (c != ec) {                                       /* R246's clip cache entry of this chunk, our slot */
+                ec = c; e = CLIP_IDX ? CLIP_IDX[c] : 0;
+                if (!(e && e[0] && *(const int16_t *)(e + 6) == c)) { e = 0; QUEUE_CLIP(c); }
+                const int s = c >= 0 && c < TM_CHUNKS ? map[t][c] - 1 : -1;
+                slot_d = s >= 0 && slot[s].state == 2 ? slot[s].data : 0;
+            }
+            if (e) {
+                int16_t *d = (int16_t *)(*(uint8_t *const *)(e + 0x10) + t * 0x10000) + (pn & (CHUNK - 1));
+                int32_t o = *d + v; o = o > 32767 ? 32767 : o < -32768 ? -32768 : o;
+                *d = (int16_t)o;
+                if (slot_d) slot_d[pn & (CHUNK - 1)] = (int16_t)o;
+                ((volatile uint8_t *)e)[2] = 1; *(volatile uint16_t *)(e + 4) |= (uint16_t)(1u << t);
+                if (first < 0) first = pn;
+                last = pn;
+                tm_rec_written++;
+            } else tm_rec_missed++;
+            n += step > 0 ? 1 : -1;
+        }
+        (void)nend;
+        h = h1;
+        if (h >= hi) h -= hi - lo; else if (h < lo) h += hi - lo;
+    }
+    if (first >= 0) { RANGE_ADD(first); RANGE_ADD(last); }
+    { const int32_t c = (int32_t)(h >> 32) >> 15, d = step < 0 ? -1 : 1; QUEUE_CLIP(c); QUEUE_CLIP(c + d); }   /* ahead */
+}
+void tm_rec_entry(void *bus)                                     /* audio ISR, in place of tape_record_block (hook.S) */
+{
+    if (!tm_on || !slot[0].data) { REC_STOCK(bus); return; }
+    tm_record((const volatile int16_t *)bus);
+}
+#endif
 
 int32_t tm_head_pos(int t) { return (int32_t)(head[t] >> 32); }   /* GUI: head in samples */
 int tm_span(int t, int32_t *lo, int32_t *hi)                     /* GUI: the track's own loop (1 if on) */

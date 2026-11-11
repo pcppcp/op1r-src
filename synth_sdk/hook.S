@@ -794,6 +794,10 @@ _l1_tramp_mix:
 _l1_tramp_dec:
 	P1.L = _dec_stage; P1.H = _dec_stage;
 	jump.l _l1_tramp_call;
+	.global _l1_tramp_rec			/* CALL tape_record_block (0xFFA0217A / 0xFFA02DCA) -> tm_rec_entry (tape/tm.c) */
+_l1_tramp_rec:
+	P1.L = _tm_rec_entry; P1.H = _tm_rec_entry;
+	jump.l _l1_tramp_call;
 	.global _l1_tramp_end
 _l1_tramp_end:
 
