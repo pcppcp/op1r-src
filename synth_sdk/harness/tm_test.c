@@ -52,6 +52,13 @@ int main(void)
         const int32_t n = (int32_t)(head[2] >> 32);
         assert(n >= 2048 && n < 2048 + 4097);
     }
+    /* a recording (mode 1) in between: the next play reloads what we hold (stale chunks) */
+    host_tm_loopon = 0; tm_tr[2].loop = 0xFFFF; tm_tr[2].off = 0;
+    run(300000, 4, 64);
+    const uint32_t before = tm_loads;
+    SET32(0x00, 1); tm_block(); SET32(0x00, 2);
+    run(300000 + 5 * 64, 2, 64);
+    assert(tm_loads > before);
     printf("tm ok (loads %u, misses %u)\n", tm_loads, tm_miss);
     return 0;
 }

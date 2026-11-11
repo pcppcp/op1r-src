@@ -61,6 +61,7 @@ static int8_t map[4][TM_CHUNKS];                                 /* chunk -> slo
 static int64_t head[4];
 static int32_t last_pos = -1;
 static uint32_t blk;
+static uint8_t rec_seen;
 volatile uint32_t tm_miss, tm_loads;
 
 static int tm_alloc(void)
@@ -119,7 +120,12 @@ void tm_block(void)                                              /* audio ISR, a
     blk++;
     if (!tm_on || !slot[0].data) return;                         /* memory comes from tm_service (main loop) */
     const int32_t mode = MODE, pos = TPOS >> 6;
+    if (mode == 1) rec_seen = 1;                                 /* recording (R246's machine) changes chunks we may hold */
     if (mode != 2) { last_pos = -1; return; }                    /* playing only (v1); else R246's output stays */
+    if (rec_seen) {                                              /* first play after a recording: reload every chunk */
+        rec_seen = 0;
+        for (int i = 0; i < TM_SLOTS; i++) if (slot[i].t >= 0) { slot[i].state = 1; slot[i].gen++; }
+    }
     const int32_t v = TSPEED;
     int32_t d = last_pos < 0 ? 0x7FFFFFFF : pos - last_pos;
     if (d != 0x7FFFFFFF && LOOP_ON && LOOP_E > LOOP_S) {         /* the transport's own loop wrap is no locate */
