@@ -1051,7 +1051,8 @@ extern int ms_view_open(void);                                 /* seqdev/ms_fw.c
 static int tape_page(void)
 {
     int id = *(volatile int *)0x018B65C8;                      /* current screen id -> object via the screen table */
-    return tm_scr && CUR_MODE_ID == 2 && id >= 0 && id < 0x40 && (SCREEN_TABLE[id] == tm_scr || ms_view_open());
+    extern int tfs_view_open(void);                             /* the free tape machine screen (screens/tfscreen.c) */
+    return tm_scr && CUR_MODE_ID == 2 && id >= 0 && id < 0x40 && (SCREEN_TABLE[id] == tm_scr || ms_view_open() || tfs_view_open());
 }
 
 /* Shift + Drop on the tape screen: an all-tracks lift is summed into one track (tape/mixdrop.c), then the stock

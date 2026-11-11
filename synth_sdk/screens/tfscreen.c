@@ -153,6 +153,15 @@ static void tfs_update(void *scr, int dt)
         }
     }
     lane(r, sel, OP1_Q10(68), OP1_Q10(10), OP1_Q10(310), head, 8, OP1_Q10(9), 1, 1);
+    {                                                            /* op1r tape markers (tape/markers.c): the active track only */
+        extern int32_t tm_pos[]; extern int tm_n;
+        for (int i = 0; i < tm_n; i++) {
+            const int64_t d = (int64_t)(tm_pos[i] - head) * OP1_Q10(150) / (8 * SR);
+            if (d < -OP1_Q10(150) || d > OP1_Q10(150)) continue;
+            const int32_t x = OP1_Q10(160) + (int32_t)d;
+            ln(r, x, OP1_Q10(58), x, OP1_Q10(78), 0x500, c_red);
+        }
+    }
     ln(r, OP1_Q10(160), OP1_Q10(48), OP1_Q10(160), OP1_Q10(88), 0x600, c_white);
     ln(r, OP1_Q10(160), OP1_Q10(48), OP1_Q10(rev ? 154 : 166), OP1_Q10(48), 0x600, rev ? c_red : c_white);
     /* all four tracks */
@@ -200,6 +209,7 @@ void tfs_poll(void)                                              /* main loop, e
     LOCATE(p < 0 ? 0 : p > TM_MAXPOS ? TM_MAXPOS : p);
 }
 static int shown_now(void) { return tfs_in && CUR_MODE_ID == 2 && tfs_id >= 0 && SCREEN_TABLE[tfs_id] == (void *)tfs_scr; }
+int tfs_view_open(void) { return shown_now(); }               /* dispatcher.c tape_page: op1r's tape markers work here too */
 
 int tfs_key(int code, int pressed)                               /* key thread: 1 = consumed */
 {
@@ -207,19 +217,11 @@ int tfs_key(int code, int pressed)                               /* key thread: 
     if (code >= 0x06 && code <= 0x09) { if (pressed) sel = (uint8_t)(code - 0x06); return 1; }
     if (code == 0x24 || code == 0x25) {                          /* < / >: our scrubbing (R246's would call TapeScreen
                                                                   * methods on this object); Shift: previous / next marker */
-        if (pressed && SHIFT) {
-            extern int32_t tm_pos[]; extern int tm_n;            /* op1r tape markers (tape/markers.c), sorted */
-            const int32_t h = tm_head_pos(sel), m = 2000;        /* ~45 ms: not the marker we stand on */
-            int32_t best = -1;
-            int32_t cand[34]; int n = 0;
-            for (int i = 0; i < tm_n && n < 32; i++) cand[n++] = tm_pos[i];
-            if (tm_tr[sel].lset) cand[n++] = tm_tr[sel].lin;
-            if (tm_tr[sel].lon) cand[n++] = tm_tr[sel].lout;
-            for (int i = 0; i < n; i++) {
-                const int32_t v = cand[i];
-                if (code == 0x25 ? (v > h + m && (best < 0 || v < best)) : (v < h - m && (best < 0 || v > best))) best = v;
-            }
-            if (best >= 0) LOCATE(best > TM_MAXPOS ? TM_MAXPOS : best);
+        if (pressed && SHIFT) {                                  /* Shift: previous / next bar (R246's tempo, from tape 0) */
+            const int64_t bar_q8 = (int64_t)4 * 60 * SR * 256 * 256 / bpm_q8(), h = (int64_t)tm_head_pos(sel) << 8, m = 2000 << 8;
+            int64_t k = code == 0x25 ? (h + m) / bar_q8 + 1 : (h - m <= 0 ? 0 : (h - m - 1) / bar_q8);
+            const int32_t v = (int32_t)(k * bar_q8 >> 8);
+            LOCATE(v < 0 ? 0 : v > TM_MAXPOS ? TM_MAXPOS : v);
             return 1;
         }
         wind = pressed && !SHIFT ? (code == 0x24 ? -1 : 1) : 0; wind_t = now();
@@ -252,7 +254,11 @@ int tfs_knob(int knob, int delta)                                /* key thread: 
     const int k = knob & 3, fine = knob > 3 || SHIFT;
     if (k != 0 && k != 3) return 0;                              /* green / white: R246's */
     volatile tm_track *tr = &tm_tr[sel];
-    if (k == 3) { if (step_of(3, delta, 2048)) tr->speed = -tr->speed; return 1; }   /* red: direction */
+    if (k == 3) {                                                /* red: direction; Shift + red: op1r's marker jump */
+        if (fine) return 0;
+        if (step_of(3, delta, 2048)) tr->speed = -tr->speed;
+        return 1;
+    }
     const int neg = tr->speed < 0;
     int32_t sp = neg ? -tr->speed : tr->speed;
     if (fine) { const int st = step_of(4, delta, 512); if (!st) return 1;

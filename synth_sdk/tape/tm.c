@@ -123,7 +123,7 @@ void tm_block(void)                                              /* audio ISR, a
     if (!tm_on || !slot[0].data) return;                         /* memory comes from tm_service (main loop) */
     const int32_t mode = MODE, pos = TPOS >> 6;
     if (mode == 1) rec_seen = 1;                                 /* recording (R246's machine) changes chunks we may hold */
-    if (mode != 2) { last_pos = -1; return; }                    /* playing only (v1); else R246's output stays */
+    if (mode != 2) { tm_resync(pos); last_pos = -1; return; }    /* playing only; stopped / winding: the heads follow the transport */
     if (rec_seen) {                                              /* first play after a recording: reload every chunk */
         rec_seen = 0;
         for (int i = 0; i < TM_SLOTS; i++) if (slot[i].t >= 0) { slot[i].state = 1; slot[i].gen++; }
