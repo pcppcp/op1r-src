@@ -49,14 +49,21 @@ static int post(int code,int down) {
     return ok;
 }
 static uintptr_t sound_id(int slot){return *(const uintptr_t *)(PATCH(slot)+4);}
+/* Kept as "op1r": {"granular_sync": 1}: a loaded patch is rebuilt from the stock keys and only "op1r" is carried
+ * over (dp_keep_op1r). The top-level key of op1r 60..62 is still read. */
+static int jv_type(const void *v){return v?((const uint8_t *)v)[8]:0;}
 static int sync_read(int slot) {
-    const void *v=JV_CGET(PATCH(slot)+4,"granular_sync");
-    return v && ((const uint8_t *)v)[8]==1 && *(const int32_t *)v==1;
+    const void *o=JV_CGET(PATCH(slot)+4,"op1r");
+    const void *v=jv_type(o)==7?JV_CGET(o,"granular_sync"):0;
+    if(!jv_type(v))v=JV_CGET(PATCH(slot)+4,"granular_sync");
+    return (jv_type(v)==1||jv_type(v)==2) && *(const int32_t *)v==1;   /* int / uint */
 }
 static void sync_write(int slot,int on) {
     /* Called only on the key thread, with the firmware saver out of the JSON. */
     uint32_t tmp[4]; op1_patch_wait();
-    JV_INT_C(tmp,on);JV_ASSIGN(JV_KEY(PATCH(slot)+4,"granular_sync"),tmp);JV_DTOR(tmp,2);
+    int t=jv_type(JV_CGET(PATCH(slot)+4,"op1r"));                 /* null (absent) or an object: "op1r" */
+    void *v=t==0||t==7?JV_KEY(JV_KEY(PATCH(slot)+4,"op1r"),"granular_sync"):JV_KEY(PATCH(slot)+4,"granular_sync");
+    JV_INT_C(tmp,on);JV_ASSIGN(v,tmp);JV_DTOR(tmp,2);
     PATCH_SAVE(PATCH(slot));
 }
 #endif
