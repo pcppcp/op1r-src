@@ -267,7 +267,7 @@ int tfs_key(int code, int pressed)                               /* key thread: 
         return 1;
     }
     if (code >= 0x06 && code <= 0x09) {                          /* T: select (R246 records here); Shift + T: mute */
-        if (pressed) { if (SHIFT) tm_tr[code - 0x06].mute ^= 1; else { sel = (uint8_t)(code - 0x06); SEL_TRACK = sel; } }
+        if (pressed) { if (SHIFT) tm_tr[code - 0x06].mute ^= 1; else { extern volatile uint8_t tm_sel; sel = (uint8_t)(code - 0x06); tm_sel = sel; SEL_TRACK = sel; } }
         return 1;
     }
     if (code == 0x3E) {                                          /* red press: a marker at the active head; Shift: remove */

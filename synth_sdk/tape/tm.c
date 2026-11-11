@@ -68,6 +68,7 @@ static uint32_t blk;
 static uint8_t rec_seen;
 volatile int8_t tm_scrub;                                        /* -1 / +1: < / > held on our screen (tfscreen.c) */
 volatile uint8_t tm_scrub_track;                                 /* the active track: only it scrubs (and sounds) */
+volatile uint8_t tm_sel;                                         /* the active track (tfscreen.c): what FREE records */
 static int32_t scrub_v;                                          /* current scrub speed, Q16 (ramps to +-8x) */
 int tm_scrubbing(void) { return scrub_v != 0; }
 volatile uint32_t tm_miss, tm_loads;
@@ -229,10 +230,11 @@ static int16_t *pend_d[PEND_MAX]; static int16_t pend_v[PEND_MAX]; static int pe
 static int16_t rec_fade;
 static void tm_record(const volatile int16_t *bus)
 {
-    const int t = SEL_TRACK & 3;
+    const int t = tm_sel & 3;                                    /* ours: R246 rewrites 0xFF802964 in several places */
     for (int k = 0; k < pend_n; k++) *pend_d[k] = pend_v[k];    /* last block's samples into our copy (after this block's playback) */
     pend_n = 0;
     if (MODE != 1) { rec_on = 0; return; }
+    SEL_TRACK = t;                                               /* R246 closes the take onto this track */
     if (!rec_on) { rec_on = 1; rec_fade = 0; RANGE_RST(); }
     const int64_t step = rec_step[t], lo = rec_lo[t], hi = rec_hi[t];
     if (!step) return;
