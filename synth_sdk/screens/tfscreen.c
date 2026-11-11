@@ -287,7 +287,8 @@ int tfs_key(int code, int pressed)                               /* key thread: 
 {
     if (!shown_now()) return 0;
     if (code == 0x21) rec_held = (uint8_t)pressed;               /* REC: shown as armed while held; stock handles it */
-    if (code == 0x23 && T_MODE == 0) {                           /* STOP while stopped (also spinning down): the active track to its loop in
+    if (code == 0x23 && T_MODE == 0 && pressed) {                /* STOP while stopped (also spinning down): the active track to its loop in
+                                                                  * (press only: R246's STOP release turns state 1 into 0, REC arms from 0)
                                                                   * (R246's would jump the transport: all tracks resync) */
         if (pressed) {
             tm_set_head(sel, tm_tr[sel].lset ? tm_tr[sel].lin : 0);
