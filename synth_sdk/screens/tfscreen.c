@@ -335,6 +335,12 @@ int tfs_key(int code, int pressed)                               /* key thread: 
         tr->lout = h;
         if (tr->lout < tr->lin) { const int32_t x = tr->lin; tr->lin = tr->lout; tr->lout = x; }
         tr->lon = tr->lout > tr->lin;
+    } else if (SHIFT) {                                          /* Shift + s3: the loop = the clip under the head */
+        for (int i = 0; i < NCLIPS; i++)
+            if (CLIP_USED[i] && CLIPS[i * 3] == sel && CLIPS[i * 3 + 1] <= h && h < CLIPS[i * 3 + 2]) {
+                tr->lin = CLIPS[i * 3 + 1]; tr->lout = CLIPS[i * 3 + 2]; tr->lset = 1; tr->lon = 1;
+                break;
+            }
     } else tr->lon = (uint8_t)(!tr->lon && tr->lout > tr->lin);   /* s3: on / off */
     return 1;
 }

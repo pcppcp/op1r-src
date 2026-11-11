@@ -51,6 +51,9 @@ static int16_t host_bus[64];
 #define TRACK_BASE ((volatile int *)0x018C1810)
 #define CLIP_IDX   (*(uint8_t **volatile *)0x01B4EF48)           /* chunk -> R246 clip entry */
 #endif
+#ifndef OP1_HOST
+#define SEL_TRACK  (*(volatile int32_t *)0xFF802964)
+#endif
 #define MODE       (*(volatile int32_t *)(X + 0x00))             /* 0 stop, 1 rec, 2 play, 3 wind */
 #define TSPEED     (*(volatile int32_t *)(X + 0x08))             /* 1x = 0x08000000 (emulator: 64 samples per block); winding 0x40000000 = 8x */
 #define TPOS       (*(volatile int32_t *)(X + 0x14))             /* samples << 6 */
@@ -171,6 +174,10 @@ void tm_block(void)                                              /* audio ISR, a
         tm_in_peak = (int16_t)(pk > 32767 ? 32767 : pk);
     }
     if (!tm_on || !slot[0].data) return;                         /* memory comes from tm_service (main loop) */
+#ifndef OP1_HOST
+    SEL_TRACK = tm_sel & 3;                                      /* R246's selected track = ours, every block: its clipboard worker
+                                                                  * (drop) and take close read it later; R246 rewrites it */
+#endif
     const int32_t mode = MODE, pos = TPOS >> 6, v = TSPEED;
     if (mode == 1) rec_seen = 1;                                 /* recording (R246's machine) changes chunks we may hold */
     {                                                            /* the transport jumped (locate, marker): heads resync */
@@ -213,7 +220,6 @@ void tm_block(void)                                              /* audio ISR, a
  * selected track (= ours: tfscreen.c sets it). */
 #ifndef OP1_HOST
 #define REC_LEVEL  (*(volatile int16_t *)0x01B4EF6E)
-#define SEL_TRACK  (*(volatile int32_t *)0xFF802964)
 #define QUEUE_CLIP ((void (*)(int))0x01A54CD4)
 #define RANGE_ADD  ((void (*)(int32_t))0x01A54BB4)
 #define RANGE_RST  ((void (*)(void))0x01A54C1C)
