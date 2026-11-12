@@ -71,6 +71,7 @@ static uint32_t blk;
 static uint8_t rec_seen;
 volatile int8_t tm_scrub;                                        /* -1 / +1: < / > held on our screen (tfscreen.c) */
 volatile uint8_t tm_scrub_track;                                 /* the active track: only it scrubs (and sounds) */
+volatile uint8_t tm_live;                                        /* free on with its cache: R246's gather skipped (tm_l1.S) */
 volatile uint8_t tm_sel;                                         /* the active track (tfscreen.c): what FREE records */
 static int32_t scrub_v;                                          /* current scrub speed, Q16 (ramps to +-8x) */
 int tm_scrubbing(void) { return scrub_v != 0; }
@@ -299,6 +300,7 @@ static void tm_block_body(void)
         for (int i = 0; i < 64; i++) { int32_t v = b[i] < 0 ? -b[i] : b[i]; if (v > pk) pk = v; }
         tm_in_peak = (int16_t)(pk > 32767 ? 32767 : pk);
     }
+    tm_live = (uint8_t)(tm_on && slot[0].data);
     if (!tm_on || !slot[0].data) return;                         /* memory comes from tm_service (main loop) */
 #ifndef OP1_HOST
     SEL_TRACK = tm_sel & 3;                                      /* R246's selected track = ours, every block: its clipboard worker
