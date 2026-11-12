@@ -161,6 +161,9 @@ int tape_service(int arg)
                 Y_READ(TAPE_FD, CLIP_DATA(c) + k * 0x10000, 0x10000);
                 IO_ADD(0);
             }
+#ifndef OP1_HOST
+            { extern void tm_mask_cache(int, uint8_t *); tm_mask_cache(idx, CLIP_DATA(c)); }   /* only clips' audio (tm.c) */
+#endif
             if (!c[1]) c[0] = *(volatile int16_t *)(c + 6) == idx;  /* invalidated meanwhile: stays unloaded */
             return 1;
         }

@@ -378,9 +378,12 @@ volatile uint8_t tm_reload_after_clip;                           /* lift / drop 
 static void tm_mask_clips(int t, int c, int16_t *d)
 {
     const int32_t a = c * CHUNK, b = a + CHUNK;
+    int32_t x0 = 0, x1 = 0;                                      /* the take being recorded on t counts as a clip */
+    if (*(volatile uint8_t *)0xFF8029EC && t == (tm_sel & 3)) { x0 = *(volatile int32_t *)0xFF8029E4; x1 = *(volatile int32_t *)0xFF8029E8 + 1; }
     int32_t cur = a;
     while (cur < b) {
         int32_t ext = cur, next = b;                             /* ext: covered up to; next: the next clip start */
+        if (x0 <= cur && x1 > ext) ext = x1; else if (x0 > cur && x0 < next && x1 > x0) next = x0;
         for (int i = 0; i < 512; i++) {
             if (!CLIP_USED[i] || CLIPS[i * 3] != t) continue;
             const int32_t s0 = CLIPS[i * 3 + 1], s1 = CLIPS[i * 3 + 2];
@@ -398,6 +401,11 @@ static uint32_t clips_hash(void)
     uint32_t h = 0;
     for (int i = 0; i < 512; i++) if (CLIP_USED[i]) h = h * 31 + (uint32_t)(CLIPS[i * 3] + CLIPS[i * 3 + 1] * 7 + CLIPS[i * 3 + 2] * 13);
     return h;
+}
+void tm_mask_cache(int c, uint8_t *data)                         /* safewrite.c: R246's clip cache entry just read from the file
+                                                                  * (4 tracks x 64 KB): recordings must not mix into old audio */
+{
+    if (tm_on) for (int t = 0; t < 4; t++) tm_mask_clips(t, c, (int16_t *)(data + t * 0x10000));
 }
 #endif
 int tm_service(void)                                             /* main loop (tape_service): one chunk per call */
@@ -438,7 +446,7 @@ int tm_service(void)                                             /* main loop (t
         }
 #endif
 #ifndef OP1_HOST
-        if (MODE != 1 && !rec_seen) tm_mask_clips(t, c, s->data);   /* recording: the take is not listed yet */
+        tm_mask_clips(t, c, s->data);
 #endif
         if (s->gen == gen) s->state = 2;                         /* reassigned meanwhile: stays wanted */
         tm_loads++;
