@@ -363,7 +363,7 @@ def build(engs, fxs):
     if os.environ.get('OP1R_SPKDIAG') == '1': flags['screens/sysmon.c'] = flags.get('screens/sysmon.c', []) + ['-DSPK_DIAG']   # speaker amp state on page 9
     if os.environ.get('OP1R_TAPEFREE') == '1': flags['tape/tm.c'] = ['-DTAPE_FREE'] + (['-DTM_DBGRING'] if os.environ.get('OP1R_TMDBG') == '1' else [])
     if os.environ.get('OP1R_TMXTEST') == '1': flags['tape/tm.c'] = flags.get('tape/tm.c', []) + ['-DTM_XHI=441000', '-DTM_XSPAN=220500']   # emulator: transport wrap at 10 s
-    if os.environ.get('OP1R_TAPEMIX') in ('stock', 'check'): flags['screens/usbtrack.c'] = flags.get('screens/usbtrack.c', []) + ['-DTAPEMIX_' + os.environ['OP1R_TAPEMIX'].upper()]   # docs/83: R246's tape mix / compared
+    if os.environ.get('OP1R_TAPEMIX') in ('stock', 'check', 'checkx', 'exact'): flags['screens/usbtrack.c'] = flags.get('screens/usbtrack.c', []) + ['-DTAPEMIX_' + os.environ['OP1R_TAPEMIX'].upper()]   # docs/83: R246's tape mix / compared
     if os.environ.get('OP1R_WDOG', '1') == '1':
         for f in ('screens/fxroute.c', 'dispatcher.c', 'boottime.c', 'tape/safewrite.c', 'screens/sysmon.c'): flags[f] = flags.get(f, []) + ['-DWDOG']
         if os.environ.get('OP1R_WDOG_NORESET') == '1': flags['wdog_nmi.S'] = flags.get('wdog_nmi.S', []) + ['-DWD_NORESET']

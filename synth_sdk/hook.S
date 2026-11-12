@@ -465,6 +465,7 @@ _mix_hook_rev:                                /* loop 2 @0xFFA0712C: src P1 (+2)
 	W[P5] = R6; W[P5 + 8] = R7;
 	R6 = [SP + 16];                           /* the loop's P1: pushed by the trampoline (P1 = hook address here) */
 	R6 += 2; R7 = I1;
+	BITSET (R6, 0);                           /* src bit 0 = loop 2 (its gains pair the other way, usbtrack.c) */
 	[--SP] = R3;
 _mix_rec_common:                              /* stack: track, R6, R7, P5, P0 (20 bytes) + 8 -> tape SP = SP + 28 */
 	[--SP] = ASTAT;                           /* CC is live in the mix loop (IF CC JUMP right after) */

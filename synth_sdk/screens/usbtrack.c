@@ -20,6 +20,8 @@ volatile int16_t tr_peak[TR_N];
 /* the tracks' gathered samples as pairs: word i of pair p = track 2p (low half) | track 2p + 1 (high half), so one
  * dual MAC filters two tracks (screens/tr_rs.S); the gather writes the halves through int16 views */
 static uint32_t tr_pair[2][TR_SRC + 1] __attribute__((aligned(4)));   /* + 1: the kernel's last read-ahead */
+/* this block's passes for the exact replay: src (bit 0: loop 2), -, track, count, offset, in 0x01B5F434's buffer */
+static tr_word tr_cp[16 * 6]; static uint32_t tr_dbg_n;
 static uint8_t tr_clean;                                    /* tracks whose half is all zero */
 #define TR_SRC16(t) ((int16_t *)tr_pair[(t) >> 1] + ((t) & 1))     /* track t's samples, stride 2 */
 
@@ -87,7 +89,7 @@ volatile uint8_t tp_on;                                     /* set per block by 
  * after the tape mix, for the next one (the mix hooks and the resampler of one block see the same choice). */
 void tp_decide(void)
 {
-#if defined(TAPEMIX_STOCK) || defined(TAPEMIX_CHECK)
+#if defined(TAPEMIX_STOCK) || defined(TAPEMIX_CHECK) || defined(TAPEMIX_CHECKX)
     tp_on = 0;
 #else
     extern int fr_tracks_needed(void);
@@ -97,11 +99,17 @@ void tp_decide(void)
 /* OP1R_TAPEMIX=check: R246's mix and resampler play; tp_check_pre (before its resampler) computes ours into a shadow,
  * tp_check_post (its return, hook.S) compares the raw resampler output with it: blocks, blocks with any difference,
  * the largest difference (sysmon / peek) */
-#ifdef TAPEMIX_CHECK
+#if defined(TAPEMIX_CHECK) || defined(TAPEMIX_CHECKX)
 volatile uint8_t tp_check = 1;
 #else
 volatile uint8_t tp_check = 0;
 #endif
+#ifdef TAPEMIX_EXACT
+volatile uint8_t tp_exact = 1;
+#else
+volatile uint8_t tp_exact = 0;
+#endif
+volatile uint32_t tp_ckb_diff, tp_ck_cov[6];                              /* checkx: blocks whose replayed gather buffers differ */
 volatile uint32_t tp_ck_blocks, tp_ck_diff, tp_ret_to, tp_ck_run, tp_ck_rundiff; volatile int32_t tp_ck_runmax; volatile int32_t tp_ck_max;
 static int16_t tp_sh[2][64];
 volatile int16_t tp_dbg[264]; volatile int32_t tp_dbg_rec[68]; volatile uint8_t tp_dbg_have;
@@ -111,21 +119,24 @@ void tr_resample(int32_t pos, int32_t inc, const int16_t *gain_inc)
 {
     extern int fr_tracks_needed(void);                       /* FX2 aux in use (screens/fxroute.c) */
     if (!tp_on && !tp_check && !usb_tracks_live && !fr_tracks_needed()) { tr_rec[0] = 0; return; }   /* no track work */
-#ifdef TAPEMIX_CHECK
+#if defined(TAPEMIX_CHECK) || defined(TAPEMIX_CHECKX)
     for (int k = 0; k < 65; k++) tr_dbg_rec[k] = (int32_t)tr_rec[k];   /* check build: this block's log */
     tr_dbg_pos = pos; tr_dbg_inc = inc;
 #endif
     int n = tr_rec[0] > 16 ? 16 : tr_rec[0];
+    tr_dbg_n = 0;
     uint8_t got = 0;
     for (int r = 0; r < n; r++) {                          /* gather: same offsets as the mixed buffers */
         const volatile tr_word *e = &tr_rec[1 + 4 * r];
-        const int16_t *src = (const int16_t *)(uintptr_t)e[0];
+        const int16_t *src = (const int16_t *)(uintptr_t)(e[0] & ~(tr_word)1);   /* bit 0: loop 2 (exact replay) */
         uintptr_t dst = (uintptr_t)e[1];
         int t = e[2], cnt = e[3];
         int32_t off = dst >= SRC_L && dst < SRC_L + 2 * TR_SRC ? (int32_t)(dst - SRC_L) / 2
                     : dst >= SRC_R && dst < SRC_R + 2 * TR_SRC ? (int32_t)(dst - SRC_R) / 2 : -1;
         if (t < 0 || t >= TR_N || off < 0 || cnt <= 0) continue;
         if (off + cnt > TR_SRC) cnt = TR_SRC - off;
+        { tr_word *c = &tr_cp[6 * tr_dbg_n++]; c[0] = e[0]; c[1] = 0; c[2] = t; c[3] = cnt; c[4] = off;
+          c[5] = dst >= SRC_L && dst < SRC_L + 2 * TR_SRC; }
         int16_t *d = TR_SRC16(t);
         if (!(got >> t & 1)) { for (int i = 0; i < TR_SRC; i++) d[2 * i] = 0; got |= (uint8_t)(1 << t); tr_clean &= (uint8_t)~(1 << t); }
         for (int i = 0; i < cnt; i++) {                    /* add: at the loop wrap the mixer makes 2 passes into */
@@ -170,16 +181,81 @@ int16_t tp_host_out[2][64];
 #define TP_R ((volatile int16_t *)0xFF800DB4)
 #endif
 static void tp_mix(volatile int16_t *L, volatile int16_t *R);
+
+/* ---- the exact path: R246's tape mix, bit for bit ----
+ * The skipped mix loops replayed from the log into R246's own gather buffers (still zero-filled by R246 per span),
+ * in log order: per sample buf = sat16(buf + rmul(g, s)) for both buffers. Gains as the loops pair them: loop 1 the
+ * logged destination g[t] and the other buffer g[4 + t]; loop 2 (src bit 0) the other way round. Then R246's
+ * resampler arithmetic on the two buffers (0x01B5F434 -> tape R 0xFF800DB4 as the low half, 0x01B5EF84 -> tape L as the
+ * high half, tr_rs.S on an interleaved copy of the span it reads). */
+#ifndef OP1_HOST
+static uint32_t tp_lr[TR_SRC + 1] __attribute__((aligned(4)));
+static int tp_replay(int16_t *ba, int16_t *bb, int zero)      /* ba = 0x01B5EF84's role, bb = 0x01B5F434's; zero: clear
+                                                              * the logged spans first (checkx shadows); -> records */
+{
+    const int n = (int)tr_dbg_n;
+    if (zero)
+        for (int r = 0; r < n; r++) {
+            const tr_word *e = (const tr_word *)&tr_cp[6 * r];
+            const int32_t off = e[4], cnt = e[3];
+            for (int i = 0; i < cnt; i++) { ba[off + i] = 0; bb[off + i] = 0; }
+        }
+    for (int r = 0; r < n; r++) {
+        const tr_word *e = (const tr_word *)&tr_cp[6 * r];
+        const int16_t *src = (const int16_t *)(uintptr_t)(e[0] & ~(tr_word)1);
+        const int rev = (int)(e[0] & 1), t = (int)e[2], cnt = (int)e[3], off = (int)e[4], in_b = (int)e[5];
+        if (cnt <= 0 || t < 0 || t >= TR_N) continue;
+        int16_t *d = in_b ? bb : ba, *o = in_b ? ba : bb;    /* the logged destination, the other buffer */
+        const int16_t gd = rev ? tm_g[4 + t] : tm_g[t], go = rev ? tm_g[t] : tm_g[4 + t];
+        for (int i = 0; i < cnt; i++) {
+            d[off + i] = sat16(d[off + i] + rmul(gd, src[i]));
+            o[off + i] = sat16(o[off + i] + rmul(go, src[i]));
+        }
+    }
+    return n;
+}
+static void tp_rs_lr(const int16_t *ba, const int16_t *bb, volatile int16_t *out_l, volatile int16_t *out_r,
+                     int32_t pos, int32_t inc, const int16_t *gain_inc)
+{
+    int32_t i0 = (pos + inc) >> 6, i1 = (pos + 64 * inc) >> 6;
+    if (i1 < i0) { const int32_t x = i0; i0 = i1; i1 = x; }
+    if (i0 < 0) i0 = 0;
+    if (i1 + 16 > TR_SRC) i1 = TR_SRC - 16;
+    for (int32_t i = i0; i <= i1 + 16 && i <= TR_SRC; i++) tp_lr[i] = (uint16_t)bb[i] | (uint32_t)(uint16_t)ba[i] << 16;
+    const tr_rs_job j = { tp_lr, COEF, (int16_t *)out_r, (int16_t *)out_l, pos, inc, GAIN0, (int16_t)(gain_inc ? *gain_inc : 0) };
+    tr_rs_pair(&j);
+}
+#define GB_A ((int16_t *)SRC_R)                             /* 0x01B5EF84: -> tape L */
+#define GB_B ((int16_t *)SRC_L)                             /* 0x01B5F434: -> tape R */
+#endif
+
 int32_t tp_resample(int32_t pos, int32_t inc, const int16_t *gain_inc)
 {
     tr_resample(pos, inc, gain_inc);
+#ifndef OP1_HOST
+    if (tp_exact) { tp_replay(GB_A, GB_B, 0); tp_rs_lr(GB_A, GB_B, TP_L, TP_R, pos, inc, gain_inc); return pos + 64 * inc; }
+#endif
     tp_mix(TP_L, TP_R);
     return pos + 64 * inc;
 }
+#ifdef TAPEMIX_CHECKX
+static int16_t tp_ga[TR_SRC + 1], tp_gb[TR_SRC + 1];
+#endif
 void tp_check_pre(int32_t pos, int32_t inc, const int16_t *gain_inc)   /* check build: ours into the shadow */
 {
     tr_resample(pos, inc, gain_inc);
+#ifdef TAPEMIX_CHECKX
+    /* the exact path on shadows of R246's gather buffers (they hold its mix now): the logged spans cleared and
+     * replayed must give the same buffers, then the resampler the same output */
+    for (int i = 0; i <= TR_SRC; i++) { tp_ga[i] = GB_A[i]; tp_gb[i] = GB_B[i]; }
+    tp_replay(tp_ga, tp_gb, 1);
+    int bad = 0;
+    for (int i = 0; i < TR_SRC; i++) bad |= tp_ga[i] != GB_A[i] || tp_gb[i] != GB_B[i];
+    if (bad) tp_ckb_diff++;
+    tp_rs_lr(tp_ga, tp_gb, tp_sh[0], tp_sh[1], pos, inc, gain_inc);
+#else
     tp_mix(tp_sh[0], tp_sh[1]);
+#endif
 }
 void tp_check_post(void)                                       /* check build: R246's raw output vs the shadow */
 {
@@ -191,6 +267,15 @@ void tp_check_post(void)                                       /* check build: R
     }
     tp_ck_blocks++;
     if (mx) tp_ck_diff++;
+    {                                                        /* what the compared blocks covered */
+        if (tr_dbg_inc < 0) tp_ck_cov[0]++;
+        if (tr_dbg_inc > 0 && tr_dbg_inc != 64) tp_ck_cov[1]++;
+        if (*(volatile uint8_t *)0xFF8029C5) tp_ck_cov[2]++;   /* loop on */
+        int xf = 0; for (uint32_t r = 0; r < tr_dbg_n; r++) xf |= !(tr_cp[6 * r] & 1);
+        if (xf) tp_ck_cov[3]++;                              /* a loop-1 (crossfade) pass */
+        if (tr_dbg_inc && !tr_dbg_n) tp_ck_cov[4]++;          /* moving, no clip read */
+        if (tr_dbg_n > 4) tp_ck_cov[5]++;                     /* more passes than tracks (wrap / two spans) */
+    }
     if (tr_dbg_inc) { tp_ck_run++; if (mx) tp_ck_rundiff++; if (mx > tp_ck_runmax) tp_ck_runmax = mx; }   /* tape moving */
     if (mx > 64 && tr_dbg_inc && !tp_dbg_have) {                           /* the first bad block, for a look (peek tp_dbg) */
         tp_dbg_have = 1;
