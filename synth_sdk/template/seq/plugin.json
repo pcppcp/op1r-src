@@ -1,0 +1,13 @@
+{
+  "name": "myseq",
+  "author": "your name",
+  "kind": "seq",
+  "symbol": "SEQ_myseq",
+  "sources": [
+    "myseq.c"
+  ],
+  "screen": {
+    "svg": "myseq.svg",
+    "symbol": "SCREEN_myseq"
+  }
+}

@@ -11,5 +11,9 @@
     12000,
     6000,
     24000
-  ]
+  ],
+  "screen": {
+    "svg": "mysynth.svg",
+    "symbol": "SCREEN_mysynth"
+  }
 }

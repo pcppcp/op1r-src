@@ -208,6 +208,19 @@ def draw_svg(ctx, el, nodes, hidden=()):
     ctx.new_path(); ctx.restore()
 
 
+def draw_frame(ctx, svg, fr):
+    """one frame of the harness JSON (screen_harness.c, plugin_test.h) over the SVG root `svg` (None: lines only)"""
+    STYLES.clear(); STYLES.update(fr.get('styles', {}))
+    if svg is not None:
+        draw_svg(ctx, svg, fr['nodes'], set(fr.get('hidden', ())))
+    for x1, y1, x2, y2, w, c in fr['lines']:
+        ctx.set_source_rgba(*(v / 255 for v in c)); ctx.set_line_width(w / 1024)
+        ctx.set_line_cap(cairo.LINE_CAP_BUTT)   # as the OP-1 rasteriser
+        ctx.move_to(x1 / 1024, y1 / 1024); ctx.line_to(x2 / 1024, y2 / 1024); ctx.stroke()
+    for x, y, size, c, txt in fr.get('texts', []):     # stock font on the device: Iosevka here (capitals, as the stock font)
+        ctx.set_source_rgb(*(v / 255 for v in c)); ctx.move_to(x / 1024, y + size * 0.72); iosevka.show(ctx, txt.upper(), size * 0.78)
+
+
 def build(engine):
     sys.path.insert(0, SDK); import plugins
     engs, fxs = plugins.load()
@@ -248,14 +261,7 @@ def main(engine, out=None):
             ctx.move_to(x0, y0 + 15); ctx.show_text(f'{label}   knobs {list(knobs)}'); ctx.restore()
         ctx.save(); ctx.translate(x0, y0 + lab); ctx.rectangle(0, 0, W, H); ctx.clip()
         ctx.set_source_rgb(0, 0, 0); ctx.paint(); ctx.scale(sc, sc)
-        STYLES.clear(); STYLES.update(fr.get('styles', {}))
-        draw_svg(ctx, svg, fr['nodes'], set(fr.get('hidden', ())))
-        for x1, y1, x2, y2, w, c in fr['lines']:
-            ctx.set_source_rgba(*(v / 255 for v in c)); ctx.set_line_width(w / 1024)
-            ctx.set_line_cap(cairo.LINE_CAP_BUTT)   # as the OP-1 rasteriser
-            ctx.move_to(x1 / 1024, y1 / 1024); ctx.line_to(x2 / 1024, y2 / 1024); ctx.stroke()
-        for x, y, size, c, txt in fr.get('texts', []):     # stock font on the device: Iosevka here (capitals, as the stock font)
-            ctx.set_source_rgb(*(v / 255 for v in c)); ctx.move_to(x / 1024, y + size * 0.72); iosevka.show(ctx, txt.upper(), size * 0.78)
+        draw_frame(ctx, svg, fr)
         ctx.restore()
         print(f'{label:24s} nodes={len(fr["nodes"])} lines={len(fr["lines"])}')
     out = out or os.path.join(SDK, 'display', f'{engine}_preview.png')

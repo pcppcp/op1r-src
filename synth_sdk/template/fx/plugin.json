@@ -11,5 +11,9 @@
     16000,
     4000,
     32767
-  ]
+  ],
+  "screen": {
+    "svg": "myfx.svg",
+    "symbol": "SCREEN_myfx"
+  }
 }

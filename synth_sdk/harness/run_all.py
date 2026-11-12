@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and run every host test (harness/*_test.c) with sanitizers; exit 1 if any fails; all in parallel.
+"""Build and run every host test (harness/*_test.c with sanitizers, and PY below); exit 1 if any fails; all in parallel.
     python3 harness/run_all.py [name ...]      (names without _test.c; default: all)
 A test builds from its own file plus the sources listed in EXTRA; SKIP names tests that need input files or
 arguments, with the reason. Run before every release (AGENTS.md)."""
@@ -29,7 +29,12 @@ if not _plugins(): SKIP['op1p'] = 'no built plugins (build/plugins/*.op1p)'
 if not os.path.exists(os.path.join(HERE, 'build', 'oblique_hostw.h')):   # width table made from the stock font (local)
     SKIP['oblique'] = 'needs build/oblique_hostw.h (stock font widths, local only)'
 
+PY = ['pluginkit']                              # harness/<name>_test.py: run with python3, no C build
+
 def run(name):
+    if name in PY:
+        r = subprocess.run([sys.executable, os.path.join(HERE, name + '_test.py')], capture_output=True, text=True, timeout=600)
+        return ('run', (r.stdout + r.stderr).strip().splitlines()[-3:]) if r.returncode else (None, None)
     src = os.path.join(HERE, name + '_test.c')
     exe = os.path.join(HERE, 'build', name + '_test')
     os.makedirs(os.path.dirname(exe), exist_ok=True)
@@ -43,7 +48,7 @@ def run(name):
     return None, None
 
 def main(names):
-    names = names or sorted(f[:-7] for f in os.listdir(HERE) if f.endswith('_test.c'))
+    names = names or sorted([f[:-7] for f in os.listdir(HERE) if f.endswith('_test.c')] + PY)
     bad = 0
     todo = [n for n in names if n not in SKIP]
     with ThreadPoolExecutor(os.cpu_count()) as pool:   # every test builds and runs in parallel (own exe, own outputs)
