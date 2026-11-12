@@ -149,6 +149,10 @@ int16_t tm_dbg[32768]; uint32_t tm_dbg_n;
 static int32_t fade_prev;                                        /* output gain of the last block (tm_block) */
 #define TM_SEAM 512                                             /* seam jump threshold (sum of both sides, ~-36 dBFS) */
 #define TM_XF 256                                                /* loop crossfade, samples (power of 2) */
+#ifndef OP1_HOST
+void tm_hloop(const int16_t *d, int32_t r, int32_t st, uint32_t gains, int32_t shift, int32_t *accL, int32_t *accR);
+#endif
+volatile uint32_t tm_chk_n, tm_chk_bad;                          /* OP1R_TMCHECK: blocks compared, mismatches */
 static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32_t *accL, int32_t *accR)
 {
     int64_t h = head[t];
@@ -181,6 +185,14 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
                 const int32_t base = c * CHUNK;
                 int32_t r = (int32_t)((h - ((int64_t)base << 32)) >> 16);   /* Q16 inside the chunk (< 2^31) */
                 const int32_t st = (int32_t)(step >> 16);
+#if !defined(OP1_HOST) && !defined(TM_CHECK)
+                tm_hloop(d, r, st, (uint16_t)gl | (uint32_t)(uint16_t)gr << 16, gain_shift, accL, accR);   /* tm_loop.S */
+#else
+#ifdef TM_CHECK
+                int32_t cl[64], cr[64];
+                for (int i = 0; i < 64; i++) { cl[i] = accL[i]; cr[i] = accR[i]; }
+                tm_hloop(d, r, st, (uint16_t)gl | (uint32_t)(uint16_t)gr << 16, gain_shift, cl, cr);
+#endif
                 for (int i = 0; i < 64; i++) {
                     const int32_t n = r >> 16, f = (r >> 4) & 0xFFF;
                     const int32_t sm = d[n - 1], s0 = d[n], s1 = d[n + 1], s2 = d[n + 2];
@@ -190,6 +202,11 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
                     accL[i] += v * gl >> gain_shift; accR[i] += v * gr >> gain_shift;
                     r += st;
                 }
+#ifdef TM_CHECK
+                for (int i = 0; i < 64; i++) if (cl[i] != accL[i] || cr[i] != accR[i]) { tm_chk_bad++; break; }
+                tm_chk_n++;
+#endif
+#endif
                 h = h_end;
                 goto done;
             }
