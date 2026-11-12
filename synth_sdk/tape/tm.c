@@ -15,7 +15,7 @@
 #define TM_CHUNKS  0x1E5                                         /* chunks per track (R246) */
 #define CHUNK      0x8000                                        /* samples */
 
-typedef struct { int32_t speed; int32_t lin, lout; uint8_t lon, lset, mute; } tm_track;   /* lset: in set (marker shown); mute: Shift + T */   /* speed Q16 (negative = reverse); own loop in / out (samples), on */
+typedef struct { int32_t speed; int32_t lin, lout; uint8_t lon, lset, mute, stop; } tm_track;   /* stop: Shift + STOP / PLAY, per track */   /* lset: in set (marker shown); mute: Shift + T */   /* speed Q16 (negative = reverse); own loop in / out (samples), on */
 volatile tm_track tm_tr[4] = { { 0x10000, 0, 0, 0, 0, 0 }, { 0x10000, 0, 0, 0, 0, 0 }, { 0x10000, 0, 0, 0, 0, 0 }, { 0x10000, 0, 0, 0, 0, 0 } };
 #ifdef TAPE_FREE
 volatile uint8_t tm_on = 1;                                      /* test builds (OP1R_TAPEFREE=1): on */
@@ -404,6 +404,8 @@ static void tm_block_body(void)
     for (int i = 0; i < 64; i++) accL[i] = accR[i] = 0;
     for (int t = 0; t < 4; t++) {
         if (scrub_v && t == sc) tm_track_block(t, (int64_t)scrub_v << 16, 0, 16, accL, accR);   /* -6 dB, no loops */
+        else if (tm_tr[t].stop) { rec_step[t] = 0; for (int i = 0; i < 64; i++) tm_v[t][i] = 0; }   /* stopped track: its head
+                                                                  * stands, silent, no recording (tm_record: step 0) */
         else if (playing) {
             const int64_t step = ((int64_t)v * tm_tr[t].speed) >> 11;   /* (1x = 2^27) x Q16 -> Q32 */
             if (!tm_fast(t, step, accL, accR)) tm_track_block(t, step, 1, 15, accL, accR);

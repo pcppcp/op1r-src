@@ -71,6 +71,18 @@ int main(void)
         const int e = ((i & 1) ? (e0 + e1) / 2 : e0) * 0x7FFF >> 15;
         assert(abs(host_tm_out[0][i] - e) <= 2);
     }
+    /* Shift + STOP on a track: its head stands and it is silent while the transport and the others run on;
+     * Shift + PLAY: it goes on from where it stopped */
+    tm_tr[2].speed = 0x10000; tm_tr[2].lon = 0;
+    run(500000, 4, 64);
+    tm_tr[2].stop = 1;
+    const int64_t hs = head[2], h1 = head[1];
+    run(500000 + 4 * 64, 8, 64);
+    assert(head[2] == hs && head[1] != h1);
+    for (int i = 0; i < 64; i++) assert(host_tm_out[0][i] == 0 && tm_v[2][i] == 0);   /* only track 3 has gain here */
+    tm_tr[2].stop = 0;
+    run(500000 + 12 * 64, 2, 64);
+    assert(head[2] == hs + ((int64_t)2 * 64 << 32));
     printf("tm ok (loads %u, misses %u)\n", tm_loads, tm_miss);
     return 0;
 }
