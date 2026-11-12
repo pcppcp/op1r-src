@@ -371,23 +371,13 @@ _l1_rs_probe:
 	R3 = B[P0] (Z);
 	CC = R3 == 0;
 	if !CC jump _tp_probe_check;
-	[--SP] = RETS;
-	[--SP] = R0;
-	[--SP] = R1;
-	[--SP] = R2;
-	SP += -12;
-	call _tr_resample;
-	SP += 12;
-	R2 = [SP++];
-	R1 = [SP++];
-	R0 = [SP++];
-	RETS = [SP++];
-	ASTAT = [SP++];
+	ASTAT = [SP++];                           /* R246's mix and resampler (no track work: the track outs only come
+	                                           * from the takeover, usbtrack.c tp_decide) */
 	P1.L = 0x29dc; P1.H = 0xff80;
 	P2.L = 0x2154; P2.H = 0xff80;
 	rts;
 
-_tp_probe_check:                              /* as the stock path, tp_check_pre instead of tr_resample, and the
+_tp_probe_check:                              /* as the stock path, plus tp_check_pre (ours into a shadow), and the
 	                                           * resampler's saved RETS ([FP + 4], LINK 0) swapped for tp_ret */
 	[--SP] = RETS;
 	[--SP] = R0;

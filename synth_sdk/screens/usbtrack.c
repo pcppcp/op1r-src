@@ -1,7 +1,7 @@
 /* Track outs, step 1 (docs/21): the four tape tracks resampled like the master, in parallel to it.
  * The L1 tape mix loops log, per pass and track, where the track's N samples come from (track buffer) and where they go
  * in the mixed source buffers (0x01B5F434 / 0x01B5EF84, 600 samples each); hook.S _mix_hook_fwd / _rev. At the
- * resampler call (hook.S _l1_rs_probe -> tr_resample, before the master resampler runs) the same tracks' samples are
+ * resampler call (hook.S _l1_rs_probe -> tp_resample with the takeover on, docs/83) the same tracks' samples are
  * gathered into per-track source buffers at the same offsets and run through the master's filter: 16 taps, 64 phases,
  * coefficients 0xFF802154 [16][64] (row stride 64), position / increment in 1/64 samples, gain ramp from
  * W[0xFF8029DC] + W[*gain_inc] per sample. Result: tr_out[4][64] per block (pre-fader), and peaks for the monitor. */
@@ -82,7 +82,8 @@ volatile uint8_t usb_tracks_live;
 
 /* tape mix takeover (docs/83, step 2 + 3): R246's mix loops only log (hook.S skips their MAC loops), the resampler
  * call runs tp_resample: the four tracks resampled here (tr_rs.S) and mixed with R246's per-track gains (tm_g, tape/
- * tm.c) into tape L / R. Off in OP1R_TAPEMIX=stock builds (R246's mix and resampler, track outs as before). */
+ * tm.c) into tape L / R. This is the only source of the track outs (the separate pass beside R246's mix is gone):
+ * OP1R_TAPEMIX=stock builds have none (silent USB track channels). */
 volatile uint8_t tp_on;                                     /* set per block by tp_decide (fxroute.c fr_snap) */
 /* the takeover runs only while the tracks are wanted (USB track outs, FX2 aux, sidechain): there it saves R246's mix
  * plus the second resampling; without them R246's path is the cheaper one and runs untouched. Decided once per block,
@@ -95,6 +96,9 @@ void tp_decide(void)
     extern int fr_tracks_needed(void);
     tp_on = (uint8_t)(usb_tracks_live || fr_tracks_needed());
 #endif
+    tr_rec[0] = 0;                                           /* the hooks log every block: start the next one empty (a
+                                                              * log not consumed with the takeover off would otherwise
+                                                              * stay full and its stale records land in the first block) */
 }
 /* OP1R_TAPEMIX=check: R246's mix and resampler play; tp_check_pre (before its resampler) computes ours into a shadow,
  * tp_check_post (its return, hook.S) compares the raw resampler output with it: blocks, blocks with any difference,
@@ -117,8 +121,7 @@ static int32_t tr_dbg_rec[65], tr_dbg_pos, tr_dbg_inc;   /* check builds only */
 
 void tr_resample(int32_t pos, int32_t inc, const int16_t *gain_inc)
 {
-    extern int fr_tracks_needed(void);                       /* FX2 aux in use (screens/fxroute.c) */
-    if (!tp_on && !tp_check && !usb_tracks_live && !fr_tracks_needed()) { tr_rec[0] = 0; return; }   /* no track work */
+
 #if defined(TAPEMIX_CHECK) || defined(TAPEMIX_CHECKX)
     for (int k = 0; k < 65; k++) tr_dbg_rec[k] = (int32_t)tr_rec[k];   /* check build: this block's log */
     tr_dbg_pos = pos; tr_dbg_inc = inc;
@@ -262,8 +265,10 @@ void tp_check_post(void)                                       /* check build: R
     int32_t mx = 0;
     for (int n = 0; n < 64; n++) {
         int32_t a = TP_L[n] - tp_sh[0][n], b = TP_R[n] - tp_sh[1][n];
-        if (a < 0) a = -a; if (b < 0) b = -b;
-        if (a > mx) mx = a; if (b > mx) mx = b;
+        if (a < 0) a = -a;
+        if (b < 0) b = -b;
+        if (a > mx) mx = a;
+        if (b > mx) mx = b;
     }
     tp_ck_blocks++;
     if (mx) tp_ck_diff++;
