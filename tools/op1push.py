@@ -250,6 +250,7 @@ def push(port, tree, paths, select=True, dry=False, timeout=2.0, log=print, dele
         st, _ = ask(DELETE, path.encode() + b'\0')
         if st: sys.exit(f'{path}: DELETE refused ({ST.get(st, st)})')
         log(f'{path}: delete staged')
+    t_sent = time.time() - t0; t1 = time.time()
     log('confirm on the OP-1: T1 restart, T2 cancel')
     asked = False
     while True:
@@ -259,8 +260,8 @@ def push(port, tree, paths, select=True, dry=False, timeout=2.0, log=print, dele
         if st != 9: sys.exit(f'COMMIT refused ({ST.get(st, st)})')
         asked = True
         time.sleep(0.3)
-    log(f'sent {len(files)} files ({total} bytes), {len(deletes)} deletes in {time.time() - t0:.0f} s; '
-        'the OP-1 restarts and applies the update.')
+    log(f'sent {len(files)} files ({total} bytes), {len(deletes)} deletes in {t_sent:.0f} s (T1 after '
+        f'{time.time() - t1:.0f} s); the OP-1 restarts and applies the update.')
 
 
 def selftest():
