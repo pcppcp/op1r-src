@@ -83,6 +83,7 @@ void fr_snap(void)                                          /* audio ISR, after 
     *(volatile uint8_t *)0x01DD591E = 0;                    /* the stock body of 0x019C9D04 */
 #endif
     sc_blk++;                                               /* once per block, after the tape mix (track outs) */
+    { extern void tp_decide(void); tp_decide(); }           /* tape mix takeover for the next block (usbtrack.c) */
 #ifndef OP1_HOST
     { extern void tm_block(void); tm_block(); }             /* the free tape machine (tape/tm.c, docs/82) */
 #endif

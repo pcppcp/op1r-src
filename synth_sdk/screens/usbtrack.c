@@ -78,10 +78,43 @@ static void tr_rs_pair(const tr_rs_job *j)
  * 1 = master + tracks. Always 6 channels, so it switches at once without re-enumeration. */
 volatile uint8_t usb_tracks_live;
 
+/* tape mix takeover (docs/83, step 2 + 3): R246's mix loops only log (hook.S skips their MAC loops), the resampler
+ * call runs tp_resample: the four tracks resampled here (tr_rs.S) and mixed with R246's per-track gains (tm_g, tape/
+ * tm.c) into tape L / R. Off in OP1R_TAPEMIX=stock builds (R246's mix and resampler, track outs as before). */
+volatile uint8_t tp_on;                                     /* set per block by tp_decide (fxroute.c fr_snap) */
+/* the takeover runs only while the tracks are wanted (USB track outs, FX2 aux, sidechain): there it saves R246's mix
+ * plus the second resampling; without them R246's path is the cheaper one and runs untouched. Decided once per block,
+ * after the tape mix, for the next one (the mix hooks and the resampler of one block see the same choice). */
+void tp_decide(void)
+{
+#if defined(TAPEMIX_STOCK) || defined(TAPEMIX_CHECK)
+    tp_on = 0;
+#else
+    extern int fr_tracks_needed(void);
+    tp_on = (uint8_t)(usb_tracks_live || fr_tracks_needed());
+#endif
+}
+/* OP1R_TAPEMIX=check: R246's mix and resampler play; tp_check_pre (before its resampler) computes ours into a shadow,
+ * tp_check_post (its return, hook.S) compares the raw resampler output with it: blocks, blocks with any difference,
+ * the largest difference (sysmon / peek) */
+#ifdef TAPEMIX_CHECK
+volatile uint8_t tp_check = 1;
+#else
+volatile uint8_t tp_check = 0;
+#endif
+volatile uint32_t tp_ck_blocks, tp_ck_diff, tp_ret_to, tp_ck_run, tp_ck_rundiff; volatile int32_t tp_ck_runmax; volatile int32_t tp_ck_max;
+static int16_t tp_sh[2][64];
+volatile int16_t tp_dbg[264]; volatile int32_t tp_dbg_rec[68]; volatile uint8_t tp_dbg_have;
+static int32_t tr_dbg_rec[65], tr_dbg_pos, tr_dbg_inc;   /* check builds only */
+
 void tr_resample(int32_t pos, int32_t inc, const int16_t *gain_inc)
 {
     extern int fr_tracks_needed(void);                       /* FX2 aux in use (screens/fxroute.c) */
-    if (!usb_tracks_live && !fr_tracks_needed()) { tr_rec[0] = 0; return; }   /* no track work */
+    if (!tp_on && !tp_check && !usb_tracks_live && !fr_tracks_needed()) { tr_rec[0] = 0; return; }   /* no track work */
+#ifdef TAPEMIX_CHECK
+    for (int k = 0; k < 65; k++) tr_dbg_rec[k] = (int32_t)tr_rec[k];   /* check build: this block's log */
+    tr_dbg_pos = pos; tr_dbg_inc = inc;
+#endif
     int n = tr_rec[0] > 16 ? 16 : tr_rec[0];
     uint8_t got = 0;
     for (int r = 0; r < n; r++) {                          /* gather: same offsets as the mixed buffers */
@@ -121,6 +154,65 @@ void tr_resample(int32_t pos, int32_t inc, const int16_t *gain_inc)
         int peak = 0;
         for (int j = 0; j < 64; j++) { const int v = o[j] < 0 ? -o[j] : o[j]; if (v > peak) peak = v; }
         tr_peak[t] = (int16_t)(peak > tr_peak[t] ? peak : tr_peak[t] - (tr_peak[t] >> 6));
+    }
+}
+
+/* the takeover's resampler (hook.S _l1_rs_probe, in place of R246's body): the tracks, then L / R = the sum over the
+ * tracks of the track x its gain, rounded as R246's gather (R.H = g * s), saturating adds in track order. Returns the
+ * position after the block, as R246's (pos + 64 inc). */
+extern volatile int16_t tm_g[8];
+#ifdef OP1_HOST
+int16_t tp_host_out[2][64];
+#define TP_L tp_host_out[0]
+#define TP_R tp_host_out[1]
+#else
+#define TP_L ((volatile int16_t *)0xFF800D34)
+#define TP_R ((volatile int16_t *)0xFF800DB4)
+#endif
+static void tp_mix(volatile int16_t *L, volatile int16_t *R);
+int32_t tp_resample(int32_t pos, int32_t inc, const int16_t *gain_inc)
+{
+    tr_resample(pos, inc, gain_inc);
+    tp_mix(TP_L, TP_R);
+    return pos + 64 * inc;
+}
+void tp_check_pre(int32_t pos, int32_t inc, const int16_t *gain_inc)   /* check build: ours into the shadow */
+{
+    tr_resample(pos, inc, gain_inc);
+    tp_mix(tp_sh[0], tp_sh[1]);
+}
+void tp_check_post(void)                                       /* check build: R246's raw output vs the shadow */
+{
+    int32_t mx = 0;
+    for (int n = 0; n < 64; n++) {
+        int32_t a = TP_L[n] - tp_sh[0][n], b = TP_R[n] - tp_sh[1][n];
+        if (a < 0) a = -a; if (b < 0) b = -b;
+        if (a > mx) mx = a; if (b > mx) mx = b;
+    }
+    tp_ck_blocks++;
+    if (mx) tp_ck_diff++;
+    if (tr_dbg_inc) { tp_ck_run++; if (mx) tp_ck_rundiff++; if (mx > tp_ck_runmax) tp_ck_runmax = mx; }   /* tape moving */
+    if (mx > 64 && tr_dbg_inc && !tp_dbg_have) {                           /* the first bad block, for a look (peek tp_dbg) */
+        tp_dbg_have = 1;
+        for (int k = 0; k < 64; k++) { tp_dbg[k] = TP_L[k]; tp_dbg[64 + k] = tp_sh[0][k]; tp_dbg[128 + k] = tr_out[0][k]; tp_dbg[192 + k] = tr_out[1][k]; }
+        for (int k = 0; k < 8; k++) tp_dbg[256 + k] = tm_g[k];
+        for (int k = 0; k < 65; k++) tp_dbg_rec[k] = (int32_t)tr_dbg_rec[k];
+        tp_dbg_rec[65] = tr_dbg_pos; tp_dbg_rec[66] = tr_dbg_inc; tp_dbg_rec[67] = tp_ck_blocks;
+    }
+    if (mx > tp_ck_max) tp_ck_max = mx;
+}
+static void tp_mix(volatile int16_t *L, volatile int16_t *R)
+{
+    int16_t gl[TR_N], gr[TR_N];
+    for (int t = 0; t < TR_N; t++) { gl[t] = tm_g[t]; gr[t] = tm_g[4 + t]; }
+    for (int n = 0; n < 64; n++) {
+        int32_t l = 0, r = 0;
+        for (int t = 0; t < TR_N; t++) {
+            const int16_t x = tr_out[t][n];
+            l = sat16(l + rmul(gl[t], x));
+            r = sat16(r + rmul(gr[t], x));
+        }
+        L[n] = (int16_t)l; R[n] = (int16_t)r;
     }
 }
 

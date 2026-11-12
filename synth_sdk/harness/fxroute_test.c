@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include "../screens/fxroute.c"
 int16_t tr_out[4][64];
+void tp_decide(void) {}                                        /* screens/usbtrack.c (not linked here) */
 const int16_t *ml_params(const int16_t *p) { return p; }   /* master LFO: off (harness/quadlfo_test.c) */
 
 static struct { int32_t x0, y0, x1, y1, w; uint8_t c[4]; } L[256]; static int nl;

@@ -11,6 +11,8 @@ extern volatile intptr_t tr_rec[]; extern int16_t tr_out[4][64];
 void tr_resample(int32_t pos, int32_t inc, const int16_t *gain_inc);
 int fr_tracks_needed(void) { return 0; }
 volatile uint8_t sc_blk, tr_at;
+volatile int16_t tm_g[8];
+int32_t tp_resample(int32_t pos, int32_t inc, const int16_t *gain_inc); extern int16_t tp_host_out[2][64];
 static int16_t coef[16 * 64];
 const int16_t *tr_host_coef = coef; int16_t tr_host_gain = 32767;
 static int16_t track[4][2000], mixL[600];                  /* mixL lives at "address" 0x1000 for the hooks */
@@ -65,6 +67,23 @@ int main(void)
         assert(snr > 50);
         int nz = 0; for (int j = 0; j < 64; j++) nz |= tr_out[3][j];
         assert(nz);                                           /* pre-fader: track 4 (gain 0) still has signal */
+    }
+    /* takeover mix: L / R = the tracks x their gains (tm_g), against the mix computed here from tr_out */
+    {
+        const int16_t gl[4] = { 30000, 12000, -20000, 32767 }, gr[4] = { 1000, 32767, 20000, 0 };
+        for (int t = 0; t < 4; t++) { tm_g[t] = gl[t]; tm_g[4 + t] = gr[t]; }
+        tr_rec[0] = 0;
+        for (int t = 0; t < 4; t++) { int r = tr_rec[0]++; tr_rec[1 + 4 * r] = (intptr_t)&track[t][100]; tr_rec[2 + 4 * r] = 0x1000;
+                                      tr_rec[3 + 4 * r] = t; tr_rec[4 + 4 * r] = 83; }
+        assert(tp_resample(576, 64, 0) == 576 + 64 * 64);
+        for (int j = 0; j < 64; j++) {
+            int32_t l = 0, r = 0;
+            for (int t = 0; t < 4; t++) {
+                l += lrint(gl[t] * (double)tr_out[t][j] / 32768); r += lrint(gr[t] * (double)tr_out[t][j] / 32768);
+            }
+            assert(abs(l - tp_host_out[0][j]) <= 2 && abs(r - tp_host_out[1][j]) <= 2);
+        }
+        printf("takeover mix: L / R = the gained tracks (within the rounding)\n");
     }
     tr_rec[0] = 0; tr_resample(576, 64, 0);
     for (int t = 0; t < 4; t++) for (int j = 0; j < 64; j++) assert(!tr_out[t][j]);   /* no records: silence */

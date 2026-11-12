@@ -361,6 +361,16 @@ _rec_check_b:                       /* on_key_shift @0x019ACC7C: type in R1, no 
 	.align 2
 _l1_rs_probe:
 	[--SP] = ASTAT;                           /* CC is live across the resampler call (tape code tests it after) */
+	P0.L = _tp_on; P0.H = _tp_on;             /* takeover (usbtrack.c tp_on): our resampler + mix, then R246's
+	                                           * epilogue (the stock body is skipped). P0 / R3: the stock body sets
+	                                           * them before any use */
+	R3 = B[P0] (Z);
+	CC = R3 == 0;
+	if !CC jump _tp_probe;
+	P0.L = _tp_check; P0.H = _tp_check;       /* check build: ours into the shadow, R246's return through tp_ret */
+	R3 = B[P0] (Z);
+	CC = R3 == 0;
+	if !CC jump _tp_probe_check;
 	[--SP] = RETS;
 	[--SP] = R0;
 	[--SP] = R1;
@@ -375,6 +385,56 @@ _l1_rs_probe:
 	ASTAT = [SP++];
 	P1.L = 0x29dc; P1.H = 0xff80;
 	P2.L = 0x2154; P2.H = 0xff80;
+	rts;
+
+_tp_probe_check:                              /* as the stock path, tp_check_pre instead of tr_resample, and the
+	                                           * resampler's saved RETS ([FP + 4], LINK 0) swapped for tp_ret */
+	[--SP] = RETS;
+	[--SP] = R0;
+	[--SP] = R1;
+	[--SP] = R2;
+	SP += -12;
+	call _tp_check_pre;
+	SP += 12;
+	P0.L = _tp_ret_to; P0.H = _tp_ret_to;
+	R3 = [FP + 4];
+	[P0] = R3;
+	R3.L = _tp_ret; R3.H = _tp_ret;
+	[FP + 4] = R3;
+	R2 = [SP++];
+	R1 = [SP++];
+	R0 = [SP++];
+	RETS = [SP++];
+	ASTAT = [SP++];
+	P1.L = 0x29dc; P1.H = 0xff80;
+	P2.L = 0x2154; P2.H = 0xff80;
+	rts;
+_tp_ret:                                      /* R246's resampler returns here (JUMP (P0) with P0 = this): compare,
+	                                           * then on to tape_play_mix; every register kept (R0 result, CC live) */
+	[--SP] = ASTAT; [--SP] = RETS;
+	[--SP] = (R7:0, P5:0);
+	[--SP] = I0; [--SP] = I1; [--SP] = I2; [--SP] = I3;
+	[--SP] = LC0; [--SP] = LT0; [--SP] = LB0; [--SP] = LC1; [--SP] = LT1; [--SP] = LB1;
+	[--SP] = A0.W; [--SP] = A0.X; [--SP] = A1.W; [--SP] = A1.X;
+	SP += -12;
+	call _tp_check_post;
+	SP += 12;
+	A1.X = [SP++]; A1.W = [SP++]; A0.X = [SP++]; A0.W = [SP++];
+	LB1 = [SP++]; LT1 = [SP++]; LC1 = [SP++]; LB0 = [SP++]; LT0 = [SP++]; LC0 = [SP++];
+	I3 = [SP++]; I2 = [SP++]; I1 = [SP++]; I0 = [SP++];
+	(R7:0, P5:0) = [SP++];
+	RETS = [SP++]; ASTAT = [SP++];
+	P0.L = _tp_ret_to; P0.H = _tp_ret_to;     /* as R246's own return: P0 = the address, JUMP (P0) */
+	P0 = [P0];
+	JUMP (P0);
+_tp_probe:                                    /* called from R246's resampler after LINK 0; [--SP] = (R7:6, P5:3);
+	                                           * R0 pos, R1 inc, R2 gain increment pointer; ASTAT (pushed above) kept */
+	SP += -12;
+	call _tp_resample;                        /* R0 = pos + 64 inc, the resampler's result */
+	SP += 12;
+	ASTAT = [SP++];
+	(R7:6, P5:3) = [SP++];                    /* R246's epilogue: back to tape_play_mix (UNLINK restores its RETS) */
+	UNLINK;
 	rts;
 
 /* Tape mix loops (L1): the per-track peak-meter MAX instruction is replaced by CALL to an L1 trampoline, which calls
@@ -428,7 +488,15 @@ _mix_rec_common:                              /* stack: track, R6, R7, P5, P0 (2
 	R5 = [SP + 0x60];                         /* tape [SP + 0x38] = N: SP + 40 + 0x38 */
 	[P5 + 16] = R5;
 _mix_rec_full:
-	R4 = [SP++]; R5 = [SP++]; ASTAT = [SP++];
+	P5.L = _tp_on; P5.H = _tp_on;             /* takeover: CC = 1 in the saved ASTAT -> the loop's IF CC JUMP skips
+	                                           * R246's MAC loop (the samples come from the log, usbtrack.c) */
+	R5 = B[P5] (Z);
+	CC = R5 == 0;
+	if CC jump 1f;
+	R5 = [SP + 8];
+	BITSET (R5, 5);                           /* ASTAT bit 5 = CC */
+	[SP + 8] = R5;
+1:	R4 = [SP++]; R5 = [SP++]; ASTAT = [SP++];
 	SP += 4;
 	R6 = [SP++]; R7 = [SP++]; P5 = [SP++]; P0 = [SP++];
 	rts;
