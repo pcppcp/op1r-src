@@ -152,6 +152,14 @@ static int32_t fade_prev;                                        /* output gain 
 #ifndef OP1_HOST
 void tm_hloop(const int16_t *d, int32_t r, int32_t st, uint32_t gains, int32_t shift, int32_t *accL, int32_t *accR);
 #endif
+#ifdef OP1_HOST
+#define TM_CYCLES() 0u
+#else
+static inline uint32_t TM_CYCLES(void) { uint32_t c; __asm__ volatile ("%0 = CYCLES;" : "=d"(c)); return c; }
+#endif
+volatile uint32_t tm_cyc_t[4], tm_blocks;                       /* per-track cycles, blocks (sysmon page 5) */
+volatile uint32_t tm_slow;                                       /* blocks through the slow path (sysmon "s") */
+volatile uint32_t tm_cyc_tracks;                                 /* cycles in the 4 tm_track_block calls */
 volatile uint32_t tm_cyc_loop;                                   /* cycles in tm_hloop (sysmon "fr total/loop") */
 volatile uint32_t tm_chk_n, tm_chk_bad;                          /* OP1R_TMCHECK: blocks compared, mismatches */
 static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32_t *accL, int32_t *accR)
@@ -166,13 +174,20 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
     const int16_t gl = tm_tr[t].mute ? 0 : GAIN_L(t), gr = tm_tr[t].mute ? 0 : GAIN_R(t);   /* muted: silent, the head runs */
     const int16_t *cache = 0, *cache2 = 0; int32_t cache_c = -1, cache2_c = -1;
     int looped = hi - lo < ((int64_t)(TM_CHUNKS * CHUNK) << 32) && hi - lo > ((int64_t)(2 * TM_XF) << 32);
-    if (looped) {                                                /* as stock: only a seam that jumps is smoothed; test = each
+    /* housekeeping (seam test, prefetch) every 16 blocks per track (staggered), or at once when the loop changed:
+     * it was most of the per-track cost (~3600 cycles a call, device) */
+    static int32_t hk_lo[4], hk_hi[4]; static int8_t seam[4];
+    const int32_t lo32 = (int32_t)(lo >> 32), hi32 = (int32_t)(hi >> 32);
+    const int hk = ((blk + (uint32_t)t * 4) & 15) == 0 || lo32 != hk_lo[t] || hi32 != hk_hi[t];
+    hk_lo[t] = lo32; hk_hi[t] = hi32;
+    if (looped && !hk) looped = seam[t];
+    else if (looped) {                                           /* as stock: only a seam that jumps is smoothed; test = each
                                                                   * side's linear extrapolation against the other's sample */
         const int32_t a = (int32_t)(lo >> 32), b = (int32_t)(hi >> 32) - 1;
         const int32_t sa = tm_sample(t, a, &cache2, &cache2_c), sa1 = tm_sample(t, a + 1, &cache2, &cache2_c),
                       sb = tm_sample(t, b, &cache2, &cache2_c), sb1 = tm_sample(t, b - 1, &cache2, &cache2_c);
         const int32_t j1 = sa - (2 * sb - sb1), j2 = sb - (2 * sa - sa1);
-        looped = (j1 < 0 ? -j1 : j1) + (j2 < 0 ? -j2 : j2) > TM_SEAM;
+        looped = seam[t] = (int8_t)((j1 < 0 ? -j1 : j1) + (j2 < 0 ? -j2 : j2) > TM_SEAM);
     }
     {                                                            /* fast path (almost every block): the 4 Hermite points of all
                                                                   * 64 samples in one loaded chunk, no wrap, no crossfade zone */
@@ -215,6 +230,7 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
             }
         }
     }
+    tm_slow++;
     for (int i = 0; i < 64; i++) {
         if (h >= hi) h -= hi - lo; else if (h < lo) h += hi - lo;
         int32_t s = tm_herm(t, h, &cache, &cache_c);
@@ -236,6 +252,7 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
 done:
     if (h < 0) h = 0;
     head[t] = h;
+    if (!hk) return;
     const int32_t c = (int32_t)(h >> 32) >> 15, d = step < 0 ? -1 : 1;   /* prefetch ahead, and the loop start */
     /* ahead along the loop (wrapping), not past loop out: the chunks after loop in must be there at the wrap (device
      * loads take 10..15 ms; a miss plays 0 = the loop-end pop). No 64-bit modulo here (a software division per call) */
@@ -267,6 +284,7 @@ void tm_block(void)                                              /* audio ISR, a
 }
 static void tm_block_body(void)
 {
+    tm_blocks++;
     blk++;
     {                                                            /* the meter: the bus R246 records (last block's) */
         int32_t pk = tm_in_peak * 31 >> 5;
@@ -303,8 +321,10 @@ static void tm_block_body(void)
     int32_t accL[64], accR[64];
     for (int i = 0; i < 64; i++) accL[i] = accR[i] = 0;
     for (int t = 0; t < 4; t++) {
+        uint32_t tb0 = TM_CYCLES();
         if (scrub_v && t == sc) tm_track_block(t, (int64_t)scrub_v << 16, 0, 16, accL, accR);   /* -6 dB, no loops */
         else if (playing) tm_track_block(t, ((int64_t)v * tm_tr[t].speed) >> 11, 1, 15, accL, accR);   /* (1x = 2^27) x Q16 -> Q32 */
+        { uint32_t tb1 = TM_CYCLES(); tm_cyc_tracks += tb1 - tb0; tm_cyc_t[t] += tb1 - tb0; }
     }
     int32_t fade = 0x7FFF;                                       /* starting / stopping: below 1/4x the volume follows the speed,
                                                                   * so neither the first sample nor the held near-DC of an almost

@@ -87,7 +87,7 @@ enum { PG_AUDIO, PG_VOICES, PG_PLUGINS, PG_SYSTEM, PG_STAGES, PG_RAW, PG_BOOT, P
  * against the emulator profile: 0 whole block, 4 decimator + DC blocker, 7 tape, 9 master EQ, 11 output stage */
 #define ST_N 12
 static uint32_t st_last[ST_N];
-static int32_t fr_pct, frl_pct;                                     /* free tape engine, % (tape/tm.c tm_cyc) */
+static int32_t fr_pct, frt_pct, frl_pct; static uint32_t fr_slow, fr_c0, fr_c3;                                     /* free tape engine, % (tape/tm.c tm_cyc) */
 static int32_t st_pct[ST_N];                                /* per record, % of the time */
 static int sm_page;
 static int32_t sm_acc;
@@ -132,6 +132,11 @@ static void sample_fast(void)                                /* CPU, AUDIO, MIDI
     for (int i = 0; i < SMC_N; i++) { uint32_t c = sm_cy[i]; cy_pct[i] = pct(c - cy_last[i], wall); cy_last[i] = c; }
     for (int i = 0; i < ST_N; i++) { uint32_t c = STAGE_SUM(i); st_pct[i] = pct(c - st_last[i], wall); st_last[i] = c; }
     { extern volatile uint32_t tm_cyc; static uint32_t l; const uint32_t c = tm_cyc; fr_pct = pct(c - l, wall); l = c; }   /* free tape engine */
+    { extern volatile uint32_t tm_slow; static uint32_t l; fr_slow = tm_slow - l; l = tm_slow; }
+    { extern volatile uint32_t tm_cyc_t[4], tm_blocks; static uint32_t l0, l3, lb;
+      const uint32_t b = tm_blocks - lb, c0 = tm_cyc_t[0] - l0, c3 = tm_cyc_t[3] - l3;
+      fr_c0 = b ? c0 / b : 0; fr_c3 = b ? c3 / b : 0; lb = tm_blocks; l0 = tm_cyc_t[0]; l3 = tm_cyc_t[3]; }
+    { extern volatile uint32_t tm_cyc_tracks; static uint32_t l; const uint32_t c = tm_cyc_tracks; frt_pct = pct(c - l, wall); l = c; }
     { extern volatile uint32_t tm_cyc_loop; static uint32_t l; const uint32_t c = tm_cyc_loop; frl_pct = pct(c - l, wall); l = c; }
     uint32_t busy = aud_busy, mx = aud_max, mp = aud_max_period;
     aud_busy = 0; aud_max = 0;
@@ -354,10 +359,11 @@ static void sm_update(void *scr, int dt)
         if (plug_skipped) q = put_u(put_s(q, " skip "), (uint32_t)plug_skipped);
         if (plug_last_err) q = put_u(put_s(q, " err "), (uint32_t)plug_last_err);
     } else if (sm_page == PG_STAGES) {                       /* "5/6 blk 18 eq 6 out 7 dec 3 tp 0" (stock timers) */
-        q = put_u(put_s(q, "blk "), (uint32_t)st_pct[0]); q = put_u(put_s(q, " eq "), (uint32_t)st_pct[9]);
-        q = put_u(put_s(q, " out "), (uint32_t)st_pct[11]); q = put_u(put_s(q, " dec "), (uint32_t)st_pct[4]);
+        /* shortcut: eq / out / dec left out while the free tape engine is measured (docs/82); put back after */
+        q = put_u(put_s(q, "blk "), (uint32_t)st_pct[0]);
         q = put_u(put_s(q, " tp "), (uint32_t)st_pct[7]);
-        q = put_u(put_s(q, " fr "), (uint32_t)fr_pct); q = put_u(put_s(q, "/"), (uint32_t)frl_pct);   /* free tape engine / its inner loop */
+        q = put_u(put_s(q, " fr "), (uint32_t)fr_pct); q = put_u(put_s(q, "/"), (uint32_t)frt_pct); q = put_u(put_s(q, "/"), (uint32_t)frl_pct);
+        q = put_u(put_s(q, " c"), fr_c0); q = put_u(put_s(q, "/"), fr_c3);   /* cycles per block: track 1 / track 4 */
     } else if (sm_page == PG_BOOT || sm_page == PG_BOOTR) {
         /* boot (docs/79): the firmware's own stage timers (OP_Main 0x019EFEEC: 25 x ms at 0x01AB3030; +0x10 mount +
          * display, +0x18 db / clips / FAT with op1r's plugin loader, +0x28 sounds, +0x50 screens with op1r's screens),
