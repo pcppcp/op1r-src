@@ -370,8 +370,44 @@ int tm_span(int t, int32_t *lo, int32_t *hi)                     /* GUI: the tra
 }
 
 volatile uint8_t tm_reload_after_clip;                           /* lift / drop on our screen: reload once the clipboard is done */
+#ifndef OP1_HOST
+#define CLIPS      ((const volatile int32_t *)0x01AA8D70)        /* 512 x { track, start, stop } (db2::Clips) */
+#define CLIP_USED  ((const volatile uint8_t *)0x01AAA570)
+/* as R246's player: only clips sound. Zero what no clip of track t covers in chunk c (an erase only clears the
+ * clip list; the old audio stays in tape_c.raw and would click here) */
+static void tm_mask_clips(int t, int c, int16_t *d)
+{
+    const int32_t a = c * CHUNK, b = a + CHUNK;
+    int32_t cur = a;
+    while (cur < b) {
+        int32_t ext = cur, next = b;                             /* ext: covered up to; next: the next clip start */
+        for (int i = 0; i < 512; i++) {
+            if (!CLIP_USED[i] || CLIPS[i * 3] != t) continue;
+            const int32_t s0 = CLIPS[i * 3 + 1], s1 = CLIPS[i * 3 + 2];
+            if (s0 <= cur && s1 > ext) ext = s1;
+            else if (s0 > cur && s0 < next) next = s0;
+        }
+        if (ext > cur) { cur = ext; continue; }                  /* inside a clip: skip it */
+        for (int32_t k = cur; k < next; k++) d[k - a] = 0;       /* a gap up to the next clip */
+        cur = next;
+    }
+}
+/* the clip list changed (erase, delete, lift, record): reload what we hold */
+static uint32_t clips_hash(void)
+{
+    uint32_t h = 0;
+    for (int i = 0; i < 512; i++) if (CLIP_USED[i]) h = h * 31 + (uint32_t)(CLIPS[i * 3] + CLIPS[i * 3 + 1] * 7 + CLIPS[i * 3 + 2] * 13);
+    return h;
+}
+#endif
 int tm_service(void)                                             /* main loop (tape_service): one chunk per call */
 {
+#ifndef OP1_HOST
+    {
+        static uint32_t last; const uint32_t h = MODE == 1 ? last : clips_hash();   /* recording: the reload follows it */
+        if (h != last) { last = h; for (int i = 0; i < TM_SLOTS; i++) if (slot[i].t >= 0) { slot[i].state = 1; slot[i].gen++; } }
+    }
+#endif
 #ifndef OP1_HOST
     {                                                            /* the clipboard queue empty for 0.5 s (the worker may still
                                                                   * run the job it popped): reload our chunks */
@@ -400,6 +436,9 @@ int tm_service(void)                                             /* main loop (t
             Y_LSEEK(TAPE_FD, TRACK_BASE[t] + c * 0x10000, 0);
             Y_READ(TAPE_FD, s->data, 0x10000);
         }
+#endif
+#ifndef OP1_HOST
+        if (MODE != 1 && !rec_seen) tm_mask_clips(t, c, s->data);   /* recording: the take is not listed yet */
 #endif
         if (s->gen == gen) s->state = 2;                         /* reassigned meanwhile: stays wanted */
         tm_loads++;
