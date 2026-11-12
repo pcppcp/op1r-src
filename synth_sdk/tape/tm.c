@@ -1,7 +1,7 @@
 /* Free tape machine, v1 (docs/82): the four tracks play with their own speed, loop length, offset and direction.
  * R246's tape player keeps running (transport, position, loop markers, UI); while free is selected and the tape plays,
  * tm_block (audio ISR, from fr_snap right after tape_play_mix) overwrites its output L / R 0xFF800D34 / DB4 with ours.
- * Data: our own single-track chunk cache (TM_SLOTS x 64 KB from heap 0, only while free is on), filled by tm_service
+ * Data: our own single-track chunk cache ((TM_SLOTS + 1) x 64 KB from heap 0: a spare to read into; only while free is on), filled by tm_service
  * from op1r's tape_service (main loop): a chunk R246's clip cache holds is copied from there (fresh recordings),
  * else read from tape_c.raw (R246's layout: track t, chunk c at TRACK_BASE[t] + c * 0x10000).
  * Heads: Q32.32 samples. Each track has its own loop (in / out in samples, on / off: s1 / s2 / s3 on the screen,
@@ -66,6 +66,20 @@ volatile int16_t tm_g[8] = { 32767, 32767, 32767, 32767, 32767, 32767, 32767, 32
 typedef struct { int16_t *data; volatile int16_t t, chunk; volatile uint8_t state; volatile uint8_t gen; volatile uint8_t refresh; uint32_t used; } tm_slot;
 static tm_slot slot[TM_SLOTS];                                   /* state 0 free, 1 wanted, 2 loaded; refresh: loaded, reread
                                                                   * wanted (keeps playing the old data meanwhile: no gap) */
+static int16_t *spare;                                           /* tm_service reads + masks here, then swaps it with the slot's
+                                                                  * data: the ISR never plays a buffer being read (raw file audio) */
+static volatile int8_t tm_rd = -1;                               /* the slot being read into the spare (recording mirrors into it) */
+#ifdef OP1_HOST
+#ifndef TM_IRQ_MODEL                                             /* (tmswap_test.c models the audio interrupt) */
+#define TM_IRQ(k)                                                /* host test: an audio interrupt may arrive here */
+static uint32_t tm_irq_off(void) { return 0; }
+static void tm_irq_on(uint32_t m) { (void)m; }
+#endif
+#else
+#define TM_IRQ(k)
+static uint32_t tm_irq_off(void) { uint32_t m; __asm__ volatile ("cli %0;" : "=d"(m) : : "memory"); return m; }
+static void tm_irq_on(uint32_t m) { __asm__ volatile ("sti %0;" : : "d"(m) : "memory"); }
+#endif
 static void tm_refresh_all(void)                                 /* reread every held chunk (recording, clip edits) */
 {
     for (int i = 0; i < TM_SLOTS; i++) if (slot[i].t >= 0) { slot[i].refresh = 1; slot[i].gen++; }
@@ -86,9 +100,13 @@ volatile uint32_t tm_miss, tm_loads;
 static int tm_alloc(void)
 {
     if (slot[0].data) return 1;
-    int16_t *m = (int16_t *)MALLOC(TM_SLOTS * CHUNK * 2);
+    int16_t *m = (int16_t *)MALLOC((TM_SLOTS + 1) * CHUNK * 2);
     if (!m) return 0;
-    for (int i = 0; i < TM_SLOTS; i++) { slot[i].data = m + i * CHUNK; slot[i].t = -1; slot[i].state = 0; }
+    spare = m + TM_SLOTS * CHUNK;
+    for (int i = 0; i < TM_SLOTS; i++) { TM_IRQ(2); slot[i].t = -1; slot[i].state = 0; if (i) slot[i].data = m + i * CHUNK; }
+    __asm__ volatile ("" : : : "memory");                        /* slot[0].data is the ISR's "ready": set last (an audio block
+                                                                  * in the loop would claim a slot still t = 0 from bss) */
+    slot[0].data = m;
     return 1;
 }
 
@@ -171,7 +189,7 @@ void tm_hloop_near(const int16_t *d, int32_t r, int32_t st, uint32_t gains, int3
 #endif
 volatile uint32_t tm_chk_n, tm_chk_bad;                          /* OP1R_TMCHECK: blocks compared, mismatches */
 static int16_t tm_v[4][64];                                      /* this block's samples per track, pre-fader */
-typedef struct { int32_t lo, hi, lin, lout; int64_t rlo, rhi; const int16_t *d; int16_t c; int8_t s; uint8_t lon, ok; } tm_win;
+typedef struct { int32_t lo, hi, lin, lout; int64_t rlo, rhi; int16_t c; int8_t s; uint8_t lon, ok; } tm_win;
 static uint32_t tm_fast_n, tm_fast_hit;
 #ifdef OP1_HOST
 static int tm_nofast;
@@ -220,7 +238,7 @@ TM_FAST_SEC int tm_fast(int t, int64_t step, int32_t *accL, int32_t *accR)
     sl->used = blk;
     if (MODE == 1) { rec_h0[t] = h; rec_step[t] = step; rec_lo[t] = w->rlo; rec_hi[t] = w->rhi; }
     const int16_t gl = tr->mute ? 0 : GAIN_L(t), gr = tr->mute ? 0 : GAIN_R(t);
-    TM_HLOOP_NEAR(w->d, (int32_t)((h - ((int64_t)(w->c * CHUNK) << 32)) >> 16), (int32_t)(step >> 16),
+    TM_HLOOP_NEAR(sl->data, (int32_t)((h - ((int64_t)(w->c * CHUNK) << 32)) >> 16), (int32_t)(step >> 16),
                   (uint16_t)gl | (uint32_t)(uint16_t)gr << 16, 15, accL, accR, tm_v[t]);
     head[t] = he;
     tm_fast_hit++;
@@ -324,7 +342,7 @@ done:
             const int32_t xf32 = looped ? TM_XF : 0, lo32w = (int32_t)(lo >> 32) + xf32, hi32w = (int32_t)(hi >> 32) - xf32;
             w->lo = c * CHUNK + 1 > lo32w ? c * CHUNK + 1 : lo32w;
             w->hi = (c + 1) * CHUNK - 3 < hi32w ? (c + 1) * CHUNK - 3 : hi32w;
-            w->s = (int8_t)sl; w->c = (int16_t)c; w->d = slot[sl].data;
+            w->s = (int8_t)sl; w->c = (int16_t)c;            /* (no data pointer: tm_service swaps it) */
             w->lin = tm_tr[t].lin; w->lout = tm_tr[t].lout; w->lon = tm_tr[t].lon;
             w->rlo = lo; w->rhi = hi;
             w->ok = w->hi > w->lo;
@@ -476,15 +494,20 @@ static uint8_t rec_on, rec_end;                                  /* rec_end: the
 /* our read copy gets the recorded samples one block late: the record track's own playback (4-point, reads n - 1 .. n + 2)
  * would otherwise hear the live input a few samples late (a comb: "resonance" at speeds != 1x); the next loop pass
  * hears them, R246's cache has them at once */
-/* shortcut: a slot reassigned between two blocks gets one block of stray samples in our copy (reloaded later);
- * store slot + gen if that ever shows */
+/* slot + gen, not a pointer: tm_service may swap the slot's buffer, or the ISR reassign the slot, between two blocks */
 #define PEND_MAX 520
-static int16_t *pend_d[PEND_MAX]; static int16_t pend_v[PEND_MAX]; static int pend_n;
+static uint16_t pend_o[PEND_MAX]; static int8_t pend_s[PEND_MAX]; static uint8_t pend_g[PEND_MAX]; static int16_t pend_v[PEND_MAX];
+static int pend_n;
 static int16_t rec_fade;
 static void tm_record(const volatile int16_t *bus)
 {
     const int t = tm_sel & 3;                                    /* ours: R246 rewrites 0xFF802964 in several places */
-    for (int k = 0; k < pend_n; k++) *pend_d[k] = pend_v[k];    /* last block's samples into our copy (after this block's playback) */
+    for (int k = 0; k < pend_n; k++) {                           /* last block's samples into our copy (after this block's playback) */
+        tm_slot *p = &slot[pend_s[k]];
+        if (p->gen != pend_g[k] || p->state != 2) continue;      /* reassigned (or a reread queued) meanwhile */
+        p->data[pend_o[k]] = pend_v[k];
+        if (pend_s[k] == tm_rd) spare[pend_o[k]] = pend_v[k];   /* being reread: the new copy too (its read may be past it) */
+    }
     pend_n = 0;
     if (MODE != 1) { rec_on = 0; return; }
     SEL_TRACK = t;                                               /* R246 closes the take onto this track */
@@ -507,7 +530,7 @@ static void tm_record(const volatile int16_t *bus)
     static int32_t box_sum; static int box_n;
     static int16_t recip[33];                                    /* 2^15 / k */
     if (!recip[1]) for (int k = 1; k <= 32; k++) recip[k] = (int16_t)(k == 1 ? 32767 : 32768 / k);
-    const uint8_t *e = 0; int32_t ec = -1; int16_t *slot_d = 0;
+    const uint8_t *e = 0; int32_t ec = -1; int slot_s = -1;
     for (int i = 0; i < 64; i++) {
         const int64_t h1 = h + step;
         int32_t n = step > 0 ? (int32_t)((h + 0xFFFFFFFFLL) >> 32) : (int32_t)(h >> 32), nend = (int32_t)(h1 >> 32);
@@ -536,13 +559,16 @@ static void tm_record(const volatile int16_t *bus)
                 ec = c; e = CLIP_IDX && c >= 0 && c < TM_CHUNKS ? CLIP_IDX[c] : 0;   /* (a loop out from before the clamp) */
                 if (!(e && e[0] && *(const int16_t *)(e + 6) == c)) { e = 0; if (c >= 0 && c < TM_CHUNKS) QUEUE_CLIP(c); }
                 const int s = c >= 0 && c < TM_CHUNKS ? map[t][c] - 1 : -1;
-                slot_d = s >= 0 && slot[s].state == 2 ? slot[s].data : 0;
+                slot_s = s >= 0 && slot[s].state == 2 ? s : -1;
             }
             if (e) {
                 int16_t *d = (int16_t *)(*(uint8_t *const *)(e + 0x10) + t * 0x10000) + (pn & (CHUNK - 1));
                 int32_t o = *d + v; o = o > 32767 ? 32767 : o < -32768 ? -32768 : o;
                 *d = (int16_t)o;
-                if (slot_d && pend_n < PEND_MAX) { pend_d[pend_n] = &slot_d[pn & (CHUNK - 1)]; pend_v[pend_n++] = (int16_t)o; }
+                if (slot_s >= 0 && pend_n < PEND_MAX) {
+                    pend_o[pend_n] = (uint16_t)(pn & (CHUNK - 1)); pend_s[pend_n] = (int8_t)slot_s; pend_g[pend_n] = slot[slot_s].gen;
+                    pend_v[pend_n++] = (int16_t)o;
+                }
                 ((volatile uint8_t *)e)[2] = 1; *(volatile uint16_t *)(e + 4) |= (uint16_t)(1u << t);
                 if (first < 0) first = pn;
                 last = pn;
@@ -654,22 +680,28 @@ int tm_service(void)                                             /* main loop (t
         tm_slot *s = &slot[k % TM_SLOTS];
         if (k < TM_SLOTS ? s->state != 1 : !(s->state == 2 && s->refresh)) continue;
         const uint8_t gen = s->gen; const int t = s->t, c = s->chunk;
+        int16_t *const d = spare;
+        tm_rd = (int8_t)(k % TM_SLOTS);
 #ifdef OP1_HOST
-        host_tm_read(t, c, s->data);
+        host_tm_read(t, c, d);
 #else
         const uint8_t *e = CLIP_IDX ? CLIP_IDX[c] : 0;           /* R246's clip cache holds it (fresh recordings) */
         if (e && e[0] && *(const int16_t *)(e + 6) == c) {
             const int16_t *src = (const int16_t *)(*(uint8_t *const *)(e + 0x10) + t * 0x10000);
-            for (int k = 0; k < CHUNK; k++) s->data[k] = src[k];
+            for (int k = 0; k < CHUNK; k++) d[k] = src[k];
         } else {
             Y_LSEEK(TAPE_FD, TRACK_BASE[t] + c * 0x10000, 0);
-            Y_READ(TAPE_FD, s->data, 0x10000);
+            Y_READ(TAPE_FD, d, 0x10000);
         }
 #endif
 #ifndef OP1_HOST
-        tm_mask_clips(t, c, s->data);
+        tm_mask_clips(t, c, d);
 #endif
-        if (s->gen == gen) { s->state = 2; s->refresh = 0; }                         /* reassigned meanwhile: stays wanted */
+        const uint32_t m = tm_irq_off();                         /* the ISR reassigns slots (tm_chunk): compare and publish as one */
+        if (s->gen == gen) { TM_IRQ(1); spare = s->data; s->data = d; s->state = 2; s->refresh = 0; }   /* reassigned meanwhile:
+                                                                  * stays wanted, d stays the spare */
+        tm_rd = -1;
+        tm_irq_on(m);
         tm_loads++;
         return 1;
     }
