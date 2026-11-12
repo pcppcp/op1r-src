@@ -98,15 +98,16 @@ void dp_fw_note_off(void *self, const void *pad)
 #define PARSE_PATCH ((int (*)(void *, int))0x01A037A8)
 enum { JV_INT = 1, JV_UINT = 2, JV_ARRAY = 6, JV_OBJECT = 7 };
 static uint8_t jv_type(const void *v) { return ((const uint8_t *)v)[8]; }
-static int dp_loading_slot = -1;
+static volatile uint8_t dp_loading[DP_SLOTS];                 /* load_drum_patch parsing that slot (any thread) */
 
 void *dp_keep_op1r(void *patch, void *fresh)
 {
     void *old = JV_KEY(patch, "op1r");                 /* (adds a null member if absent: patch is overwritten next) */
     int keep = jv_type(old) == JV_OBJECT;
     if (keep) JV_ASSIGN(JV_KEY(fresh, "op1r"), old);
-    if (dp_loading_slot >= 0)
-        for (int i = 0; i < op1_drum_n; i++) op1_drums[i]->slot_loaded(dp_loading_slot, keep ? JV_KEY(fresh, "op1r") : 0);
+    uint32_t doff = (uint32_t)patch - (DRUM_PATCHES + 4);           /* the slot from the patch itself: another thread's */
+    if (doff < DP_SLOTS * 0x38 && doff % 0x38 == 0 && dp_loading[doff / 0x38])   /* parse may run meanwhile */
+        for (int i = 0; i < op1_drum_n; i++) op1_drums[i]->slot_loaded((int)(doff / 0x38), keep ? JV_KEY(fresh, "op1r") : 0);
     uint32_t off = (uint32_t)patch - (SYNTH_PATCHES + 4);              /* a synth slot's patch (sampler+, docs/46) */
     if (off < 8 * 0x38 && off % 0x38 == 0) sp_slot_loaded((int)(off / 0x38), keep ? JV_KEY(fresh, "op1r") : 0);
     return JV_ASSIGN(patch, fresh);
@@ -137,9 +138,10 @@ int dp_load_parse(void *json, int mode)
     dp_repair_playmode(json);                          /* before the stock range check (error 12) */
     extern void patch_repair(void *json); patch_repair(json);   /* unknown FX / LFO (error 22 / 25) */
     uint32_t off = (uint32_t)json - 4 - DRUM_PATCHES;
-    dp_loading_slot = off % 0x38 == 0 && off / 0x38 < DP_SLOTS ? (int)(off / 0x38) : -1;
+    int slot = off % 0x38 == 0 && off / 0x38 < DP_SLOTS ? (int)(off / 0x38) : -1;
+    if (slot >= 0) dp_loading[slot] = 1;
     int r = PARSE_PATCH(json, mode);
-    dp_loading_slot = -1;
+    if (slot >= 0) dp_loading[slot] = 0;
     return r;
 }
 
