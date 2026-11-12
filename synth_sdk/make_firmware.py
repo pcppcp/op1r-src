@@ -340,6 +340,7 @@ def build(engs, fxs):
     srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'seq/tombola.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/pcpage.c', 'screens/usbtrack.c', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'boottime.c', 'build/l1_runtime.c', 'dsp/outstage.c', 'dsp/outstage_l1.c', 'dsp/eq.c', 'dsp/fir.S', 'dsp/eq_l1.c', 'dsp/fir_l1.S', 'dsp/mix.c', 'dsp/mix_l1.S', 'dsp/dec.c', 'dsp/dec_l1.S', 'dsp/dc.c', 'dsp/cw.c', 'dsp/mon.c', 'plugload/op1p_load.c', 'screens/settings.c', 'screens/stxt.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/tm.c', 'tape/tm_loop.S', 'tape/tm_l1.S', 'screens/tfscreen.c', 'tape/mixdrop.c', 'crash.c', 'patchjob.c', 'l1pool.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxgroups.c', 'screens/guiskip.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c', 'input/in_host.c'] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
     objs = []
     cmds = []
+    if os.environ.get('OP1R_WDOG') == '1': srcs += ['wdog.c', 'wdog_nmi.S']   # hang detector (wdog.c, docs/18)
     if L1SLOT:                                       # docs/56 test: mixtur's passes in Pulse's L1 slot (needs --builtin mixtur)
         assert any(e['name'] == 'mixtur' for e in engs), 'OP1R_L1SLOT=1 needs --builtin mixtur'
         srcs += ['plugins/mixtur/mixtur_dsp_l1.S']
@@ -362,6 +363,9 @@ def build(engs, fxs):
     if os.environ.get('OP1R_SPKDIAG') == '1': flags['screens/sysmon.c'] = flags.get('screens/sysmon.c', []) + ['-DSPK_DIAG']   # speaker amp state on page 9
     if os.environ.get('OP1R_TAPEFREE') == '1': flags['tape/tm.c'] = ['-DTAPE_FREE'] + (['-DTM_DBGRING'] if os.environ.get('OP1R_TMDBG') == '1' else [])
     if os.environ.get('OP1R_TMXTEST') == '1': flags['tape/tm.c'] = flags.get('tape/tm.c', []) + ['-DTM_XHI=441000', '-DTM_XSPAN=220500']   # emulator: transport wrap at 10 s
+    if os.environ.get('OP1R_WDOG') == '1':
+        for f in ('screens/fxroute.c', 'dispatcher.c', 'boottime.c', 'tape/safewrite.c', 'screens/sysmon.c'): flags[f] = flags.get(f, []) + ['-DWDOG']
+        if os.environ.get('OP1R_WDOG_NORESET') == '1': flags['wdog_nmi.S'] = flags.get('wdog_nmi.S', []) + ['-DWD_NORESET']
     if L1SLOT:
         for f in ('boottime.c', 'screens/sysmon.c', 'dispatcher.c'): flags[f] = flags.get(f, []) + ['-DL1SLOT']
         for f in [x for x in flags] + ['plugins/mixtur/mixtur.c']:

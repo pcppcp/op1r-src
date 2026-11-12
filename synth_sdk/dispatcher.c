@@ -825,6 +825,9 @@ void lz_guard(uint32_t *o)                    /* Screen::find_node entry (hook.S
 }
 static void lz_frame(void)                    /* Gfx, the start of a frame: what will be shown, else one in the background */
 {
+#ifdef WDOG
+    { extern void wd_kick(void), wd_arm(void); static uint32_t wf; wd_kick(); if (++wf == 120) wd_arm(); }   /* hang detector (wdog.c): armed ~2 s after the first frame */
+#endif
     static uint32_t frames;
     int cur = *(volatile int *)0x018B65C8, did = 0;
     for (int i = 0; i < 0x44; i++) {

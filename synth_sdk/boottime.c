@@ -17,6 +17,9 @@ static void l1slot_setup(void);
 #endif
 void bt_db_open(const char *root)                /* CALL @0x019F02E0 db2::open(root) */
 {
+#ifdef WDOG
+    { extern void wd_boot(void); wd_boot(); }    /* a hang record from before the watchdog reset (wdog.c) */
+#endif
 #ifdef L1RUNTIME
     l1_runtime_apply();                          /* first: before anything could run the patched L1 */
 #endif

@@ -82,7 +82,11 @@ volatile uint32_t sm_cy[SMC_N];
 static uint32_t cy_last[SMC_N];
 static int32_t cy_pct[SMC_N];
 /* the bottom line: helper metrics, BLUE turn steps through them (sm_turn) */
-enum { PG_AUDIO, PG_VOICES, PG_PLUGINS, PG_SYSTEM, PG_STAGES, PG_RAW, PG_BOOT, PG_BOOTR, PG_BOOTD, PG_BOOTS, PG_N };
+enum { PG_AUDIO, PG_VOICES, PG_PLUGINS, PG_SYSTEM, PG_STAGES, PG_RAW, PG_BOOT, PG_BOOTR, PG_BOOTD, PG_BOOTS,
+#ifdef WDOG
+       PG_H1, PG_H2, PG_H3, PG_H4, PG_H5,                    /* hang record (wdog.c): from the boot after a freeze */
+#endif
+       PG_N };
 /* stock audio stage timers (docs/32): 12 records x 0x2C at 0x01BA2618, run by Core_render_block; mapping checked
  * against the emulator profile: 0 whole block, 4 decimator + DC blocker, 7 tape, 9 master EQ, 11 output stage */
 #define ST_N 12
@@ -200,6 +204,17 @@ static void sample_disk(void)
 }
 
 /* ---------------- text ---------------- */
+#ifdef WDOG
+extern volatile uint32_t wd_last[48]; extern volatile uint8_t wd_have;
+static char *put_x(char *p, uint32_t v) { for (int i = 28; i >= 0; i -= 4) *p++ = "0123456789abcdef"[v >> i & 15]; return p; }
+static int wd_code(uint32_t v) { return !(v & 1) && ((v >= 0x01900000 && v < 0x01B00000) || (v >= 0x01E00000 && v < 0x01F00000) || (v >= 0xFFA00000 && v < 0xFFA14000)); }
+static int wd_codes(uint32_t *o, int n)                      /* the stack words that look like code addresses */
+{
+    int k = 0;
+    for (int i = 12; i < 44 && k < n; i++) if (wd_code(wd_last[i])) o[k++] = wd_last[i];
+    return k;
+}
+#endif
 static char *put_u(char *p, uint32_t v)                     /* decimal, no libc */
 {
     char t[10]; int n = 0;
@@ -369,6 +384,18 @@ static void sm_update(void *scr, int dt)
         q = put_u(put_s(q, "plugins "), (uint32_t)plug_loaded); q = put_u(put_s(q, " refused "), (uint32_t)plug_refused);
         if (plug_skipped) q = put_u(put_s(q, " skip "), (uint32_t)plug_skipped);
         if (plug_last_err) q = put_u(put_s(q, " err "), (uint32_t)plug_last_err);
+#ifdef WDOG
+    } else if (sm_page >= PG_H1 && sm_page <= PG_H5) {        /* "11/15 retn 01e2f7ea reti ffa04b9c" */
+        if (!wd_have) q = put_s(q, "hang none");
+        else if (sm_page == PG_H1) { q = put_x(put_s(q, "retn "), wd_last[1]); q = put_x(put_s(q, " reti "), wd_last[2]); }
+        else if (sm_page == PG_H2) { q = put_x(put_s(q, "rets "), wd_last[4]); q = put_x(put_s(q, " retx "), wd_last[3]); }
+        else if (sm_page == PG_H3) { q = put_x(put_s(q, "ip "), wd_last[5]); q = put_x(put_s(q, " sq "), wd_last[7]); }
+        else {
+            uint32_t c[6]; int n = wd_codes(c, 6), o = sm_page == PG_H4 ? 0 : 3;
+            if (sm_page == PG_H4) q = put_x(put_s(q, "sp "), wd_last[8]);
+            for (int i = o; i < o + 3 && i < n; i++) q = put_x(put_s(q, " "), c[i]);
+        }
+#endif
     } else if (sm_page == PG_STAGES) {                       /* "5/6 blk 18 eq 6 out 7 dec 3 tp 0" (stock timers) */
 #ifdef L1SLOT
         q = put_s(q, !l1slot_ok ? "mx -- " : l1slot_on ? "mx l1 " : "mx sd ");   /* first (the line is long): red turn flips (docs/56) */

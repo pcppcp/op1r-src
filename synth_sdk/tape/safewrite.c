@@ -137,6 +137,9 @@ static void save_done(uint8_t *c, int s, int idx, const uint8_t *data, uint16_t 
 
 int tape_service(int arg)
 {
+#if defined(WDOG) && !defined(OP1_HOST)
+    if (arg) { extern void wd_off(void); wd_off(); }        /* power-off flush: the hang detector off (wdog.c) */
+#endif
 #ifndef OP1_HOST
     if (!arg) { extern void tfs_poll(void); tfs_poll(); }     /* free tape machine screen: setting, scrubbing (every pass) */
 #endif
