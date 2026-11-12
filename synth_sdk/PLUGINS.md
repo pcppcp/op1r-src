@@ -4,6 +4,33 @@ A plugin is one folder with a `plugin.json` and C code. It becomes a new synth e
 You can write and test it on a PC; the op1r maintainers build it into a release. License: like all of op1r,
 GPL-3.0-or-later with the OP-1 firmware permission (see `LICENSE` and `NOTICE` in the repository root).
 
+## Start here: the plugin kit
+
+```sh
+python3 pluginkit.py new synth mysynth --author "Your Name"   # or fx, seq, tool -> plugins/mysynth/
+python3 pluginkit.py check mysynth                            # build, test, previews -> harness/out/mysynth/
+```
+
+`new` copies `template/<kind>/` under your plugin's name: `plugin.json`, the C source, a screen (`<name>.svg` and
+its `op1_screen_t`; tools draw an overlay instead) and a host test `<name>_test.c`. It builds and passes as it is;
+change the sound, the screen and the test from there. The name must also work in C (`ENGINE_<name>`): lowercase
+letters, digits and `_`, at most 15 characters.
+
+`check` builds `<name>_test.c` with your sources for the PC (address and undefined-behaviour sanitizers) and runs
+it, then writes the previews: `<name>.wav` (synths and FX, `harness/audio.py`) and `<name>_screen.png` (the frames
+the test prints when run with `render`; needs pycairo or cairocffi). Any `FAIL` line, sanitizer report or crash
+fails the check. The test uses `harness/plugin_test.h`: the firmware mocks, `CHECK(cond, "message")`, helpers to
+play a synth note (`pt_synth_note`) or run an FX (`pt_fx_run`), the lines a screen drew (`pt_nlines`,
+`pt_lines_on_screen`) and `pt_frame("label")` for the preview. Add a check for each thing your plugin promises.
+
+Kinds: `synth` (an engine in the synth list), `fx` (an effect), `seq` (a sequencer in the sequencer list; the
+template's player code follows `seq/euclid.c`), `tool` (keys, the main loop and an overlay over any page; see Tool
+plugins). Drum and sampler engines (`drumplus`, `samplerplus`) are tied to the core: start from those instead.
+
+From here to the OP-1: build the plugin file with `make_plugin.py` (Docker toolchain) and copy it to the OP-1, see
+Plugin file below; maintainers can also build it for you from your pull request. `python3 pluginkit.py check --all`
+checks every plugin in `plugins/` the same way (no previews).
+
 ## Quick start
 
 ```sh
@@ -138,3 +165,26 @@ Open a pull request with your `plugins/<name>/` folder: sources, `plugin.json`, 
 with a screen, a preview PNG. Keep your copyright line in the sources; by submitting you license your plugin under the same terms as op1r
 (GPL-3.0-or-later with the OP-1 firmware permission). The maintainers test it on hardware, assign
 its number and include it in a release; users can still hide any plugin when they patch their firmware.
+
+## Limits
+
+- Plugin file: code + data at most 2 MB and static arrays (bss) at most 2 MB; all loaded plugins together 4 MB;
+  at most 32 imported core functions (`plugload/plugload.c` `exports[]`); 96 plugin files per boot; 8 sequencers,
+  4 tools, 4 drum engines at once. A file over a limit is not loaded (the others are).
+- Memory: synth voices have 32 bytes each; FX use `op1_fx_scratch` (176 KB per position) or static arrays; no
+  malloc. L1 (on-chip, one-cycle) memory only through `op1_l1.h` claims (8 KB for the synth engine).
+- CPU: the rules above (integers, no per-sample division / 64-bit, small per-sample work). The resource monitor on
+  the OP-1 shows what a plugin costs; a render that takes too long makes the audio crackle or locks the OP-1.
+- Threads: `render` runs in the audio interrupt and can interrupt every other callback (note_on / note_off, key,
+  service, screens): never leave state half-written where `render` reads it. Screens and tool `draw` run in the GUI
+  thread, tool `key` in the KeyHandler thread, `service` in the main loop: keep key / draw short, slow work in service.
+
+## Pull request checklist
+
+- [ ] `python3 pluginkit.py check <name>` passes; the WAV / PNG previews sound and look as intended.
+- [ ] `<name>_test.c` checks what the plugin promises (not only that it builds).
+- [ ] `plugin.json`: your `name` is not a stock type or another plugin's name; `author` set; no `order`.
+- [ ] Your copyright line in the sources; no code you may not license under GPL-3.0-or-later.
+- [ ] Tried on an OP-1 (or say that you could not): every knob over its whole range, every FX position, sounds
+      saved and loaded again, and the resource monitor at a busy moment.
+- [ ] `cd synth_sdk && python3 harness/run_all.py` still says "all ok" if you changed anything outside your folder.

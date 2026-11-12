@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="320px" height="160px" viewBox="0 0 320 160">
+<!-- myseq screen: a base line under the steps (drawn by the code) and the colours of the 4 encoders -->
+<line fill="none" stroke="#6F7173" stroke-width="1" x1="36" y1="104" x2="284" y2="104"/>
+<circle fill="#4D9EFF" cx="70" cy="136" r="3"/>
+<circle fill="#00ED95" cx="130" cy="136" r="3"/>
+<circle fill="#FFFFFF" cx="190" cy="136" r="3"/>
+<circle fill="#FF3A5D" cx="250" cy="136" r="3"/>
+</svg>

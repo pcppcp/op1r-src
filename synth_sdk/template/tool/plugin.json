@@ -1,0 +1,9 @@
+{
+  "name": "mytool",
+  "author": "your name",
+  "kind": "tool",
+  "symbol": "TOOL_mytool",
+  "sources": [
+    "mytool.c"
+  ]
+}

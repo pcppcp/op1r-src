@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="320px" height="160px" viewBox="0 0 320 160">
+<!-- mysynth screen: a frame for the waves (drawn by the code) and the 4 knob dials (rotated by the code) -->
+<rect fill="none" stroke="#6F7173" stroke-width="1" x="30" y="20" width="260" height="70"/>
+<circle fill="none" stroke="#6F7173" stroke-width="1" cx="70" cy="136" r="10"/>
+<circle fill="none" stroke="#6F7173" stroke-width="1" cx="130" cy="136" r="10"/>
+<circle fill="none" stroke="#6F7173" stroke-width="1" cx="190" cy="136" r="10"/>
+<circle fill="none" stroke="#6F7173" stroke-width="1" cx="250" cy="136" r="10"/>
+<line id="bar0" fill="none" stroke="#4D9EFF" stroke-width="2" x1="70" y1="136" x2="70" y2="127"/>
+<line id="bar1" fill="none" stroke="#00ED95" stroke-width="2" x1="130" y1="136" x2="130" y2="127"/>
+<line id="bar2" fill="none" stroke="#FFFFFF" stroke-width="2" x1="190" y1="136" x2="190" y2="127"/>
+<line id="bar3" fill="none" stroke="#FF3A5D" stroke-width="2" x1="250" y1="136" x2="250" y2="127"/>
+</svg>
