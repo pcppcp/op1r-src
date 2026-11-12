@@ -48,8 +48,10 @@ static sp_voice *model(void *self) { return (sp_voice *)((uint8_t *)self + 8); }
 /* ---- ping-pong / crossfade on the stock render (the C voice, sp_plus_render, is the host model only) ----
  * stock_at: the stock render on a copy of the voice object from pos, loop off (k2 = k0) and forward / reverse;
  * positions inside a block are taken as linear between its ends (the step is nearly constant over 128 samples). */
+#define SP_CAP_POS ((264600 - 16) << 12)                          /* buffer end (pos units), minus the FIR taps */
 static int32_t stock_at(void *self, int16_t *out, const int16_t *k, int32_t pos, int rev, int loop)
 {
+    if (pos < 0) pos = 0; else if (pos > SP_CAP_POS) pos = SP_CAP_POS;   /* p0 - span etc. of an odd region */
     uint32_t vo[4];
     for (int i = 0; i < 4; i++) vo[i] = ((const uint32_t *)self)[i];
     vo[2] = (uint32_t)pos; ((uint8_t *)vo)[13] = 0;                 /* +8 pos, +0xD first block: off */
@@ -116,7 +118,6 @@ static void pingpong(void *self, int16_t *out, const int16_t *k, const sp_extra 
  * earlier (pos - span) fades in, so at the wrap it continues seamlessly from ls. Mode B (loop starts at / near the
  * buffer start, the stock default): after a wrap, the audio past the loop end (pos + span, the continuation of the
  * pre-wrap sound; silence past the recording) fades out over the start of the loop. */
-#define SP_CAP_POS ((264600 - 16) << 12)                          /* buffer end (pos units), minus the FIR taps */
 static void xfade(void *self, int16_t *out, const int16_t *k, const sp_extra *x, sp_xvoice *xs)
 {
     sp_voice *v = model(self);
@@ -253,6 +254,7 @@ void sp_fw_store(int slot)
     void *op = JV_KEY((uint8_t *)(SYNTH_PATCHES + slot * 0x38) + 4, "op1r");
     if (jv_type(op) != JV_OBJECT) return;
     void *p = JV_KEY(op, "p");
+    if (jv_type(p) != JV_ARRAY && jv_type(p) != JV_NULL) return;   /* a shared preset's "p": "x" (JV_IDX asserts) */
     uint32_t tmp[4];
     for (int i = 0; i < SP_NFIELDS; i++) {
         JV_FROM_INT(tmp, sp_extra_get(&sp_x[slot], i));

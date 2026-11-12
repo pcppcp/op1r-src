@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static struct { int32_t x0, y0, x1, y1, w; uint8_t c[4]; } L[4096]; static int nl;
@@ -60,6 +61,16 @@ int main(int argc, char **argv)
     dpu_texts(&x, pw, 0, 0, 0, a, b, c); assert(!strcmp(b, "+3") && !strcmp(c, "rev"));
     dpu_texts(&x, pw, 0, 1, 3, a, b, c); assert(!strcmp(a, "volume") && !strcmp(b, "79"));
     dpu_texts(&x, pw, 1, 0, 1, a, b, c); assert(!strcmp(c, "lin"));
+    {   /* a shared kit's pad words: start / end word -32768 is sample -529200 (dp_bound >> 11); stay in the buffer (ASan) */
+        int16_t *big = calloc(DPU_N, sizeof *big);
+        static const int32_t bad[][2] = { { -529200, 529199 }, { -1, 5000 }, { 400000, 600000 }, { -529200, -1000 } };
+        for (int i = 0; i < 4; i++) {
+            dpu_wave w; memset(&w, 0, sizeof w); w.key0 = w.key1 = -1;
+            dpu_wave_update(&w, big, bad[i][0], bad[i][1]);
+            assert(w.key0 >= 0 && w.key1 <= DPU_N && w.len <= DPU_N);
+        }
+        free(big);
+    }
     if (argc < 2 || strcmp(argv[1], "render")) { printf("OK: drum+ pages (edits, presses, labels)\n"); return 0; }
     /* render: a decaying hit in the region, the mock-up's values */
     for (int i = 0; i < 200000; i++) data[i] = (int16_t)(20000 * exp(-i / 9000.0) * sin(i * 0.05) * (0.6 + 0.4 * sin(i * 0.0011)));

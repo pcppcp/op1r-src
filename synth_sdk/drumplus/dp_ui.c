@@ -10,6 +10,7 @@ enum { DPU_T1 = 0, DPU_T2 = 1 };
 #define DPU_X0   20                          /* waveform area */
 #define DPU_X1   300
 #define DPU_COLS ((DPU_X1 - DPU_X0) / 2)     /* one line every 2 px */
+#define DPU_N    529200                      /* drum buffer: 12 s (sampedit's SE_CAP_DRUM) */
 #define DPU_MID  66
 #define DPU_AMP  32
 #define DPU_TS   12                          /* text size (as the sample editor) */
@@ -158,6 +159,8 @@ typedef struct {
 /* columns of the region [a, b) (sample indices of data), at most 64 reads per column */
 void dpu_wave_update(dpu_wave *w, const int16_t *data, int32_t a, int32_t b)
 {
+    a = a < 0 ? 0 : a > DPU_N ? DPU_N : a;               /* a kit's pad words may be anything (sampedit clamps too) */
+    b = b < 0 ? 0 : b > DPU_N ? DPU_N : b;
     if (w->key0 == a && w->key1 == b) return;
     w->key0 = a; w->key1 = b; w->len = b > a ? b - a : 0;
     int32_t per = w->len / DPU_COLS;                     /* (on a region change only) */

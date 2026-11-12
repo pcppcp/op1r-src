@@ -388,7 +388,7 @@ static void v_render(void *voice, short *out, const short *par, const unsigned *
     const u32 rate = v->rate;
     const u32 ks = (u32)(u16)par[1] | (u32)(u16)par[3] << 16;
     const u32 ksync = sync_on ? tempo_mbpm << 4 | (u32)(sync_step(par[1]) + 1) : 0;
-    if (ks != v->k_size || ksync != v->k_sync) {                        /* 0.8.6: as the rate */
+    if (ks != v->k_size || ksync != v->k_sync || !v->size) {            /* 0.8.6: as the rate; !size: words 1, 3 = -1 */
         /* sizes are worked out in 44.1 kHz samples (the screen shows those); R246 renders voices at 88.2 kHz: twice as
          * many output samples (issue 36, as op1r's granular since op1r 57) */
         const s32 size = 2 * (ksync ? sync_size(sync_step(par[1]), tempo_mbpm) : 441 + (s32)(((u32)par[1] * 16000u) >> 15));
