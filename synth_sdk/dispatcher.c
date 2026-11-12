@@ -785,6 +785,7 @@ static uint32_t *lz_obj[0x44];
 static volatile uint8_t lz_state[0x44];
 volatile uint32_t lz_stat[5];
 volatile uint8_t lz_shown[16], lz_shown_slot[16];   /* debug: which object (boot slot) / table slot was parsed for a frame */                 /* shown, guarded, background, slowest (us), last guarded slot */
+static volatile uint32_t lz_sp;               /* the parsing thread's SP while lz_load runs (0: none) */
 static int lz_load(int i)                     /* any thread; 1 = parsed now */
 {
     uint32_t m; __asm__ volatile ("cli %0;" : "=d"(m));
@@ -792,19 +793,35 @@ static int lz_load(int i)                     /* any thread; 1 = parsed now */
     if (mine) lz_state[i] = 2;
     __asm__ volatile ("sti %0;" : : "d"(m));
     if (!mine) return 0;
+    uint32_t sp; __asm__ volatile ("%0 = SP;" : "=d"(sp));
+    lz_sp = sp;                                 /* lz_guard: find_node from this parse (its init) must not wait */
     uint32_t *o = lz_obj[i], c0 = op1_cycles();
     if (!o[0] && o[2]) o[0] = (uint32_t)SVG_LOAD((void *)o[2]);
     const uint8_t *vt = (const uint8_t *)o[3];
     ((void (*)(void *))*(const uint32_t *)(vt + 0x24))((uint8_t *)o + *(const int16_t *)(vt + 0x20));
     uint32_t us = (op1_cycles() - c0) / 400u;
     if (us > lz_stat[3]) lz_stat[3] = us;
+    lz_sp = 0;
     lz_state[i] = 0;
     return 1;
 }
 void lz_guard(uint32_t *o)                    /* Screen::find_node entry (hook.S): a node of an unparsed screen */
 {
-    for (int i = 0; i < 0x44; i++)
-        if (lz_obj[i] == o && lz_state[i] == 1) { if (lz_load(i)) { lz_stat[1]++; lz_stat[4] = (uint32_t)i; } return; }
+    for (int i = 0; i < 0x44; i++) {
+        if (lz_obj[i] != o) continue;
+        if (lz_state[i] == 1) { if (lz_load(i)) { lz_stat[1]++; lz_stat[4] = (uint32_t)i; } return; }
+        if (lz_state[i] != 2) return;
+        /* another thread parses it right now: wait until it is done (before: went on with the half-built tree).
+         * Not from the parse itself (its init looks nodes up: same thread, SP below the parser's), not in an
+         * interrupt (IVG6..14 active), at most ~1 s (VDK ticks ~10 ms), then as before. */
+        uint32_t sp, ip = *(volatile uint32_t *)0xFFE02108;  /* IPEND */
+        __asm__ volatile ("%0 = SP;" : "=d"(sp));
+        const uint32_t ls = lz_sp;
+        if ((ls && sp <= ls && ls - sp < 0x10000) || (ip & 0x7FC0)) return;
+        for (int n = 0; n < 100 && lz_state[i] == 2; n++) ((void (*)(unsigned))0xFFA0BD2C)(1);   /* VDK::Sleep */
+        lz_stat[1]++;
+        return;
+    }
 }
 static void lz_frame(void)                    /* Gfx, the start of a frame: what will be shown, else one in the background */
 {

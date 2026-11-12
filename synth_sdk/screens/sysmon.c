@@ -362,13 +362,14 @@ static void sm_update(void *scr, int dt)
         if (plug_skipped) q = put_u(put_s(q, " skip "), (uint32_t)plug_skipped);
         if (plug_last_err) q = put_u(put_s(q, " err "), (uint32_t)plug_last_err);
     } else if (sm_page == PG_STAGES) {                       /* "5/6 blk 18 eq 6 out 7 dec 3 tp 0" (stock timers) */
+#ifdef L1SLOT
+        q = put_s(q, !l1slot_ok ? "mx -- " : l1slot_on ? "mx l1 " : "mx sd ");   /* first (the line is long): red turn flips (docs/56) */
+#endif
         q = put_u(put_s(q, "blk "), (uint32_t)st_pct[0]); q = put_u(put_s(q, " eq "), (uint32_t)st_pct[9]);
         q = put_u(put_s(q, " out "), (uint32_t)st_pct[11]); q = put_u(put_s(q, " dec "), (uint32_t)st_pct[4]);
         q = put_u(put_s(q, " tp "), (uint32_t)st_pct[7]);
         q = put_u(put_s(q, " fr "), (uint32_t)fr_pct);           /* free tape engine (tape/tm.c) */
-#ifdef L1SLOT
-        q = put_s(q, !l1slot_ok ? " mx --" : l1slot_on ? " mx l1" : " mx sd");   /* red turn flips (docs/56 test) */
-#endif
+
     } else if (sm_page == PG_BOOT || sm_page == PG_BOOTR) {
         /* boot (docs/79): the firmware's own stage timers (OP_Main 0x019EFEEC: 25 x ms at 0x01AB3030; +0x10 mount +
          * display, +0x18 db / clips / FAT with op1r's plugin loader, +0x28 sounds, +0x50 screens with op1r's screens),
