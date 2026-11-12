@@ -64,6 +64,7 @@ static const char *val(int row) { return ((txt_t *)txt_mem[2 * row + 1])->s; }
 
 void in_clock(uint32_t t) { (void)t; } void in_end(void) {}   /* input engines (input/in_host.c): none on the host */
 volatile uint32_t op1r_boot_ms[2] = { 1140, 420 };
+volatile uint32_t tm_cyc, tm_cyc_tracks, tm_cyc_loop, tm_cyc_t[4], tm_blocks, tm_slow;                 /* tape/tm.c (free tape engine, page 5) */
 const int32_t *volatile pc_in_b, *volatile pc_in_c;                 /* midi/pclk.c */
 volatile uint32_t l1rd[4], l1rt[4], os_selftest[4], eq_selftest[4];                 /* boottime.c: L1 diagnostic, runtime patches, output stage self-test (0: off) */
 const unsigned l1_pokes_n = 9;
@@ -89,9 +90,9 @@ int main(int argc, char **argv)
         sm_turn(1024); run(8, 4000000, 36, 55, 71);
         static const char *const lab[PG_N] = { "", "page 2/10: voices", "page 3/10: plugins", "page 4/10: system", "page 5/10: stock stages", "page 6/10: other records", "page 7/10: boot stages", "page 8/10: op1r boot share", "page 9/10: db split", "page 10/10: snd split" };
         if (render) dump(lab[p]); else printf("page %d: %s\n", p + 1, ((txt_t *)txt_mem[2 * SM_ROWS + 2])->s);
-        if (p == PG_STAGES && strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "5/10 blk 18 eq 6 out 7 dec 3 tp 1")) fprintf(stderr, "stages: [%s]\n", ((txt_t *)txt_mem[2 * SM_ROWS + 2])->s);
+        if (p == PG_STAGES && strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "5/10 blk 18 tp 1 fr 0/0/0 c0/0")   /* shortcut: the temporary free tape measurement line (docs/82) */) fprintf(stderr, "stages: [%s]\n", ((txt_t *)txt_mem[2 * SM_ROWS + 2])->s);
         if (p == PG_RAW) assert(!strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "6/10 1:0 3:0 5:0 6:0 8:0 10:0 o1"));
-        if (p == PG_STAGES) assert(!strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "5/10 blk 18 eq 6 out 7 dec 3 tp 1"));
+        if (p == PG_STAGES) assert(!strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "5/10 blk 18 tp 1 fr 0/0/0 c0/0")   /* shortcut: the temporary free tape measurement line (docs/82) */);
         if (p == PG_BOOT) assert(!strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "7/10 boot 0.0 mnt 0.0 db 0.0 snd 0.0"));
         if (p == PG_BOOTD) assert(!strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "9/10 open 0.4 clips 0.5 fat 0.1"));
         if (p == PG_BOOTS) assert(!strcmp(((txt_t *)txt_mem[2 * SM_ROWS + 2])->s, "10/10 pre 1.2 0.6 slot 0.4 0.3 smp 0.1"));

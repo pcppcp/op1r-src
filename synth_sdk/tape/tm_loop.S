@@ -6,7 +6,7 @@
  *   v = sat16((((c3 f >> 12) + c2) f >> 12 + c1) f >> 12 + s0); accL += v gl >> shift, accR += v gr >> shift; r += st
  * void tm_hloop(const int16_t *d, int32_t r, int32_t st, uint32_t gains (gl low, gr high), int32_t shift,
  *               int32_t *accL, int32_t *accR, int16_t *out (v per sample, pre-fader: meters, track outs)) */
-	.text
+	.section .l1tape,"ax"                       /* in L1 with tm_fast (tape/tm.c, the dead Lander range) */
 	.align 4
 	.global _tm_hloop
 	.type _tm_hloop, STT_FUNC

@@ -155,7 +155,10 @@ static int32_t fade_prev;                                        /* output gain 
 #define TM_SEAM 512                                             /* seam jump threshold (sum of both sides, ~-36 dBFS) */
 #define TM_XF 256                                                /* loop crossfade, samples (power of 2) */
 #ifndef OP1_HOST
-void tm_hloop(const int16_t *d, int32_t r, int32_t st, uint32_t gains, int32_t shift, int32_t *accL, int32_t *accR, int16_t *out);
+void tm_hloop(const int16_t *d, int32_t r, int32_t st, uint32_t gains, int32_t shift, int32_t *accL, int32_t *accR, int16_t *out)
+    __attribute__((longcall));                                   /* in L1 (.l1tape): far from SDRAM */
+void tm_hloop_near(const int16_t *d, int32_t r, int32_t st, uint32_t gains, int32_t shift, int32_t *accL, int32_t *accR,
+                   int16_t *out) __asm__("_tm_hloop");           /* the same, from tm_fast (both in .l1tape) */
 #endif
 #ifdef OP1_HOST
 #define TM_CYCLES() 0u
@@ -166,8 +169,63 @@ volatile uint32_t tm_cyc_t[4], tm_blocks;                       /* per-track cyc
 volatile uint32_t tm_slow;                                       /* blocks through the slow path (sysmon "s") */
 volatile uint32_t tm_cyc_tracks;                                 /* cycles in the 4 tm_track_block calls */
 volatile uint32_t tm_cyc_loop;                                   /* cycles in tm_hloop (sysmon "fr total/loop") */
-static int16_t tm_v[4][64];                                      /* this block's samples per track, pre-fader */
 volatile uint32_t tm_chk_n, tm_chk_bad;                          /* OP1R_TMCHECK: blocks compared, mismatches */
+static int16_t tm_v[4][64];                                      /* this block's samples per track, pre-fader */
+typedef struct { int32_t lo, hi, lin, lout; int64_t rlo, rhi; const int16_t *d; int16_t c; int8_t s; uint8_t lon, ok; } tm_win;
+static uint32_t tm_fast_n, tm_fast_hit;
+#ifdef OP1_HOST
+static int tm_nofast;
+#endif
+                                      /* host test: tm_fast calls */
+static tm_win win[4];                                            /* per track: where tm_fast may run (set by the slow path) */
+#ifdef OP1_HOST
+static void tm_hloop_host(const int16_t *d, int32_t r, int32_t st, uint32_t gains, int32_t shift, int32_t *accL, int32_t *accR, int16_t *out)
+{
+    const int32_t gl = (int16_t)gains, gr = (int16_t)(gains >> 16);
+    for (int i = 0; i < 64; i++) {
+        const int32_t n = r >> 16, f = (r >> 4) & 0xFFF;
+        const int32_t sm = d[n - 1], s0 = d[n], s1 = d[n + 1], s2 = d[n + 2];
+        const int32_t c1 = (s1 - sm) >> 1, c2 = sm - (5 * s0 >> 1) + 2 * s1 - (s2 >> 1), c3 = ((s2 - sm) >> 1) + (3 * (s0 - s1) >> 1);
+        int32_t v = (((((c3 * f >> 12) + c2) * f >> 12) + c1) * f >> 12) + s0;
+        v = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
+        accL[i] += v * gl >> shift; accR[i] += v * gr >> shift; out[i] = (int16_t)v;
+        r += st;
+    }
+}
+#define TM_HLOOP_NEAR tm_hloop_host
+#define TM_FAST_SEC
+#else
+#define TM_HLOOP_NEAR tm_hloop_near
+#define TM_FAST_SEC __attribute__((section(".l1tape")))
+#endif
+#ifndef OP1_HOST
+int tm_fast(int t, int64_t step, int32_t *accL, int32_t *accR) __attribute__((longcall));   /* L1, called from SDRAM */
+#endif
+/* the per-block fast path (A + B, docs/82): a few 32-bit compares against the window, then the inner loop. In L1. */
+TM_FAST_SEC int tm_fast(int t, int64_t step, int32_t *accL, int32_t *accR)
+{
+#ifdef OP1_HOST
+    if (tm_nofast) return 0;                                     /* host test (tmfast): the old path only */
+#endif
+    tm_fast_n++;
+    const tm_win *w = &win[t];
+    if (!w->ok || ((blk + (uint32_t)t * 4) & 15) == 0) return 0;   /* housekeeping blocks: the slow path */
+    const volatile tm_track *tr = &tm_tr[t];
+    if (tr->lin != w->lin || tr->lout != w->lout || tr->lon != w->lon) return 0;
+    const int64_t h = head[t], he = h + step * 64;
+    const int32_t na = (int32_t)(h >> 32), nb = (int32_t)(he >> 32);
+    if ((na < nb ? na : nb) < w->lo || (na < nb ? nb : na) >= w->hi) return 0;
+    tm_slot *sl = &slot[w->s];
+    if (sl->t != t || sl->chunk != w->c || sl->state != 2) return 0;
+    sl->used = blk;
+    if (MODE == 1) { rec_h0[t] = h; rec_step[t] = step; rec_lo[t] = w->rlo; rec_hi[t] = w->rhi; }
+    const int16_t gl = tr->mute ? 0 : GAIN_L(t), gr = tr->mute ? 0 : GAIN_R(t);
+    TM_HLOOP_NEAR(w->d, (int32_t)((h - ((int64_t)(w->c * CHUNK) << 32)) >> 16), (int32_t)(step >> 16),
+                  (uint16_t)gl | (uint32_t)(uint16_t)gr << 16, 15, accL, accR, tm_v[t]);
+    head[t] = he;
+    tm_fast_hit++;
+    return 1;
+}
 static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32_t *accL, int32_t *accR)
 {
     int64_t h = head[t];
@@ -260,6 +318,21 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
 done:
     if (h < 0) h = 0;
     head[t] = h;
+    {                                                            /* the fast window for the next blocks (tm_fast) */
+        tm_win *w = &win[t];
+        const int32_t n = (int32_t)(h >> 32), c = n >> 15;
+        const int sl = loops && c >= 0 && c < TM_CHUNKS ? map[t][c] - 1 : -1;
+        w->ok = 0;
+        if (sl >= 0 && slot[sl].state == 2) {
+            const int32_t xf32 = looped ? TM_XF : 0, lo32w = (int32_t)(lo >> 32) + xf32, hi32w = (int32_t)(hi >> 32) - xf32;
+            w->lo = c * CHUNK + 1 > lo32w ? c * CHUNK + 1 : lo32w;
+            w->hi = (c + 1) * CHUNK - 3 < hi32w ? (c + 1) * CHUNK - 3 : hi32w;
+            w->s = (int8_t)sl; w->c = (int16_t)c; w->d = slot[sl].data;
+            w->lin = tm_tr[t].lin; w->lout = tm_tr[t].lout; w->lon = tm_tr[t].lon;
+            w->rlo = lo; w->rhi = hi;
+            w->ok = w->hi > w->lo;
+        }
+    }
     if (!hk) return;
     const int32_t c = (int32_t)(h >> 32) >> 15, d = step < 0 ? -1 : 1;   /* prefetch ahead, and the loop start */
     /* ahead along the loop (wrapping), not past loop out: the chunks after loop in must be there at the wrap (device
@@ -343,7 +416,10 @@ static void tm_block_body(void)
     for (int t = 0; t < 4; t++) {
         uint32_t tb0 = TM_CYCLES();
         if (scrub_v && t == sc) tm_track_block(t, (int64_t)scrub_v << 16, 0, 16, accL, accR);   /* -6 dB, no loops */
-        else if (playing) tm_track_block(t, ((int64_t)v * tm_tr[t].speed) >> 11, 1, 15, accL, accR);   /* (1x = 2^27) x Q16 -> Q32 */
+        else if (playing) {
+            const int64_t step = ((int64_t)v * tm_tr[t].speed) >> 11;   /* (1x = 2^27) x Q16 -> Q32 */
+            if (!tm_fast(t, step, accL, accR)) tm_track_block(t, step, 1, 15, accL, accR);
+        }
         else for (int i = 0; i < 64; i++) tm_v[t][i] = 0;
         { uint32_t tb1 = TM_CYCLES(); tm_cyc_tracks += tb1 - tb0; tm_cyc_t[t] += tb1 - tb0; }
     }
