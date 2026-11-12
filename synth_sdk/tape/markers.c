@@ -83,7 +83,8 @@ static void tm_load(void)
 }
 #endif
 static uint8_t tm_loaded;
-void tm_ready(void) { if (!tm_loaded) { tm_loaded = 1; tm_load(); } }   /* (also seqdev/ms_fw.c) */
+void tm_ready(void) { if (!tm_loaded) { tm_loaded = 1; if (!op1r_safe_boot) tm_load(); } }   /* (also seqdev/ms_fw.c) */
+static void tm_store(void) { if (!op1r_safe_boot) tm_save(); }   /* safe mode: markers only until power off */
 
 /* ---- edits ---- */
 /* zoom (IEEE float px/s from the firmware) -> Q10 integer, clamped to 1..4096 px/s; no soft-float */
@@ -109,7 +110,7 @@ void tm_add_at(int32_t c)                                   /* also the free tap
     if ((i < tm_n && tm_pos[i] - c < TM_DUP) || (i > 0 && c - tm_pos[i - 1] < TM_DUP)) return;
     for (int k = tm_n; k > i; k--) tm_pos[k] = tm_pos[k - 1];
     tm_pos[i] = c; tm_n++;
-    tm_save();
+    tm_store();
 }
 void tm_add(void) { tm_add_at(TM_CURSOR()); }
 void tm_remove_at(int32_t c, int32_t tol)
@@ -123,7 +124,7 @@ void tm_remove_at(int32_t c, int32_t tol)
     if (best < 0) return;
     for (int k = best; k < tm_n - 1; k++) tm_pos[k] = tm_pos[k + 1];
     tm_n--;
-    tm_save();
+    tm_store();
 }
 void tm_remove(void) { tm_remove_at(TM_CURSOR(), tm_hit_samples()); }
 static int32_t tm_acc;

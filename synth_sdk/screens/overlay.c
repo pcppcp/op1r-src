@@ -6,6 +6,7 @@
 #pragma GCC optimize ("Os", "no-tree-loop-distribute-patterns")
 #endif
 #include "../op1_synth.h"
+#include "../seq/seq_text.h"
 
 #ifdef OP1_HOST
 extern void **host_screen_table;
@@ -90,8 +91,18 @@ void op1_overlay(const op1_tool_t *t)
     ov_tool = t; ov_done = 0; ov_gen++;
     irq_on(m);
 }
+/* safe mode (safeboot.c): a note over every page, the whole session (no tool plugins are loaded to want the overlay) */
+static int safe_draw(void *r)
+{
+    static const uint8_t red[4] = { 0xFF, 0x3A, 0x5D, 255 };
+    const char *t = op1r_safe_boot & SB_RESET ? "SAFE MODE  SETTINGS RESET" : "SAFE MODE";
+    sq_text(r, OP1_Q10(316) - sq_width(OP1_Q10(1.2), t), OP1_Q10(3), OP1_Q10(1.2), t, 0x300, red);   /* top right */
+    return 1;
+}
+static const op1_tool_t safe_tool = { 0, 0, safe_draw };
 void tool_service(void)                                         /* main loop: services, then the overlay */
 {
+    if (op1r_safe_boot && !ov_tool) op1_overlay(&safe_tool);   /* (no page yet: tried again on the next pass) */
     { extern void sb_service(void); sb_service(); }              /* sample browser: page after an engine load */
     for (int i = 0; i < op1_tool_count; i++) if (op1_tools[i]->service) op1_tools[i]->service();
 #ifndef OP1_HOST

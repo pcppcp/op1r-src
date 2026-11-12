@@ -7,7 +7,8 @@
  * (header, = plugin.json order of a former built-in) if free, else >= OP1_FILE_FIRST, and
  * their synth_types / fx_types row (content/op1_factory.db); rows of file plugins no longer present are deleted (only when something changed).
  * Crash marker: plugins/.boot is created before loading and removed by plug_service() once the UI has run for a
- * while; found at boot -> all files are skipped this boot (and it is removed, the next boot tries again). */
+ * while; found at boot -> all files are skipped this boot (and it is removed, the next boot tries again).
+ * Safe mode (safeboot.c): no file is read at all, for a plugin that locks the OP-1 after the marker is gone. */
 #pragma GCC optimize ("Os", "no-tree-loop-distribute-patterns")   /* boot-time code: size; no strlen / memset calls */
 #include "op1_synth.h"
 #include "op1p_load.h"
@@ -569,6 +570,7 @@ static int file_pref(const char *file)
 void plug_boot(void)
 {
     tables_init();
+    if (op1r_safe_boot) return;                           /* safe mode: built-ins only, the marker left as it is */
     void *dir = Y_OPENDIR(DIR_PATH);
     if (!dir) return;
     static char files[MAX_FILES][44];                     /* static: not on the boot thread's stack */

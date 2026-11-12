@@ -11,7 +11,7 @@ EXTRA = {                                   # test -> extra sources (relative to
     'chord': ['chord/ch_core.c'], 'dddd': ['dddd/dd_core.c'], 'dddd_plugin': ['dddd/dd_core.c'],
     'devupd': ['devupd/du.c'], 'dp_plus': ['drumplus/dp_plus.c', 'drumplus/dp_voice.c'],
     'dp_ui': ['drumplus/dp_plus.c', 'drumplus/dp_voice.c'], 'erase': ['tape/erase.c'],
-    'mseq': ['seqdev/ms_core.c'], 'oblique': ['harness/build/oblique_data.c'], 'mx': ['midi/mx.c'], 'ccmap': ['midi/ccmap.c', 'midi/mx.c', 'screens/op1r_settings.c'], 'overlay': ['screens/overlay.c'],
+    'mseq': ['seqdev/ms_core.c'], 'oblique': ['harness/build/oblique_data.c'], 'mx': ['midi/mx.c'], 'ccmap': ['midi/ccmap.c', 'midi/mx.c', 'screens/op1r_settings.c'], 'overlay': ['screens/overlay.c'], 'safeboot': ['safeboot.c'],
     'rnd': ['rnd/rn_core.c'], 'pclk': ['midi/pclk.c', 'screens/op1r_settings.c'], 'safewrite': ['tape/safewrite.c'], 'tapeevict': ['tape/safewrite.c'], 'percdrum_kit': ['plugins/percsyn/perc_dsp.c'], 'steve': ['steve/st_core.c'],
     'usbtrack': ['screens/usbtrack.c'], 'op1p': ['plugload/op1p_load.c'], 'mixdrop': ['tape/mixdrop.c'], 'patchjob': ['patchjob.c'], 'sp_start': ['samplerplus/sp_plus.c', 'samplerplus/sp_voice.c'], 'tombola': ['seq/tombola.c'], 'fxgroups': ['screens/fxgroups.c'],
 }

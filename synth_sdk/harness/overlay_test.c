@@ -15,6 +15,15 @@ void **host_screen_table = table;
 int host_cur_screen;
 void sb_service(void) {}                                         /* sample browser (screens/sbrowse.c): not in this test */
 void *host_raster(void) { return table; }
+static int lines, line_x0 = 1 << 30, line_x1;               /* safe mode note: raster lines drawn, x extent (Q10) */
+void host_raster_line(void *r, const void *p0, const void *p1, int32_t w, const uint8_t *c)
+{
+    (void)w; (void)c; assert(r == table); lines++;
+    const op1_pt *a = p0, *b = p1;
+    int32_t lo = a->x < b->x ? a->x : b->x, hi = a->x < b->x ? b->x : a->x;
+    if (lo < line_x0) line_x0 = lo;
+    if (hi > line_x1) line_x1 = hi;
+}
 
 /* instrument fade: the decimator's gain / step words; per block the Core sets step +0x40, then the voices'
  * envelopes (inst_fade_pre, if any voice plays), the decimator, the block end */
@@ -143,5 +152,19 @@ int main(void)
     tool_service();
     assert(served[0] == 1 && served[1] == 1);
     printf("tools ok\n");
+    /* safe mode: the note over the current page (after its update), inside the screen, and on every page after */
+    op1_tool_count = 0; host_cur_screen = 0x10; tool_service();
+    assert(obj_a[3] == (uintptr_t)vt_a && !lines);                /* off: nothing */
+    op1r_safe_boot = SB_ON; tool_service();
+    assert(!strcmp(frame(obj_a), "A") && lines > 20 && line_x0 >= 0 && line_x1 <= OP1_Q10(320));
+    int n = lines;
+    host_cur_screen = 0x16; tool_service();
+    assert(obj_a[3] == (uintptr_t)vt_a && !strcmp(frame(obj_b), "B") && lines == 2 * n);
+    for (int i = 0; i < 3; i++) { tool_service(); frame(obj_b); }
+    assert(obj_b[3] != (uintptr_t)vt_b && lines == 5 * n);        /* stays */
+    op1r_safe_boot = SB_ON | SB_RESET; lines = 0; line_x0 = 1 << 30; line_x1 = 0;
+    frame(obj_b);
+    assert(lines > 2 * n && line_x0 >= 0 && line_x1 <= OP1_Q10(320));   /* "settings reset" too */
+    printf("safe mode note ok\n");
     return 0;
 }
