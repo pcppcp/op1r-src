@@ -53,6 +53,7 @@ static ms_t *ms;                            /* heap (~60 KB), allocated by the m
 #define ITER_SCREEN_VT ((const uint32_t *)0x019103FC)
 #define SVG_LOAD      ((void *(*)(void *))0x01A503D8)
 static uint32_t ms_scr[32], ms_vt[10];
+static int ms_ctor_id = -1;                            /* SCREEN_CTOR done for this id: only SVG_LOAD is retried */
 static int ms_scr_id = -1;
 static so_owner ms_own = { .obj = ms_scr };           /* the slot shared with FREE and devupd (screens/slotown.h) */
 static volatile uint8_t view, seq_open_req, rec_held, rec_latch, seq_down, seq_chord, sel_set, own_play;
@@ -309,14 +310,17 @@ static void view_set(int on)                          /* key thread */
 {
     if (on && ms_scr_id < 0) {                         /* first open: the tape screen is the current one */
         int id = CUR_SCREEN;
-        if (id < 0 || id >= 0x44 || !SCREEN_TABLE[id]) return;
+        if (id < 0 || id >= 0x44 || !SCREEN_TABLE[id] || (ms_ctor_id >= 0 && id != ms_ctor_id)) return;
         void *saved = SCREEN_TABLE[id];
-        SCREEN_CTOR(ms_scr, id, "usbout.svg");         /* (empty SVG, shipped for the USB out page) */
-        SCREEN_TABLE[id] = saved;
-        for (int i = 0; i < 10; i++) ms_vt[i] = ITER_SCREEN_VT[i];   /* is_visible: id == ours */
-        ms_vt[3 * 2 + 1] = (uint32_t)ms_scr_update;
-        ms_vt[4 * 2 + 1] = (uint32_t)ms_scr_init;
-        ms_scr[3] = (uint32_t)ms_vt;
+        if (ms_ctor_id < 0) {                          /* once: a second ctor would leak the first one's objects */
+            SCREEN_CTOR(ms_scr, id, "usbout.svg");     /* (empty SVG, shipped for the USB out page) */
+            SCREEN_TABLE[id] = saved;
+            for (int i = 0; i < 10; i++) ms_vt[i] = ITER_SCREEN_VT[i];   /* is_visible: id == ours */
+            ms_vt[3 * 2 + 1] = (uint32_t)ms_scr_update;
+            ms_vt[4 * 2 + 1] = (uint32_t)ms_scr_init;
+            ms_scr[3] = (uint32_t)ms_vt;
+            ms_ctor_id = id;
+        }
         ms_scr[0] = (uint32_t)SVG_LOAD((void *)ms_scr[2]);
         if (!ms_scr[0]) return;
         ms_scr_id = id;

@@ -228,6 +228,7 @@ static int visible_screens(void **only)
     }
     return n;
 }
+static int16_t clamp_dev(int32_t v, int32_t hi) { return (int16_t)(v < 0 ? 0 : v > hi ? hi : v); }
 static void rect_to_dev(const op1_rect_t *r, int16_t *d)
 {
     int32_t in[4][2] = { { r->x0, r->y0 }, { r->x1 + 1, r->y0 }, { r->x0, r->y1 + 1 }, { r->x1 + 1, r->y1 + 1 } };
@@ -239,8 +240,8 @@ static void rect_to_dev(const op1_rect_t *r, int16_t *d)
         if (o[1] < y0) y0 = o[1]; if (o[1] > y1) y1 = o[1];
     }
     x0 = (x0 >> 10) - 2; y0 = (y0 >> 10) - 2; x1 = (x1 >> 10) + 2; y1 = (y1 >> 10) + 2;   /* antialiasing margin */
-    d[0] = (int16_t)(x0 < 0 ? 0 : x0); d[1] = (int16_t)(y0 < 0 ? 0 : y0);
-    d[2] = (int16_t)(x1 > BUF_COLS - 1 ? BUF_COLS - 1 : x1); d[3] = (int16_t)(y1 > (int)BUF_ROWS - 1 ? (int)BUF_ROWS - 1 : y1);
+    d[0] = clamp_dev(x0, BUF_COLS - 1); d[1] = clamp_dev(y0, (int)BUF_ROWS - 1);   /* both ends: a rect off screen */
+    d[2] = clamp_dev(x1, BUF_COLS - 1); d[3] = clamp_dev(y1, (int)BUF_ROWS - 1);   /* must not wrap in the int16 */
 }
 /* a render frame on the display buffer: region mode or the normal clear */
 static void render_start(void *raster)

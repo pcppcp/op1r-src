@@ -137,7 +137,7 @@ void *op1_fx_fast(int pos, uint32_t *size)
     return m;
 }
 void *op1_fx_big(int pos, uint32_t *size) { (void)pos; *size = 0; return 0; }
-static void fx_fast_alloc(void)                 /* boot thread: the first file that imports op1_fx_fast */
+static void fx_fast_alloc(void)                 /* boot thread: the first file that imports op1_fx_fast and loads */
 {
     for (int p = 0; p < 3; p++) {
         if (fx_fast_mem[p]) continue;
@@ -410,7 +410,7 @@ static void placed(const uint8_t *mem, uint32_t size, const char *file)
 }
 
 static uint32_t total;
-static int load_one(void *db, const char *file)
+static int load_file(void *db, const char *file, int *fast)
 {
     char path[64];
     if (slen(file) > 40) return OP1P_E_SIZE;
@@ -419,6 +419,9 @@ static int load_one(void *db, const char *file)
     if (fd < 0) return OP1P_E_SIZE;
     int len = Y_LSEEK(fd, 0, 2);
     Y_LSEEK(fd, 0, 0);
+    /* the whole file, parsed, then the image copied into its own allocation: for a moment file + image + bss, and the
+     * file's size left as a hole next to it (the header first and the image read straight into its allocation
+     * would avoid both, but op1p_parse checks the file as one buffer) */
     uint8_t *buf = len > 0 && (uint32_t)len <= 2 * TOTAL_CAP ? MALLOC((len + 3) & ~3) : 0;
     int r = buf && Y_READ(fd, buf, len) == len ? 0 : OP1P_E_SIZE;
     Y_CLOSE(fd);
@@ -429,12 +432,12 @@ static int load_one(void *db, const char *file)
         imp[i] = 0;
         for (unsigned k = 0; k < sizeof exports / sizeof exports[0]; k++)
             if (seq(exports[k].name, v.import[i])) imp[i] = (uint32_t)exports[k].addr;
-        if (imp[i] == (uint32_t)op1_fx_fast) fx_fast_alloc();
+        if (imp[i] == (uint32_t)op1_fx_fast) *fast = 1;
         if (!imp[i]) r = OP1P_E_IMPORT;
     }
     if (!r && total + v.mem_size > TOTAL_CAP) r = OP1P_E_SIZE;
     int kind = r ? 0 : (int)v.hdr->kind;
-    const char *name = r ? 0 : sdup(v.hdr->name);
+    const char *name = r || kind == OP1P_SAMPLER || kind == OP1P_TOOL ? 0 : sdup(v.hdr->name);
     if (!r && kind == OP1P_SAMPLER) {                               /* sampler engine (sampler+): one, row id 100 */
         uint8_t *mem = op1_sampler ? 0 : MALLOC(v.mem_size);
         if (!mem) r = op1_sampler ? OP1P_E_HEADER : OP1P_E_SIZE;
@@ -471,12 +474,17 @@ static int load_one(void *db, const char *file)
             if (plus) {
                 if (!db_has(DB_FACTORY(), "SELECT id FROM drum_types WHERE id=2"))
                     op1_db_write(DB_FACTORY(), "INSERT OR IGNORE INTO drum_types VALUES (2,'drum+','[0, 0, 0, 0, 0, 0, 0, 0]')");
-            } else op1_db_write(DB_FACTORY(), sql);
+            } else {
+                char q[96];                                         /* (that row as it is: no write transaction per boot) */
+                scat(scat(scat(scat(scat(q, "SELECT id FROM drum_types WHERE id="), num), " AND type='"), drum_label[n]), "'");
+                if (!db_has(DB_FACTORY(), q)) op1_db_write(DB_FACTORY(), sql);
+            }
             op1_drums[n] = d; op1_drum_rows[n] = row;
             if (plus) op1_drum = d;
             op1_drum_n = n + 1;                                     /* the slot is complete: render may see it now */
             kind_map('d', drum_label[n]);
         }
+        if (name) FREE((void *)name);                               /* (drum_label holds a copy) */
         if (buf) FREE(buf);
         return r;
     }
@@ -502,6 +510,7 @@ static int load_one(void *db, const char *file)
             seq_row(DB_FACTORY(), name);
             seq_map(name);
         }
+        if (r && name) FREE((void *)name);
         if (buf) FREE(buf);
         return r;
     }
@@ -558,7 +567,15 @@ static int load_one(void *db, const char *file)
         from_file[kind][n] = 1;
         if (!builtin) row_ensure(DB_FACTORY(), v.hdr, n);           /* a replaced built-in keeps its row */
     }
+    if (r && name) FREE((void *)name);
     if (buf) FREE(buf);
+    return r;
+}
+
+static int load_one(void *db, const char *file)
+{
+    int fast = 0, r = load_file(db, file, &fast);
+    if (!r && fast) fx_fast_alloc();                        /* only for a file that loaded, after its read buffer is freed */
     return r;
 }
 
