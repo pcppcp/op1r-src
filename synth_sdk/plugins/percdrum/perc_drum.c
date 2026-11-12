@@ -11,6 +11,8 @@
  *             + turn, and encoder presses for the modes, as drum+. T3 is the stock FX page.
  *   save      "op1r": {"engine": "perc", "b": "<base64>"}: packed bytes, a preset slot is 4 bytes, an edited or
  *             transferred one adds its 21 (+ 21) words. About 2.8 KB at worst (a big patch froze R246 on save).
+ *             Without this plugin the firmware plays the kit as a stock sampled kit: its sample, i.e. a transfer
+ *             recorded into it, sounds as it is (loud modem noise).
  *
  * Voices: the 12 drum voices of the DrumSampler; the stock voice fields (+8: pos, state, blocks) are kept as the stock
  * note_on / note_off / render do, so the firmware's voice allocation works as for a sampled kit. At most PD_SYNTH voices
@@ -336,14 +338,19 @@ static unsigned b64_dec(const char *in, uint8_t *out, unsigned cap)
     if (qn >= 3 && o < cap) out[o++] = (uint8_t)((q[1] << 4) | (q[2] >> 2));
     return o;
 }
-/* a kit from its saved string (0: a fresh kit) */
+/* a kit from its saved string (0: a fresh kit). From a patch parse (any thread): its own decode buffer (pd_raw is
+ * kit_write's), and pd_flush leaves the slot alone meanwhile */
+static uint8_t pd_raw_in[PD_RAW_MAX];
+static volatile uint8_t pd_loading[PD_SLOTS];
 static void kit_load(int slot, const char *b64)
 {
+    pd_loading[slot] = 1;
     for (int p = 0; p < PD_PADS; p++) key_default(&kit[slot][p], p);
     kit_sig[slot] = 0; kit_old[slot] = 0; pool_seen[slot] = 0;
     if (pend.slot == slot) pend.slot = -1;
     if (undo_slot == slot) undo_slot = -1;
-    if (b64) { unsigned n = b64_dec(b64, pd_raw, PD_RAW_MAX); unpack_kit(slot, pd_raw, n); }
+    if (b64) { unsigned n = b64_dec(b64, pd_raw_in, PD_RAW_MAX); unpack_kit(slot, pd_raw_in, n); }
+    pd_loading[slot] = 0;
 }
 
 /* ================= the pages (logic and drawing; the host tests build this part too) ================= */
@@ -814,6 +821,7 @@ static void pd_flush(void)
     for (int slot = 0; slot < PD_SLOTS; slot++) {
         if (!dirty_keys[slot]) continue;
         if (!op1_patch_idle()) return;                        /* a save / type job runs: on the next turn or key */
+        if (pd_loading[slot]) continue;                       /* its kit is being loaded: later, too */
         dirty_keys[slot] = 0;
         if (!claimed[slot]) continue;
         kit_write(slot);

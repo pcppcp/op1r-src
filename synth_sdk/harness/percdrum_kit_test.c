@@ -95,6 +95,16 @@ int main(int argc, char **argv)
     for (int p = 0; p < 24; p++) { pd_key *a = &saved[p], *b = &kit[0][p]; bad += a->origin != b->origin || a->morph != b->morph || a->flags != b->flags || memcmp(a->a, b->a, 42) || memcmp(a->b, b->b, 42); }
     printf("mixed kit: %u bytes, round trip %s\n", n, bad ? "FAIL" : "ok"); assert(!bad && kit_sig[0] == 0xDEADBEEF);
     for (unsigned cut = 0; cut < n; cut += 7) { kit_load(1, 0); unpack_kit(1, pd_raw, cut); }    /* truncated: no overrun (ASan) */
+    {   /* a kit load (patch parse) between kit_write's pack and encode: the bytes being written stay slot 0's */
+        static char other[4096];
+        for (int p = 0; p < 24; p++) { key_preset(&kit[1][p], (p + 3) % 24); kit[1][p].a[P_DIST] = 777; kit[1][p].flags = PK_EDITED; }
+        b64_enc(pd_raw, pack_kit(1)); strcpy(other, pd_b64);
+        n = pack_kit(0);
+        kit_load(1, other);
+        b64_enc(pd_raw, n);
+        printf("kit load during a write: %s\n", strcmp(pd_b64, str) ? "FAIL" : "ok"); assert(!strcmp(pd_b64, str));
+        assert(kit[1][0].a[P_DIST] == 777 && !pd_loading[1]);
+    }
 
     /* ---- v1 kits: the knob offsets go into the patch; the sound stays ---- */
     {
