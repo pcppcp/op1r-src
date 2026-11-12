@@ -13,6 +13,7 @@
  * recorded bus (the selected track's own send muted: no feedback). The track work runs only while a send is up. */
 #include "../op1_synth.h"
 #include "stroke_font.h"
+#include "stxt.h"
 #include "op1r_settings.h"
 
 uint8_t fr_src;                                             /* 0 master, 1 instrument, 2 aux */
@@ -251,12 +252,12 @@ static void fr_update(void *scr, int dt)
 {
     op1_screen_draw(scr, dt);
     void *r = op1_raster();
-    sf_text(r, FR_LX, FR_Y0, FR_S, "FX2 SOURCE", FR_W, c_blue);
+    st_text(r, ST_FXROUTE + 0, FR_LX, (FR_Y0) >> 10, c_blue, "FX2 SOURCE");
     static const char *const src[3] = { "MASTER", "INSTRUMENT", "AUX" };
-    sf_text(r, FR_LX, FR_Y1, FR_S, src[fr_src], FR_W, c_blue);
+    st_text(r, ST_FXROUTE + 1, FR_LX, (FR_Y1) >> 10, c_blue, src[fr_src]);
     if (!fr_src) return;                                    /* master source: stereo to master only */
-    sf_text(r, FR_LX, FR_Y2, FR_S, "FX2 OUTPUT", FR_W, c_green);
-    sf_text(r, FR_LX, FR_Y3, FR_S, fr_out ? "MONO TAPE" : "STEREO MASTER", FR_W, c_green);
+    st_text(r, ST_FXROUTE + 2, FR_LX, (FR_Y2) >> 10, c_green, "FX2 OUTPUT");
+    st_text(r, ST_FXROUTE + 3, FR_LX, (FR_Y3) >> 10, c_green, fr_out ? "MONO TAPE" : "STEREO MASTER");
 }
 const op1_screen_t SCREEN_fxroute = { fr_init, fr_update };
 

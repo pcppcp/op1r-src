@@ -4,6 +4,7 @@
  * (keys 'countin', 'kbvel'). The white and red rows are free for future small settings. */
 #include "../op1_synth.h"
 #include "stroke_font.h"
+#include "stxt.h"
 #include "op1r_settings.h"
 
 extern uint8_t ci_beats;
@@ -65,16 +66,16 @@ static void st_update(void *scr, int dt)
     op1_screen_draw(scr, dt);
     void *r = op1_raster();
     static const char *const txt[3] = { "4", "8", "16" };
-    sf_text(r, ST_LX, ST_Y0, ST_S, "COUNT-IN", ST_W, c_blue);
-    sf_text(r, ST_VX, ST_Y0, ST_S, txt[ci_idx], ST_W, c_blue);
+    st_text(r, ST_SETTINGS + 0, ST_LX, (ST_Y0) >> 10, c_blue, "COUNT-IN");
+    st_text(r, ST_SETTINGS + 1, ST_VX, (ST_Y0) >> 10, c_blue, txt[ci_idx]);
     char v[4]; int n = kb_vel, i = 0;
     if (n >= 100) v[i++] = (char)('0' + n / 100);
     if (n >= 10) v[i++] = (char)('0' + n / 10 % 10);
     v[i++] = (char)('0' + n % 10); v[i] = 0;
-    sf_text(r, ST_LX, ST_Y0 + ST_DY, ST_S, "VELOCITY", ST_W, c_green);
-    sf_text(r, ST_VX, ST_Y0 + ST_DY, ST_S, v, ST_W, c_green);
+    st_text(r, ST_SETTINGS + 2, ST_LX, (ST_Y0 + ST_DY) >> 10, c_green, "VELOCITY");
+    st_text(r, ST_SETTINGS + 3, ST_VX, (ST_Y0 + ST_DY) >> 10, c_green, v);
     static const uint8_t c_white[4] = { 0xFF, 0xFF, 0xFF, 0xFF };
-    sf_text(r, ST_LX, ST_Y0 + 2 * ST_DY, ST_S, "TAPE", ST_W, c_white);
-    sf_text(r, ST_VX, ST_Y0 + 2 * ST_DY, ST_S, tm_on ? "FREE" : "STOCK", ST_W, c_white);
+    st_text(r, ST_SETTINGS + 4, ST_LX, (ST_Y0 + 2 * ST_DY) >> 10, c_white, "TAPE");
+    st_text(r, ST_SETTINGS + 5, ST_VX, (ST_Y0 + 2 * ST_DY) >> 10, c_white, tm_on ? "STEFAN" : "JESPER/OP1");
 }
 const op1_screen_t SCREEN_settings = { st_init, st_update };

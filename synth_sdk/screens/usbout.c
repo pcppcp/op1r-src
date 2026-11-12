@@ -4,6 +4,7 @@
  * device (seqdev/ms_fw.c, docs/39) is opt-in, off by default. Both saved in the DB table op1rsettings. */
 #include "../op1_synth.h"
 #include "stroke_font.h"
+#include "stxt.h"
 #include "op1r_settings.h"
 
 extern volatile uint8_t usb_tracks_live;
@@ -65,11 +66,11 @@ static void us_update(void *scr, int dt)
 {
     op1_screen_draw(scr, dt);
     void *r = op1_raster();
-    sf_text(r, US_LX, US_Y0, US_S, "USB OUT", US_W, c_blue);
-    sf_text(r, US_VX, US_Y0, US_S, "MASTER", US_W, c_blue);
-    if (setting) sf_text(r, US_VX, US_Y0 + US_DY, US_S, "+ TRACKS", US_W, c_blue);
-    sf_text(r, US_LX, US_Y0 + 2 * US_DY, US_S, "MIDI SEQ", US_W, c_green);
-    sf_text(r, US_VX, US_Y0 + 2 * US_DY, US_S, ms_enabled ? "ON" : "OFF", US_W, c_green);
+    st_text(r, ST_USBOUT + 0, US_LX, (US_Y0) >> 10, c_blue, "USB OUT");
+    st_text(r, ST_USBOUT + 1, US_VX, (US_Y0) >> 10, c_blue, "MASTER");
+    if (setting) st_text(r, ST_USBOUT + 2, US_VX, (US_Y0 + US_DY) >> 10, c_blue, "+ TRACKS");
+    st_text(r, ST_USBOUT + 3, US_LX, (US_Y0 + 2 * US_DY) >> 10, c_green, "MIDI SEQ");
+    st_text(r, ST_USBOUT + 4, US_VX, (US_Y0 + 2 * US_DY) >> 10, c_green, ms_enabled ? "ON" : "OFF");
 }
 
 const op1_screen_t SCREEN_usbout = { us_init, us_update };

@@ -3,6 +3,7 @@
  * + 256 mode). */
 #include "../op1_synth.h"
 #include "stroke_font.h"
+#include "stxt.h"
 #include "op1r_settings.h"
 #include "../scale/sc_core.h"
 
@@ -83,12 +84,12 @@ static void sp_update(void *scr, int dt)
 {
     op1_screen_draw(scr, dt);
     void *r = op1_raster();
-    sf_text(r, SP_LX, OP1_Q10(12), SP_S, "ROOT", SP_W, c_blue);
-    sf_text(r, SP_VX, OP1_Q10(12), SP_S, sc_root_names[sc_root], SP_W, c_blue);
-    sf_text(r, SP_LX, OP1_Q10(34), SP_S, "SCALE", SP_W, c_green);
-    sf_text(r, SP_VX, OP1_Q10(34), SP_S, sc_type_names[sc_type], SP_W, c_green);
-    sf_text(r, SP_LX, OP1_Q10(56), SP_S, "MODE", SP_W, c_white);
-    sf_text(r, SP_VX, OP1_Q10(56), SP_S, sc_mode_names[sc_mode], SP_W, c_white);
+    st_text(r, ST_SCALE + 0, SP_LX, (OP1_Q10(12)) >> 10, c_blue, "ROOT");
+    st_text(r, ST_SCALE + 1, SP_VX, (OP1_Q10(12)) >> 10, c_blue, sc_root_names[sc_root]);
+    st_text(r, ST_SCALE + 2, SP_LX, (OP1_Q10(34)) >> 10, c_green, "SCALE");
+    st_text(r, ST_SCALE + 3, SP_VX, (OP1_Q10(34)) >> 10, c_green, sc_type_names[sc_type]);
+    st_text(r, ST_SCALE + 4, SP_LX, (OP1_Q10(56)) >> 10, c_white, "MODE");
+    st_text(r, ST_SCALE + 5, SP_VX, (OP1_Q10(56)) >> 10, c_white, sc_mode_names[sc_mode]);
     sp_keyboard(r);
 }
 const op1_screen_t SCREEN_scale = { sp_init, sp_update };
