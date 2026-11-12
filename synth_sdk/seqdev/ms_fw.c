@@ -150,12 +150,13 @@ static void e_play(int t, int dest, int ch, int kind, int d1, int d2, int on)
     own_play = 0;
 }
 static int open_rw(void) { return Y_OPEN(MS_FILE, O_RDWR_CREAT, 0x180); }
+/* 0 ok; 1 the file ends before (none yet: created empty, so a failed open is a read error); -1 read error (retried) */
 static int e_read(int off, void *p, int n)
 {
     if (op1r_safe_boot) return -1;                                    /* safe mode: the file is not opened */
-    int fd = Y_OPEN(MS_FILE, 0, 0), r = -1;
+    int fd = open_rw(), r = -1;
     if (fd < 0) return -1;
-    if (Y_LSEEK(fd, off, 0) == off && Y_READ(fd, p, (unsigned)n) == n) r = 0;
+    if (Y_LSEEK(fd, off, 0) == off) { int k = Y_READ(fd, p, (unsigned)n); r = k == n ? 0 : k >= 0 ? 1 : -1; }
     Y_CLOSE(fd);
     return r;
 }

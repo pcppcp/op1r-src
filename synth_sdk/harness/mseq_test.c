@@ -1,6 +1,7 @@
 /* Host test of seqdev/ms_core.c (docs/39): record notes + CCs on the tape timeline, playback with note lengths, slot
  * splits, persistence through the file, streaming through the RAM cache, cut / copy / paste, a damaged slot, the loop
- * wrap, MIDI channel routing, chains after a lost slot write, a full clipboard, a failed quantize move.   cc -I.. -fsanitize=address,undefined mseq_test.c ../seqdev/ms_core.c */
+ * wrap, MIDI channel routing, chains after a lost slot write, a full clipboard, a failed quantize move, read errors (fault
+ * injection) and the used map rebuild.   cc -I.. -fsanitize=address,undefined mseq_test.c ../seqdev/ms_core.c */
 #include "../seqdev/ms_core.h"
 #include <assert.h>
 #include <signal.h>
@@ -12,6 +13,7 @@
 static int32_t tpos; static int tplay, lon; static int32_t lin, lout;
 static ms_slot disk[MS_SLOTS]; static int disk_ok[MS_SLOTS]; static ms_head dhead; static int dhead_ok;
 static int reads, writes, drop_slot = -1;           /* drop_slot: that slot's writes are lost (power off) */
+static int err_slot = -1, err_head;                 /* reads of that slot / of the header fail (open / seek / read) */
 typedef struct { int t, dest, ch, kind, d1, d2, on; int32_t pos; } call_t;
 static call_t calls[4096]; static int ncalls;
 static int32_t e_pos(void) { return tpos; }
@@ -19,9 +21,9 @@ static int e_playing(void) { return tplay; }
 static int e_loop(int32_t *a, int32_t *b) { *a = lin; *b = lout; return lon; }
 static void e_play(int t, int dest, int ch, int kind, int d1, int d2, int on)
 { if (ncalls < 4096) calls[ncalls++] = (call_t){ t, dest, ch, kind, d1, d2, on, tpos }; }
-static int e_rs(int sl, ms_slot *o) { reads++; if (!disk_ok[sl]) return -1; *o = disk[sl]; return 0; }
+static int e_rs(int sl, ms_slot *o) { reads++; if (sl == err_slot) return -1; if (!disk_ok[sl]) return 1; *o = disk[sl]; return 0; }
 static int e_ws(int sl, const ms_slot *i) { writes++; if (sl == drop_slot) return -1; disk[sl] = *i; disk_ok[sl] = 1; return 0; }
-static int e_rh(void *h, int n) { if (!dhead_ok) return -1; memcpy(h, &dhead, n); return 0; }
+static int e_rh(void *h, int n) { if (err_head) return -1; if (!dhead_ok) return 1; memcpy(h, &dhead, n); return 0; }
 static int e_wh(const void *h, int n) { memcpy(&dhead, h, n); dhead_ok = 1; return 0; }
 static uint32_t e_off(void) { return 0; }
 static void e_on(uint32_t m) { (void)m; }
@@ -39,6 +41,7 @@ static void settle(ms_t *s) { for (int k = 0; k < 10; k++) ms_service(s, 1000); 
 static int last_slot(int t, int p) { int sl = dhead.first[t][p]; while (disk[sl].next != MS_NONE) sl = disk[sl].next; return sl; }
 static void reseal(int sl) { disk[sl].crc = 0; disk[sl].crc = ms_crc(&disk[sl], 16 + 8 * disk[sl].n); }
 static void hang(int sig) { (void)sig; printf("FAIL: a chain walk did not return (cycle)\n"); _exit(1); }
+static int used_n(void) { int n = 0; for (int i = 0; i < MS_SLOTS; i++) n += dhead.used[i >> 3] >> (i & 7) & 1; return n; }
 static int notes_on(int from, int t) { int n = 0; for (int i = from; i < ncalls; i++) n += calls[i].on && calls[i].kind == MS_NOTE && calls[i].t == t; return n; }
 
 int main(void)
@@ -234,6 +237,47 @@ int main(void)
         assert(ms_quantize_take(&A, st) == 1 && ms_count(&A, 3) == 2);
     }
     printf("quantize: a failed move keeps the note ok\n");
+    {   /* read errors at boot are not damage: nothing written, the song loads once the reads work */
+        ms_init(&A, &env); dhead_ok = 0; memset(disk_ok, 0, sizeof disk_ok); lon = 0;
+        rec(&A, 0, 1000, 200, 256); rec(&A, 2, 5 * 65536, 10, 256); settle(&A);
+        int first = dhead.first[0][0], nsl = 1;
+        for (int sl = first; disk[sl].next != MS_NONE; sl = disk[sl].next) nsl++;
+        assert(nsl >= 4);
+        static ms_slot keep; static ms_head hk; keep = disk[first]; hk = dhead;
+        int w0 = writes, u0 = used_n();
+        err_slot = first;                                        /* a slot */
+        ms_init(&B, &env); assert(ms_load(&B) == 0); tpos = 0; settle(&B);
+        int kept = !memcmp(&disk[first], &keep, sizeof keep);
+        printf("  slot read error at boot: chain on disk %s (%d events in slot %d), %d writes\n", kept ? "kept" : "ERASED",
+               disk[first].n, first, writes - w0);
+        assert(kept && writes == w0 && ms_load_range(&B, 0, 0, 0) == -1 && ms_count(&B, 0) == 0);
+        err_slot = -1; settle(&B);
+        assert(ms_count(&B, 0) == 200 && !memcmp(&disk[first], &keep, sizeof keep) && used_n() == u0);
+        err_head = 1;                                            /* the header: read-only, recording refused */
+        ms_init(&B, &env); int lr = ms_load(&B);
+        rec(&B, 0, 2000, 3, 256); settle(&B);
+        kept = !memcmp(&dhead, &hk, sizeof hk) && !memcmp(&disk[first], &keep, sizeof keep);
+        printf("  header read error at boot: song on disk %s, %d writes\n", kept ? "kept" : "ERASED", writes - w0);
+        assert(lr == -1 && kept && writes == w0 && B.dropped);
+        err_head = 0; settle(&B);
+        assert(ms_load_range(&B, 0, 0, MS_PAGES - 1) == 0 && ms_count(&B, 0) == 200);
+        rec(&B, 3, 2000, 1, 256); settle(&B);
+        assert(ms_count(&B, 3) == 1 && dhead.first[3][0] != MS_NONE && used_n() == u0 + 1);
+        printf("read errors at boot: nothing written, the song loads when the reads work ok\n");
+        /* damage (real: a bad CRC) cuts the chain at its first slot: the rest comes back free, slots no chain reaches too */
+        disk[first].ev[0].d1 ^= 1;
+        for (int i = 2000; i < 2010; i++) dhead.used[i >> 3] |= (uint8_t)(1 << (i & 7));   /* (leaked by older builds) */
+        dhead.crc = 0; dhead.crc = ms_crc(&dhead, (int)sizeof dhead);
+        int u1 = used_n();
+        ms_init(&B, &env); assert(ms_load(&B) == 0); tpos = 0; settle(&B);
+        printf("  used slots %d -> %d (chain of %d cut at its first)\n", u1, used_n(), nsl);
+        assert(used_n() == u1 - (nsl - 1) - 10 && (dhead.used[first >> 3] >> (first & 7) & 1));
+        ms_init(&A, &env); assert(ms_load(&A) == 0);
+        assert(ms_load_range(&A, 0, 0, MS_PAGES - 1) == 0 && ms_count(&A, 0) == 0);
+        assert(ms_load_range(&A, 2, 0, MS_PAGES - 1) == 0 && ms_count(&A, 2) == 10);
+        assert(ms_load_range(&A, 3, 0, MS_PAGES - 1) == 0 && ms_count(&A, 3) == 1);
+    }
+    printf("used map rebuilt from the chains: damaged / leaked slots free again ok\n");
     alarm(0);
     printf("mseq_test: ok\n");
     return 0;
