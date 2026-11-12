@@ -39,9 +39,17 @@ int main(int argc, char **argv)
     frame("master (default)", render);
     usbout_turn(1024);
     assert(usb_tracks_live == 1 && op1r_setting_get("usbtracks", -1) == 1);
-    frame("blue right: master + tracks", render);
+    frame("blue right: master + tracks pre", render);
+    usbout_turn(1024);
+    assert(usb_tracks_live == 2 && op1r_setting_get("usbtracks", -1) == 2);
+    frame("blue right again: master + tracks post", render);
+    usbout_turn(1024); assert(usb_tracks_live == 2);                     /* clamped */
+    usb_tracks_live = 0; usbout_load(); us_init(0); assert(op1r_setting_get("usbtracks", -1) == 2);   /* loaded */
+    usbout_turn(-1024); assert(usb_tracks_live == 1);
     usbout_turn(-1024);
     assert(usb_tracks_live == 0 && op1r_setting_get("usbtracks", -1) == 0);
+    op1r_setting_put("usbtracks", 7); assert(usbout_load() == 0);          /* out of range: master */
+    op1r_setting_put("usbtracks", 0);
 
     usbout_turn(-1024); assert(op1r_setting_get("usbtracks", -1) == 0);      /* already there: no change */
     usbout_turn(300); usbout_turn(300); assert(usb_tracks_live == 0);   /* < 1 detent */
