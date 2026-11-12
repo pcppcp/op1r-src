@@ -140,6 +140,7 @@ int main(int argc, char **argv)
     *(uint32_t *)v0 = 0xdeadbeef;                           /* firmware vtable word */
     for (int i = 0; i < 128; i++) host_voice_env[i] = 24000;   /* stock envelope: sustaining */
     if (note) ENGINE.note_on(v0, host_knobs[0]);
+    if (getenv("HOST_SHIFT")) host_shift = atoi(getenv("HOST_SHIFT"));   /* Shift held (screens with Shift views) */
     if (getenv("HOST_ACCEL")) sscanf(getenv("HOST_ACCEL"), "%hd,%hd,%hd", &host_accel[0], &host_accel[1], &host_accel[2]);   /* after note-on: tilted from home */
     SCREEN.init(0);
     for (int f = 0; f < frames; f++) {
