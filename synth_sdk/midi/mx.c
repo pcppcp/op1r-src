@@ -110,7 +110,7 @@ static int8_t dpad = -1;                                   /* CC 37: target pad,
 
 typedef struct { int16_t *w; int k; const int16_t *rg; setter set; void *patch; int page2, save_master; } tgt_t;
 
-static int lfo_quad(const int16_t *w) { int m = (uint16_t)w[7] >> 8; return m >= 0xA5 && m <= 0xAF; }
+static int lfo_quad(const int16_t *w) { int m = (uint16_t)w[7] >> 8; return (m >= 0xA5 && m <= 0xAF) || (m & 0xB2) == 0xA0; }   /* + quad's mute bits */
 static int pad_now(void) { int p = dpad >= 0 ? dpad : LAST_PAD; return p >= 0 && p < 24 ? p : 0; }
 
 /* where target id lives now; 0 if it cannot be set / read at the moment */
