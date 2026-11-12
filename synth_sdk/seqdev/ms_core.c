@@ -118,7 +118,8 @@ static int insert(ms_t *s, int track, int32_t pos, const ms_ev *e0)   /* 0 ok; c
     }
     ms_slot *x = res(s, *link);
     if (!x) { s->underruns++; s->dropped++; return -1; }
-    for (;;) {                                  /* the slot whose range takes e: before the next slot's first event */
+    for (int hop = 0;; hop++) {                 /* the slot whose range takes e: before the next slot's first event */
+        if (hop >= MS_RAM) { s->dropped++; return -1; }   /* (more than every buffer: a damaged chain) */
         ms_slot *nx = x->next == MS_NONE ? 0 : res(s, x->next);
         if (x->next != MS_NONE && !nx) { s->underruns++; s->dropped++; return -1; }
         if (!nx || !nx->n || e.off < nx->ev[0].off) break;
@@ -144,7 +145,7 @@ static ms_ev *find_note(ms_t *s, int track, int32_t pos, int note, int ch)   /* 
 {
     if (pos < 0 || pos > MS_MAXPOS) return 0;
     uint16_t off = (uint16_t)(pos & 0xFFFF);
-    for (int sl = s->h.first[track][pos >> MS_PAGE_BITS]; sl != MS_NONE;) {
+    for (int sl = s->h.first[track][pos >> MS_PAGE_BITS], hop = 0; sl != MS_NONE && hop < MS_RAM; hop++) {
         ms_slot *x = res(s, sl);
         if (!x) return 0;
         for (int i = x->n - 1; i >= 0; i--)
@@ -186,7 +187,7 @@ static void cross(ms_t *s, int32_t a, int32_t b)
     for (int t = 0; t < MS_TRACKS; t++) {
         if (s->h.mute[t]) continue;
         for (int p = (int)(lo >> MS_PAGE_BITS); p <= (int)(hi >> MS_PAGE_BITS); p++)
-            for (int sl = s->h.first[t][p]; sl != MS_NONE;) {
+            for (int sl = s->h.first[t][p], hop = 0; sl != MS_NONE && hop < MS_RAM; hop++) {   /* (bounded: audio thread) */
                 ms_slot *x = res(s, sl);
                 if (!x) { s->underruns++; break; }
                 for (int i = 0; i < x->n; i++) {
@@ -263,18 +264,21 @@ void ms_cc_in(ms_t *s, int cc, int val, int ch)
 }
 
 /* ---- main loop: cache ---- */
-static int load_slot(ms_t *s, int slot)     /* resident (reads it); -1 no buffer / bad slot */
+static int load_slot(ms_t *s, int slot, int track, int page)   /* resident (reads it); -1 no buffer; 1 not of this chain */
 {
-    if (s->where[slot] != 0xFF) return 0;
+    if (!(s->h.used[slot >> 3] & (1 << (slot & 7)))) return 1;   /* a free slot: stale link (a lost slot write) */
+    if (s->where[slot] != 0xFF) { ms_slot *x = &s->ram[s->where[slot]]; return x->track != track || x->page != page; }
     int b = buf_free(s);
     if (b < 0) return -1;
     ms_slot *x = &s->ram[b];
     if (s->env->read_slot(slot, x) || x->magic != MS_MAGIC || x->slot != slot || x->n > MS_SLOT_EV ||
         slot_crc(x) != x->crc) {
         clr(x, (int)sizeof *x);                  /* damaged: an empty slot, the rest of the chain is lost */
-        x->magic = MS_MAGIC; x->slot = (uint16_t)slot; x->next = MS_NONE; x->ver = 1;
+        x->magic = MS_MAGIC; x->slot = (uint16_t)slot; x->track = (uint8_t)track; x->page = (uint16_t)page;
+        x->next = MS_NONE; x->ver = 1;
         s->ram_dirty[b] = 1;
-    } else s->ram_dirty[b] = 0;
+    } else if (x->track != track || x->page != page) return 1;   /* another chain's slot */
+    else s->ram_dirty[b] = 0;
     if (x->next != MS_NONE && x->next >= MS_SLOTS) x->next = MS_NONE;
     uint32_t m = s->env->irq_off();
     s->ram_slot[b] = (uint16_t)slot; s->where[slot] = (uint8_t)b; s->ram_use[b] = 1;
@@ -296,14 +300,30 @@ static int in_window(ms_t *s, const ms_slot *x, int page, int lp)
 {
     return (x->page + 1 >= page && x->page <= page + 3) || (lp >= 0 && x->page >= lp && x->page <= lp + 1);
 }
+static int in_chain(ms_t *s, int track, int page, int slot, int k)   /* slot among the first k of the chain */
+{
+    for (int sl = s->h.first[track][page]; k-- > 0; sl = s->ram[s->where[sl]].next) if (sl == slot) return 1;
+    return 0;
+}
 int ms_load_range(ms_t *s, int track, int pa, int pb)   /* make pages [pa, pb] of a track resident; 0 all */
 {
     int ok = 0;
-    for (int p = pa < 0 ? 0 : pa; p <= pb && p < MS_PAGES; p++)
-        for (int sl = s->h.first[track][p]; sl != MS_NONE;) {
-            if (load_slot(s, sl)) { ok = -1; break; }
-            sl = res(s, sl)->next;
+    for (int p = pa < 0 ? 0 : pa; p <= pb && p < MS_PAGES; p++) {
+        uint16_t *link = &s->h.first[track][p];
+        ms_slot *px = 0;
+        for (int k = 0; *link != MS_NONE; k++) {
+            int r = in_chain(s, track, p, *link, k) ? 1 : load_slot(s, *link, track, p);
+            if (r < 0) { ok = -1; break; }
+            if (r) {                                /* stale, another chain's or a cycle (lost slot write): the chain ends */
+                uint32_t m = s->env->irq_off();
+                *link = MS_NONE;
+                if (px) dirty(s, px); else s->head_dirty = 1;
+                s->env->irq_on(m);
+                break;
+            }
+            px = res(s, *link); link = &px->next;
         }
+    }
     return ok;
 }
 void ms_service(ms_t *s, int budget)
@@ -348,7 +368,8 @@ static int load_track_range(ms_t *s, int t, int32_t a, int32_t b)
     return ms_load_range(s, t, (int)(a >> MS_PAGE_BITS), (int)(b >> MS_PAGE_BITS));
 }
 /* copy the events starting in [a, b) of the tracks in mask (bit t) into the clipboard, positions relative to the
- * first copied event (clip_first: its position, -1 when nothing was copied) */
+ * first copied event (clip_first: its position, -1 when nothing was copied); -1 and an empty clipboard when more
+ * than MS_CLIP events */
 int ms_copy(ms_t *s, int32_t a, int32_t b, int mask)
 {
     if (a < 0) a = 0;
@@ -359,11 +380,12 @@ int ms_copy(ms_t *s, int32_t a, int32_t b, int mask)
     for (int t = 0; t < MS_TRACKS; t++) {
         if (!(mask >> t & 1)) continue;
         for (int p = (int)(a >> MS_PAGE_BITS); p <= (int)((b - 1) >> MS_PAGE_BITS); p++)
-            for (int sl = s->h.first[t][p]; sl != MS_NONE;) {
+            for (int sl = s->h.first[t][p], hop = 0; sl != MS_NONE && hop < MS_RAM; hop++) {
                 ms_slot *x = res(s, sl);
-                for (int i = 0; i < x->n && s->nclip < MS_CLIP; i++) {
+                for (int i = 0; i < x->n; i++) {
                     int32_t q = ((int32_t)p << MS_PAGE_BITS) | x->ev[i].off;
                     if (q < a || q >= b) continue;
+                    if (s->nclip >= MS_CLIP) { s->nclip = 0; s->clip_len = s->clip_first = -1; return -1; }   /* (a cut would lose the rest) */
                     s->clip[s->nclip] = x->ev[i]; s->clip_pos[s->nclip] = q; s->clip_trk[s->nclip++] = (uint8_t)t;
                     if (s->clip_first < 0 || q < s->clip_first) s->clip_first = q;
                 }
@@ -380,7 +402,7 @@ int ms_cut(ms_t *s, int32_t a, int32_t b, int mask)
     for (int t = 0; t < MS_TRACKS; t++) {
         if (!(mask >> t & 1)) continue;
         for (int p = (int)(a >> MS_PAGE_BITS); p <= (int)((b - 1) >> MS_PAGE_BITS); p++)
-            for (int sl = s->h.first[t][p]; sl != MS_NONE;) {
+            for (int sl = s->h.first[t][p], hop = 0; sl != MS_NONE && hop < MS_RAM; hop++) {
                 ms_slot *x = res(s, sl);
                 uint32_t m = s->env->irq_off();
                 int o = 0;
@@ -395,7 +417,7 @@ int ms_cut(ms_t *s, int32_t a, int32_t b, int mask)
         for (int p = (int)(a >> MS_PAGE_BITS); p <= (int)((b - 1) >> MS_PAGE_BITS); p++) {   /* drop empty slots */
             uint32_t m = s->env->irq_off();
             uint16_t *link = &s->h.first[t][p];
-            while (*link != MS_NONE) {
+            for (int hop = 0; *link != MS_NONE && hop < MS_RAM; hop++) {
                 ms_slot *x = res(s, *link);
                 if (!x) break;
                 if (!x->n) { int sl = *link; *link = x->next; slot_free(s, sl); s->head_dirty = 1; }
@@ -430,31 +452,37 @@ int32_t ms_grid_step(int grid, int32_t bpm_q8)
     return (int32_t)(((int64_t)2646000 << 8) / ((int64_t)bpm_q8 * div[grid]));   /* 44100 * 60 / bpm / div */
 }
 static int32_t snap(int32_t p, int32_t step) { int32_t q = (p + step / 2) / step * step; return q > MS_MAXPOS ? q - step : q; }
-/* move one note (track t, position pos, note / channel) to np: removed from its slot, inserted again (len kept) */
+/* the first note (track t, position pos, note / channel) of its chain: its slot (0: none), index, link to the slot */
+static ms_slot *note_at(ms_t *s, int t, int32_t pos, int note, int ch, uint16_t **lk, int *ix)
+{
+    uint16_t off = (uint16_t)(pos & 0xFFFF);
+    uint16_t *link = &s->h.first[t][pos >> MS_PAGE_BITS];
+    for (int hop = 0; *link != MS_NONE && hop < MS_RAM; hop++) {
+        ms_slot *x = res(s, *link);
+        if (!x) return 0;
+        for (int i = 0; i < x->n; i++)
+            if (x->ev[i].off == off && x->ev[i].kind == MS_NOTE && x->ev[i].d1 == note && x->ev[i].ch == ch) { *lk = link; *ix = i; return x; }
+        link = &x->next;
+    }
+    return 0;
+}
+/* move one note (track t, position pos, note / channel) to np: inserted there (len kept), then removed from its slot */
 static int move_note(ms_t *s, int t, int32_t pos, int note, int ch, int32_t np)
 {
     if (np == pos) return 0;
     if (ms_load_range(s, t, (int)(pos >> MS_PAGE_BITS), (int)(pos >> MS_PAGE_BITS)) ||
         ms_load_range(s, t, (int)(np >> MS_PAGE_BITS), (int)(np >> MS_PAGE_BITS))) return -1;
-    int p = (int)(pos >> MS_PAGE_BITS);
-    uint16_t off = (uint16_t)(pos & 0xFFFF);
-    for (uint16_t *link = &s->h.first[t][p]; *link != MS_NONE;) {
-        ms_slot *x = res(s, *link);
-        if (!x) return -1;
-        for (int i = 0; i < x->n; i++) {
-            if (x->ev[i].off != off || x->ev[i].kind != MS_NOTE || x->ev[i].d1 != note || x->ev[i].ch != ch) continue;
-            ms_ev e = x->ev[i];
-            uint32_t m = s->env->irq_off();
-            for (int j = i; j + 1 < x->n; j++) x->ev[j] = x->ev[j + 1];
-            x->n--; dirty(s, x);
-            if (!x->n) { int sl = *link; *link = x->next; slot_free(s, sl); s->head_dirty = 1; }
-            int r = insert(s, t, np, &e);
-            s->env->irq_on(m);
-            return r;
-        }
-        link = &x->next;
+    uint16_t *link; int i;
+    uint32_t m = s->env->irq_off();
+    ms_slot *x = note_at(s, t, pos, note, ch, &link, &i);    /* (0: edited away meanwhile) */
+    int r = x ? insert(s, t, np, &x->ev[i]) : -1;          /* the copy first: a failed insert loses nothing */
+    if (!r && (x = note_at(s, t, pos, note, ch, &link, &i))) {   /* again: the insert may have split or shifted it */
+        for (int j = i; j + 1 < x->n; j++) x->ev[j] = x->ev[j + 1];
+        x->n--; dirty(s, x);
+        if (!x->n) { int sl = *link; *link = x->next; slot_free(s, sl); s->head_dirty = 1; }
     }
-    return -1;                                   /* not found (edited away meanwhile) */
+    s->env->irq_on(m);
+    return r;
 }
 int ms_quantize(ms_t *s, int track, int32_t a, int32_t b, int32_t step)
 {
@@ -465,7 +493,7 @@ int ms_quantize(ms_t *s, int track, int32_t a, int32_t b, int32_t step)
     static ms_ev ev[MS_TAKE]; static int32_t ps[MS_TAKE];
     int n = 0;                                    /* collect first: moved notes must not be met again */
     for (int p = (int)(a >> MS_PAGE_BITS); p <= (int)((b - 1) >> MS_PAGE_BITS) && n < MS_TAKE; p++)
-        for (int sl = s->h.first[track][p]; sl != MS_NONE && n < MS_TAKE;) {
+        for (int sl = s->h.first[track][p], hop = 0; sl != MS_NONE && n < MS_TAKE && hop < MS_RAM; hop++) {
             ms_slot *x = res(s, sl);
             if (!x) break;
             for (int i = 0; i < x->n && n < MS_TAKE; i++) {
@@ -495,7 +523,7 @@ int ms_events(ms_t *s, int t, int32_t a, int32_t b, ms_ev *out, int32_t *pos, in
     if (a < 0) a = 0;
     if (b > MS_MAXPOS) b = MS_MAXPOS;
     for (int p = (int)(a >> MS_PAGE_BITS); p <= (int)(b >> MS_PAGE_BITS) && n < max; p++)
-        for (int sl = s->h.first[t][p]; sl != MS_NONE && n < max;) {
+        for (int sl = s->h.first[t][p], hop = 0; sl != MS_NONE && n < max && hop < MS_RAM; hop++) {   /* (bounded: GUI thread) */
             ms_slot *x = res(s, sl);
             if (!x) break;
             for (int i = 0; i < x->n && n < max; i++) {

@@ -1,14 +1,17 @@
 /* Host test of seqdev/ms_core.c (docs/39): record notes + CCs on the tape timeline, playback with note lengths, slot
  * splits, persistence through the file, streaming through the RAM cache, cut / copy / paste, a damaged slot, the loop
- * wrap, MIDI channel routing.   cc -I.. -fsanitize=address,undefined mseq_test.c ../seqdev/ms_core.c */
+ * wrap, MIDI channel routing, chains after a lost slot write, a full clipboard, a failed quantize move.   cc -I.. -fsanitize=address,undefined mseq_test.c ../seqdev/ms_core.c */
 #include "../seqdev/ms_core.h"
 #include <assert.h>
+#include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static int32_t tpos; static int tplay, lon; static int32_t lin, lout;
 static ms_slot disk[MS_SLOTS]; static int disk_ok[MS_SLOTS]; static ms_head dhead; static int dhead_ok;
-static int reads, writes;
+static int reads, writes, drop_slot = -1;           /* drop_slot: that slot's writes are lost (power off) */
 typedef struct { int t, dest, ch, kind, d1, d2, on; int32_t pos; } call_t;
 static call_t calls[4096]; static int ncalls;
 static int32_t e_pos(void) { return tpos; }
@@ -17,7 +20,7 @@ static int e_loop(int32_t *a, int32_t *b) { *a = lin; *b = lout; return lon; }
 static void e_play(int t, int dest, int ch, int kind, int d1, int d2, int on)
 { if (ncalls < 4096) calls[ncalls++] = (call_t){ t, dest, ch, kind, d1, d2, on, tpos }; }
 static int e_rs(int sl, ms_slot *o) { reads++; if (!disk_ok[sl]) return -1; *o = disk[sl]; return 0; }
-static int e_ws(int sl, const ms_slot *i) { writes++; disk[sl] = *i; disk_ok[sl] = 1; return 0; }
+static int e_ws(int sl, const ms_slot *i) { writes++; if (sl == drop_slot) return -1; disk[sl] = *i; disk_ok[sl] = 1; return 0; }
 static int e_rh(void *h, int n) { if (!dhead_ok) return -1; memcpy(h, &dhead, n); return 0; }
 static int e_wh(const void *h, int n) { memcpy(&dhead, h, n); dhead_ok = 1; return 0; }
 static uint32_t e_off(void) { return 0; }
@@ -26,6 +29,16 @@ static const ms_env env = { e_pos, e_playing, e_loop, e_play, e_rs, e_ws, e_rh, 
 static ms_t A, B;                      /* (large: static) */
 
 static void run(ms_t *s, int32_t to, int step) { while (tpos < to) { tpos += step; ms_block(s); } }
+static void rec(ms_t *s, int t, int32_t from, int n, int step)   /* n short notes on track t */
+{
+    tplay = 1; tpos = from; ms_block(s); s->sel = t; s->rec = 1;
+    for (int i = 0; i < n; i++) { ms_note_in(s, 60, 100, 0, 1); ms_note_in(s, 60, 0, 0, 0); tpos += step; ms_block(s); }
+    s->rec = 0; tplay = 0; ms_block(s);
+}
+static void settle(ms_t *s) { for (int k = 0; k < 10; k++) ms_service(s, 1000); }
+static int last_slot(int t, int p) { int sl = dhead.first[t][p]; while (disk[sl].next != MS_NONE) sl = disk[sl].next; return sl; }
+static void reseal(int sl) { disk[sl].crc = 0; disk[sl].crc = ms_crc(&disk[sl], 16 + 8 * disk[sl].n); }
+static void hang(int sig) { (void)sig; printf("FAIL: a chain walk did not return (cycle)\n"); _exit(1); }
 static int notes_on(int from, int t) { int n = 0; for (int i = from; i < ncalls; i++) n += calls[i].on && calls[i].kind == MS_NOTE && calls[i].t == t; return n; }
 
 int main(void)
@@ -167,6 +180,61 @@ int main(void)
     assert(notes_on(0, 3) == 3);
     for (int i = 0; i < ncalls; i++) if (calls[i].on) assert(calls[i].dest == MS_DEST_MIDI && calls[i].ch == 9);
     printf("loop wrap, MIDI channel routing ok\n");
+
+    signal(SIGALRM, hang); alarm(20);
+    {   /* a slot write lost (power off) after a cut freed the old first slot: the stale copy on disk points back */
+        ms_init(&A, &env); dhead_ok = 0; memset(disk_ok, 0, sizeof disk_ok); lon = 0;
+        rec(&A, 0, 1000, 100, 256); settle(&A);                  /* slot 0 -> slot 1 */
+        ms_cut(&A, 0, 1000 + 40 * 256, 1); settle(&A);           /* slot 0 freed, first = 1 */
+        drop_slot = 0; rec(&A, 0, 1000 + 40 * 256 + 64, 70, 64); settle(&A); drop_slot = -1;   /* 1 splits into 0: lost */
+        assert(disk[1].next == 0 && disk[0].next == 1 && !(dhead.used[0] & 1));
+        ms_init(&B, &env); assert(ms_load(&B) == 0);
+        tpos = 0; ms_service(&B, 4);                             /* (hung here every boot) */
+        assert(ms_load_range(&B, 0, 0, 0) == 0 && ms_count(&B, 0) == disk[1].n && B.ram[B.where[1]].next == MS_NONE);
+        settle(&B); assert(disk[1].next == MS_NONE);             /* the cut chain is saved */
+    }
+    {   /* a cycle through used slots, a link into another page's chain: cut there, the events of both stay */
+        ms_init(&A, &env); dhead_ok = 0; memset(disk_ok, 0, sizeof disk_ok);
+        rec(&A, 1, 1000, 100, 256); rec(&A, 1, 3 * 65536, 5, 256); settle(&A);
+        int l0 = last_slot(1, 0);
+        assert(l0 != dhead.first[1][0]);
+        disk[l0].next = dhead.first[1][0]; reseal(l0);
+        ms_init(&B, &env); assert(ms_load(&B) == 0);
+        tpos = 0; ms_service(&B, 4);
+        assert(ms_load_range(&B, 1, 0, MS_PAGES - 1) == 0 && ms_count(&B, 1) == 105);
+        disk[l0].next = dhead.first[1][3]; reseal(l0);
+        ms_init(&B, &env); assert(ms_load(&B) == 0);
+        assert(ms_load_range(&B, 1, 0, MS_PAGES - 1) == 0 && ms_count(&B, 1) == 105);
+        /* resident cycle (RAM): playback and drawing walks stay bounded, the next prefetch cuts it */
+        B.ram[B.where[l0]].next = B.h.first[1][0];
+        ms_events(&B, 1, 0, 65535, 0, 0, 1 << 30);
+        tplay = 1; tpos = 0; ms_block(&B); run(&B, 65536, 64); tplay = 0; ms_block(&B);
+        assert(ms_load_range(&B, 1, 0, 0) == 0 && ms_count(&B, 1) == 105);
+    }
+    printf("chains after a lost slot write: stale / foreign links and cycles cut, walks bounded ok\n");
+    {   /* LIFT of more events than the clipboard holds: refused, nothing lost */
+        ms_init(&A, &env); dhead_ok = 0; memset(disk_ok, 0, sizeof disk_ok);
+        A.sel = 0; A.rec = 1; tplay = 1; tpos = 0; ms_block(&A);
+        for (int i = 0; i < 600; i++) { tpos += 441; ms_block(&A); ms_cc_in(&A, 1, i & 127, 0); }
+        A.rec = 0; tplay = 0; ms_block(&A);
+        int n = ms_count(&A, 0);
+        assert(n > MS_CLIP && ms_cut(&A, 0, 4 * 65536, 1) == -1 && ms_count(&A, 0) == n && A.clip_len == -1);
+        assert(ms_paste(&A, 0) == -1 && ms_count(&A, 0) == n);
+        assert(ms_cut(&A, 0, 65536, 1) == 0 && A.nclip == n - ms_count(&A, 0) && ms_paste(&A, A.clip_first) == 0 && ms_count(&A, 0) == n);
+    }
+    printf("full clipboard: LIFT refused, nothing lost ok\n");
+    {   /* quantize move into a page that can't get a slot (no free buffer): the note stays */
+        ms_init(&A, &env); dhead_ok = 0; memset(disk_ok, 0, sizeof disk_ok);
+        int32_t st = ms_grid_step(MS_Q_16, 120 << 8);
+        rec(&A, 3, 65536 - 200, 1, 64);                           /* snaps to the next page */
+        for (int b = 0; b < MS_RAM; b++) if (A.ram_slot[b] == MS_NONE) A.ram_slot[b] = MS_SLOTS - 1 - b;   /* taken */
+        assert(ms_quantize_take(&A, st) == 0 && ms_count(&A, 3) == 1);
+        for (int b = 0; b < MS_RAM; b++) if (A.ram_slot[b] == MS_SLOTS - 1 - b) A.ram_slot[b] = MS_NONE;
+        rec(&A, 3, 65536 - 300, 1, 64);
+        assert(ms_quantize_take(&A, st) == 1 && ms_count(&A, 3) == 2);
+    }
+    printf("quantize: a failed move keeps the note ok\n");
+    alarm(0);
     printf("mseq_test: ok\n");
     return 0;
 }
