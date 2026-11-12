@@ -3,6 +3,7 @@
 
     op1push.py op1_246_custom --port /dev/snd/midiC3D0    # only what differs on the OP-1 -> staged
     op1push.py op1_246_custom --port ... --dry-run        # list what would be sent
+    op1push.py op1_246_custom --port ... --size-only      # compare sizes only (fast, development: ~1 s, no CRC)
     op1push.py op1_246_custom --port ... --force          # every file of the tree, without asking
     op1push.py op1_246_custom --port ... --files content/display/x.svg OP1_vdk.ldr   # these, unconditionally
     op1push.py --dump session.bin op1_246_custom          # the session as SysEx messages (C host test)
@@ -151,7 +152,7 @@ def ldr_ident(data):
     return m.group(1).decode() if m else None
 
 
-def push(port, tree, paths, select=True, dry=False, timeout=2.0, log=print, deletes=(), list_only=False):
+def push(port, tree, paths, select=True, dry=False, timeout=2.0, log=print, deletes=(), list_only=False, size_only=False):
     """paths: candidates (tree-relative); select: send only those that differ on the device"""
     import time
     p = UsbipPort(port[6:]) if port.startswith('usbip:') else Port(port); seq = 0
@@ -184,7 +185,7 @@ def push(port, tree, paths, select=True, dry=False, timeout=2.0, log=print, dele
         32 KB per message: the host carries offset and CRC until the end)"""
         st, pl = ask(STAT, path.encode() + b'\0')
         if st or struct.unpack('<I', pl[:4])[0] != len(data): return st, False
-        if proto < 4: return st, True                             # (size only)
+        if proto < 4 or size_only: return st, True               # (size only)
         off = crc = 0
         while off < len(data):
             st, pl = ask(CRC, path.encode() + b'\0' + struct.pack('<II', off, crc))
@@ -207,7 +208,7 @@ def push(port, tree, paths, select=True, dry=False, timeout=2.0, log=print, dele
                 if st not in (0, 10): sys.exit(f'{path}: STAT refused ({ST.get(st, st)})')
                 if not same: log(f'  {"missing " if st else "differs "} {path}')
             if not same: keep.append(path)
-        if proto < 4 and 'OP1_vdk.ldr' in keep and FACTORY_DB in paths and FACTORY_DB not in keep:
+        if (proto < 4 or size_only) and 'OP1_vdk.ldr' in keep and FACTORY_DB in paths and FACTORY_DB not in keep:
             keep.append(FACTORY_DB)                               # engine / FX rows: often the same size
             log(f'  with the firmware: {FACTORY_DB}')
         log(f'{len(keep)} of {len(paths)} files differ (checked in {time.time() - t0:.1f} s)')
@@ -284,6 +285,8 @@ def main():
     ap.add_argument('--port', help='raw MIDI device of the OP-1 (/dev/snd/midiC3D0) or usbip:HOST:PORT (emulator)')
     ap.add_argument('--files', nargs='*', help='send these files (paths in the tree) without asking the device')
     ap.add_argument('--dry-run', action='store_true', help='only list what differs on the device')
+    ap.add_argument('--size-only', action='store_true',
+                    help='compare sizes only, no CRC (protocol 3 behaviour: fast; a same-size change is missed)')
     ap.add_argument('--force', action='store_true', help='send every file of the tree without checking the device')
     ap.add_argument('--selftest', action='store_true')
     ap.add_argument('--list', action='store_true', help='list the plugin files on the OP-1 (/yaffs2/plugins)')
@@ -308,7 +311,7 @@ def main():
             os.path.exists(os.path.join(a.tree, FACTORY_DB)):
         a.files.append(FACTORY_DB)                                # engine / FX rows belong to the firmware build
     if a.port:
-        return push(a.port, a.tree, sorted(a.files), select, a.dry_run)
+        return push(a.port, a.tree, sorted(a.files), select, a.dry_run, size_only=a.size_only)
     files = [(p, open(os.path.join(a.tree, p), 'rb').read()) for p in sorted(a.files)]
     msgs = session(files)
     with open(a.dump, 'wb') as f:
