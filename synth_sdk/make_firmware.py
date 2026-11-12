@@ -5,6 +5,7 @@
       (synths / FX: plugins/*/plugin.json, by default built as /yaffs2/plugins/<name>.op1p files, docs/37;
        --builtin: those compiled into the firmware instead)
                                               + ../op1_246_custom-delta.op1 (changes since the installed tree, docs/34)
+                                              + ../op1_246_custom-symbols.json (crash screen addresses -> names, symmap.py)
 
   --release  boot screen shows only "op1r <VERSION>" (use for the patcher); local builds add the build time
 
@@ -409,6 +410,7 @@ def build(engs, fxs):
     cmds.append('bfin-elf-objcopy -O binary -j .l1pulse build/synth.elf build/l1pulse.bin')
     cmds.append('bfin-elf-objcopy -O binary -j .l1master build/synth.elf build/l1master.bin')
     cmds.append('bfin-elf-nm build/synth.elf > build/synth.sym')
+    cmds.append('bfin-elf-nm -S -n --defined-only build/synth.elf > build/synth.nms')   # with sizes: symmap.py
     cmds.append('bfin-elf-objdump -d build/synth.elf > build/synth.lst && bfin-elf-size build/synth.elf')
     ncc = len(srcs)                                  # the compiles run in parallel (all cores), then link etc. in order
     open(os.path.join(HERE, 'build', 'cc.list'), 'w').write('\n'.join(cmds[:ncc]) + '\n')
@@ -719,13 +721,18 @@ def main(opz=False, release=False, plugin_files='all', builtin=''):
     with ThreadPoolExecutor(os.cpu_count()) as pool:  # plugin files build in parallel, alongside the core
         jobs = [pool.submit(make_plugin.build, e['name'], pl_out) for e in file_plugins]
         code, hooks, syms = build(engs, fxs)
-        for j in jobs: j.result()                    # re-raises a plugin's build error
+        outs = [j.result() for j in jobs]           # re-raises a plugin's build error
     assert len(code) < 0x100000
     shutil.rmtree(OUT_FW, ignore_errors=True); shutil.copytree(SRC_FW, OUT_FW)
     if file_plugins:
         shutil.copytree(pl_out, os.path.join(OUT_FW, 'plugins'), dirs_exist_ok=True)
     patch_ldr(os.path.join(SRC_FW, 'OP1_vdk.ldr'), os.path.join(OUT_FW, 'OP1_vdk.ldr'), code, hooks, syms, opz, release)
     print(f'code {len(code)} bytes @{CODE_BASE:#x}; ' + ', '.join(f'{k}={syms[k]:#x}' for k in SLOTS))
+    try:                                         # crash screen addresses -> names (tools/op1crash.py, patcher web/crash.html)
+        import symmap
+        symmap.write(OUT_FW + '-symbols.json', symmap.from_build([os.path.basename(o)[:-5] for o in outs]))
+    except Exception as x:                       # never fails the firmware build
+        print(f'warning: no symbol map ({x!r})')
     patch_db(os.path.join(OUT_FW, 'content', 'op1_factory.db'), engs, fxs)
     disp = os.path.join(OUT_FW, 'content', 'display')
     for e in engs + fxs:

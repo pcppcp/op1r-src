@@ -90,6 +90,14 @@ def image(path):
     return f, base, img, bss_size, syms
 
 
+def funcs(f, base):
+    """code symbols as [offset in the image, size, name] (crash reports: symmap.py)"""
+    text = [i for i, s in enumerate(f.iter_sections()) if s.name == '.text']
+    return sorted([s['st_value'] - base, s['st_size'], s.name[1:] if s.name.startswith('_') else s.name]
+                  for s in f.get_section_by_name('.symtab').iter_symbols()
+                  if s.name and not s.name.startswith(('.', '$')) and s['st_shndx'] in text)
+
+
 def relocs(f, base, n_img, imports):
     syms = f.get_section_by_name('.symtab')
     out = []
@@ -182,6 +190,11 @@ def build(name, out_dir=OUT):
     os.makedirs(out_dir, exist_ok=True)
     out = os.path.join(out_dir, f'{e["name"].replace(" ", "_").replace("+", "plus")}.op1p')
     open(out, 'wb').write(data)
+    try:                                                           # symbol map for crash reports (symmap.py)
+        os.makedirs(OUT, exist_ok=True)
+        json.dump(funcs(f0, base0), open(os.path.join(OUT, os.path.basename(out)[:-5] + '.funcs.json'), 'w'))
+    except Exception as x:                                         # never fails the plugin build
+        print(f'warning: {name}: no symbol list ({x!r})')
     if out_dir == OUT:                                             # host test: image at CHECK_BASE
         open(out[:-5] + '.ref', 'wb').write(bytes(imgb) + bytes(bss))
     print(f'{out}: {len(data)} B (svg {len(head)}, image {len(img0)} + bss {bss}, {len(rel)} relocs, '
