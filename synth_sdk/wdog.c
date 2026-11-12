@@ -32,4 +32,14 @@ void wd_arm(void)                                             /* GUI thread, onc
     WDOG_CTL = 0x0002;                                        /* enabled, event NMI */
     wd_armed = 1;
 }
-void wd_off(void) { WDOG_CTL = 0x0AD0; wd_armed = 0; }        /* power-off flush: no NMI while the OP-1 goes down */
+void wd_off(void) { WDOG_CTL = 0x0AD0; wd_armed = 0; }
+void wd_crash(void)                                           /* crash screen (crash.c): the longest count, ~35 s to photograph
+                                                               * it, then the NMI record and the reset as for a hang */
+{
+    if (!wd_armed) return;
+    WDOG_CTL = 0x0AD0;
+    WDOG_CNT = 0xFFFFFFFFu;
+    WDOG_STAT = 0;
+    WDOG_CTL = 0x0002;
+    wd_armed = 0;                                             /* no kicks any more (nothing runs) */
+}        /* power-off flush: no NMI while the OP-1 goes down */

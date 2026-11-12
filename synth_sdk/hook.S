@@ -614,12 +614,30 @@ _pj_sampler_over:
 	.section .hook_diskprobe,"ax"
 	call _pj_probe_open;
 	.section .hook_crash,"ax"
-	jump.l _crash_print;                     /* LINK 0x10 of the FP-chain printer 0x0191995C: our crash lines */
+	jump.l _crash_stub;                      /* LINK 0x10 of the FP-chain printer 0x0191995C: our crash lines */
 	.section .hook_bgsgc,"ax"
 	call _bgs_idle_gc;
 	.section .hook_bgsqueue,"ax"
 	jump.l _bgs_queue_slot;
 	.text
+/* te_fatal_show_message 0x0191995C (R0 = message): its frame rebuilt as the stock entry makes it (LINK 0x10, R7:4 / P5:3
+ * pushed, P5 = the text buffer 0x01BA138C, 16 bytes of locals), our text instead of its FP chain (crash.c), then its own
+ * tail from 0x01919A1A: 0x019D1FF4, the text drawn with the built-in bitmap font (0x019416EA), the frame sent to the
+ * display per variant (0x01A36AB6), its epilogue. Without that tail the screen was never drawn (docs/65). */
+	.global _crash_stub
+	.align 2
+_crash_stub:
+	call _crash_frame;                       /* the screen (returns through the stock epilogue) */
+	call _crash_wait;                        /* a key restarts (crash.c); never returns */
+_crash_frame:
+	LINK 0x10;
+	[--SP] = (R7:4, P5:3);
+	P5.L = 0x138c; P5.H = 0x01ba;
+	SP += -0x10;
+	call _crash_print;
+	P5.L = 0x138c; P5.H = 0x01ba;
+	P0.L = 0x9a1a; P0.H = 0x0191;
+	jump (P0);
 	.global _bgs_queue_stock
 	.align 2
 _bgs_queue_stock:

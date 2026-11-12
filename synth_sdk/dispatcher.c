@@ -1153,6 +1153,9 @@ void key_event_hook(int code, int pressed)
      * (0x019EFE6C, word 0x018E62BC) and the COM controller leaves disk mode on it, so that one must reach the stock code */
     if (code == 0x3F && pressed == 0xA5) { extern void mx_apply(void); mx_apply(); return; }   /* MX_KEY_DOWN */
     { extern void cc_fb_key(int, int); cc_fb_key(code, pressed); }   /* CC feedback (midi/ccmap.c) */
+#ifdef CRASH_TEST
+    if (code == 0x00 && pressed) { static uint16_t bad[4] = { 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF }; ((void (*)(void))bad)(); }   /* test build: an undefined instruction (docs/65) */
+#endif
     if (du_prompt_key(code, pressed)) return;                    /* dev update prompt: T1 restart / T2 cancel */
     if (pressed) { extern void tfs_state_flush(void); tfs_state_flush(); }   /* FREE tracks saved first: its screen consumes keys */
     { extern int tfs_key(int, int); if (tfs_key(code, pressed)) return; }   /* free tape machine screen: T1..T4 */
