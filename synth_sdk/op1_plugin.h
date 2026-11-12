@@ -297,8 +297,12 @@ int16_t op1_page2_live(int fx, int pos, int k, int16_t stored);
  * type job. */
 #ifndef OP1_HOST
 int op1_patch_wait(void);
+/* 1 when no patch job runs now (no waiting): for a writer that can come back later instead of blocking. From a thread
+ * above the BgFileWorker, a write right after a 1 cannot be overtaken by a new job (it does not preempt us). */
+int op1_patch_idle(void);
 #else
 static inline int op1_patch_wait(void) { return 0; }
+static inline int op1_patch_idle(void) { return 1; }
 #endif
 static inline const int16_t *op1_knobs_shown(int fx, int pos, const int16_t *w, int16_t *buf)
 {
@@ -400,8 +404,8 @@ typedef struct {
 } op1_seq_t;
 #define OP1_SEQ_MAX 8                                  /* sequencer plugins loaded at once */
 
-/* ---- drum engine plugin (plugin.json "kind": "drum", docs/43): drum+ ----
- * One at a time. The core keeps the DrumSampler vtable slots, the "op1r" key in drum patches (also without the plugin),
+/* ---- drum engine plugin (plugin.json "kind": "drum", docs/43): drum+, perc ----
+ * Up to OP1_DRUMS_MAX; each claims its kits (is_plus) and has its own drum_types row. The core keeps the DrumSampler vtable slots, the "op1r" key in drum patches (also without the plugin),
  * the drum_types row (id 2); the plugin builds its own page screens (ui_build / ui_load). The core calls these when a
  * plugin is loaded, else the stock code. pad = the stock pad words (int16[8]). */
 typedef struct {
@@ -418,6 +422,7 @@ typedef struct {
     int  (*knob)(int knob, int delta);                /* 1 = consumed */
     int  (*key)(int code, int pressed);
 } op1_drum_t;
+#define OP1_DRUMS_MAX 4                              /* drum engine plugins at once: drum+ (row 2) and others (row 3..) */
 
 /* ---- sampler engine plugin (plugin.json "kind": "sampler", docs/46): sampler+ ----
  * One at a time. The core keeps the SynthSampler vtable slots (render / note_on / note_off), the Adsr_render entry

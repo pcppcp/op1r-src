@@ -39,7 +39,13 @@ int sp_adsr_stock(void *, int16_t *, const int16_t *, const int16_t *);   /* hoo
 void sp_replay(void);
 const op1_tool_t   *op1_tools[OP1_TOOL_MAX];                   /* tool plugins, in load order */
 int                 op1_tool_count;
-extern const op1_drum_t *op1_drum;                             /* drumplus/dp_core.c: the drum engine plugin (docs/43) */
+extern const op1_drum_t *op1_drum;                             /* drumplus/dp_core.c: drum+ (docs/43) */
+extern const op1_drum_t *op1_drums[OP1_DRUMS_MAX];             /* every drum engine plugin, op1_drum_n of them */
+extern int op1_drum_rows[OP1_DRUMS_MAX];
+extern volatile int op1_drum_n;
+static int seq(const char *a, const char *b);
+static char drum_label[OP1_DRUMS_MAX][16];                     /* drum_types name of each ("drum+" for drumplus) */
+static int drum_here(const char *label) { for (int i = 0; i < op1_drum_n; i++) if (seq(drum_label[i], label)) return 1; return 0; }
 extern const op1_engine_t *const op1_builtin_engines[];
 extern const int                 op1_builtin_engine_count;
 extern const char *const         op1_builtin_engine_names[], *const op1_builtin_sample_engine_names[];
@@ -74,7 +80,7 @@ extern volatile uint8_t op1_eng_page[4];
 extern volatile uint8_t op1_fx_page[3][4];
 void *read_fx_param_safe(int slot, int pos);
 int16_t op1_page2_live(int fx, int pos, int k, int16_t stored);
-int op1_patch_wait(void);
+int op1_patch_wait(void), op1_patch_idle(void);
 int  eu_fw_note_on(int pos, int note, int key, int vel);           /* seq/seq_core.c */
 void eu_fw_note_off(int midi);
 extern volatile uint8_t eu_rec_play;
@@ -142,7 +148,7 @@ static const struct { const char *name; void *addr; } exports[] = {
     { "read_fx_param_safe", (void *)read_fx_param_safe },
     { "op1_sc_source", (void *)op1_sc_source },
     { "op1_page2_live", (void *)op1_page2_live },
-    { "op1_patch_wait", (void *)op1_patch_wait },
+    { "op1_patch_wait", (void *)op1_patch_wait }, { "op1_patch_idle", (void *)op1_patch_idle },
     { "op1_sine_q", (void *)&op1_sine_q },
     { "op1_l1_claim", (void *)op1_l1_claim }, { "op1_l1_claim_state", (void *)op1_l1_claim_state },
     { "op1_l1_sine_quarter", (void *)op1_l1_sine_quarter },
@@ -434,17 +440,31 @@ static int load_one(void *db, const char *file)
         if (buf) FREE(buf);
         return r;
     }
-    if (!r && kind == OP1P_DRUM) {                                  /* drum engine (drum+): one, row id 2 */
-        uint8_t *mem = op1_drum ? 0 : MALLOC(v.mem_size);
-        if (!mem) r = op1_drum ? OP1P_E_HEADER : OP1P_E_SIZE;
+    if (!r && kind == OP1P_DRUM) {                                  /* drum engine: drum+ row 2, others row 3.. */
+        int n = op1_drum_n, plus = name && seq(name, "drumplus");
+        if (!name || n >= OP1_DRUMS_MAX || (plus && op1_drum)) r = OP1P_E_HEADER;
+        for (int i = 0; !r && i < n; i++) if (seq(drum_label[i], name)) r = OP1P_E_HEADER;   /* same name twice */
+        uint8_t *mem = r ? 0 : MALLOC(v.mem_size);
+        if (!r && !mem) r = OP1P_E_SIZE;
         if (!r) {
             op1p_relocate(&v, mem, (uint32_t)mem, imp);
             cache_sync(mem, v.mem_size); placed(mem, v.mem_size, file);
             total += v.mem_size;
-            op1_drum = (const op1_drum_t *)(mem + v.hdr->entry_off);
-            if (!db_has(DB_FACTORY(), "SELECT id FROM drum_types WHERE id=2"))
-                op1_db_write(DB_FACTORY(), "INSERT OR IGNORE INTO drum_types VALUES (2,'drum+','[0, 0, 0, 0, 0, 0, 0, 0]')");
-            kind_map('d', "drum+");
+            const op1_drum_t *d = (const op1_drum_t *)(mem + v.hdr->entry_off);
+            int row = 2;
+            if (!plus) { row = 3; for (int i = 0; i < n; i++) if (op1_drum_rows[i] >= row) row = op1_drum_rows[i] + 1; }
+            scat(drum_label[n], plus ? "drum+" : name);
+            char sql[128], num[4] = { (char)('0' + row), 0 };
+            char *o = scat(scat(scat(sql, "INSERT OR REPLACE INTO drum_types VALUES ("), num), ",'");
+            scat(scat(o, drum_label[n]), "','[0, 0, 0, 0, 0, 0, 0, 0]')");
+            if (plus) {
+                if (!db_has(DB_FACTORY(), "SELECT id FROM drum_types WHERE id=2"))
+                    op1_db_write(DB_FACTORY(), "INSERT OR IGNORE INTO drum_types VALUES (2,'drum+','[0, 0, 0, 0, 0, 0, 0, 0]')");
+            } else op1_db_write(DB_FACTORY(), sql);
+            op1_drums[n] = d; op1_drum_rows[n] = row;
+            if (plus) op1_drum = d;
+            op1_drum_n = n + 1;                                     /* the slot is complete: render may see it now */
+            kind_map('d', drum_label[n]);
         }
         if (buf) FREE(buf);
         return r;
@@ -590,7 +610,7 @@ void plug_boot(void)
         if (!map[i].present) continue;
         int here = map[i].kind == 's' ? map[i].n < op1_engine_count && op1_engines[map[i].n]
                  : map[i].kind == 'f' ? map[i].n < op1_fx_count && op1_fxs[map[i].n]
-                 : map[i].kind == 'd' ? op1_drum != 0
+                 : map[i].kind == 'd' ? drum_here(map[i].name)
                  : map[i].kind == 'p' ? op1_sampler != 0
                  : seq_taken(map[i].name);
         if (!here) { row_delete(DB_FACTORY(), map[i].kind, map[i].name); map[i].present = 0; map_dirty = 1; }

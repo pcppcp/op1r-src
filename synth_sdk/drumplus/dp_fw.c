@@ -100,13 +100,22 @@ static int32_t jv_int(const void *v)                   /* ints only, never asser
 }
 
 
+/* "op1r": {"engine": ...}: drum+'s kit if the engine is "drum+" or absent (kits from before); another drum plugin's
+ * engine (e.g. "perc") is not ours. Const lookup: no member is added. */
+#define JV_CGET ((const void *(*)(const void *, const char *))0x019BEB70)   /* Value::get(key) or 0, no insert */
+static int jv_is_str(void *v, const char *s);
+static int dp_engine_ours(void *op1r)
+{
+    const void *e = JV_CGET(op1r, "engine");
+    return !e || jv_type(e) == JV_NULL || jv_is_str((void *)e, "drum+");
+}
 static void dpx_slot_loaded(int slot, void *op1r)    /* core: a drum patch was loaded (op1r object or 0) */
 {
     if ((unsigned)slot >= DP_SLOTS) return;
-    dp_isplus[slot] = (uint8_t)(op1r && jv_type(op1r) == JV_OBJECT);
+    dp_isplus[slot] = (uint8_t)(op1r && jv_type(op1r) == JV_OBJECT && dp_engine_ours(op1r));
     for (int p = 0; p < DP_PADS; p++)
         for (int i = 0; i < DP_NFIELDS; i++) dp_extra_set(&dp_x[slot][p], i, 0);
-    if (op1r && jv_type(op1r) == JV_OBJECT) {
+    if (dp_isplus[slot]) {
         void *pads = JV_KEY(op1r, "pads");
         if (jv_type(pads) == JV_ARRAY) {
             unsigned n = JV_SIZE(pads);
@@ -182,12 +191,10 @@ static void dpx_type_job(void *job)
         return;
     }
     if (!jv_is_str(JV_KEY(json, "type"), "drum")) return;     /* dbox: no sample regions to keep */
-    void *op = JV_KEY(json, "op1r");
-    if (jv_type(op) != JV_OBJECT) {                              /* null -> object on the first key */
-        JV_FROM_STR(tmp, "drum+");
-        JV_ASSIGN(JV_KEY(op, "engine"), tmp);
-        JV_DTOR(tmp, 2);
-    }
+    void *op = JV_KEY(json, "op1r");                              /* null -> object on the first key */
+    JV_FROM_STR(tmp, "drum+");                                    /* also over another plugin's engine (e.g. perc) */
+    JV_ASSIGN(JV_KEY(op, "engine"), tmp);
+    JV_DTOR(tmp, 2);
     dp_isplus[slot] = 1;
     dpu_sync_auto();
     UI_SLOT(slot);

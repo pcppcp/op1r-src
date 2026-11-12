@@ -8,26 +8,80 @@
  *    dispatcher.c, forwarded to the plugin if one is loaded. */
 #include "../op1_synth.h"
 
-const op1_drum_t *op1_drum;                                   /* set by the plugin loader (plugload.c) */
+/* drum engine plugins (docs/43): drum+ (row 2) is op1_drum, the default for kits no plugin claims (it plays those with
+ * the stock code itself, so a drum+-only firmware routes exactly as before); further drum plugins (e.g. perc, row 3)
+ * each claim their kits through is_plus. The loader fills a slot before it bumps the count (render may run). */
+const op1_drum_t *op1_drum;                                   /* drum+ (set by the plugin loader, plugload.c) */
+const op1_drum_t *op1_drums[OP1_DRUMS_MAX];
+int op1_drum_rows[OP1_DRUMS_MAX];                             /* drum_types id of each */
+volatile int op1_drum_n;
+#ifndef DRUM_SLOT                                               /* (host test: harness/drumroute_test.c) */
+#define DRUM_SLOT   (*(const volatile int32_t *)0x01AAAC10)   /* the playing drum slot */
+#endif
+#ifndef VOICE_OBJ
+#define VOICE_OBJ   ((void *const *)0x01AAAD30)               /* the 12 drum voice objects */
+#endif
+#ifndef UI_SLOT_CUR
+#define UI_SLOT_CUR (*(volatile int *)0xFF8016D8 & 7)         /* the drum slot the pages show */
+#endif
+
+static const op1_drum_t *drum_owner(int slot)                 /* the plugin that claims the slot's kit, or 0 */
+{
+    int n = op1_drum_n;
+    for (int i = 0; i < n; i++) { const op1_drum_t *d = op1_drums[i]; if (d && d->is_plus(slot & 7)) return d; }
+    return 0;
+}
+static const op1_drum_t *drum_for_slot(int slot) { const op1_drum_t *d = drum_owner(slot); return d ? d : op1_drum; }
+static const op1_drum_t *drum_by_row(int id)
+{
+    int n = op1_drum_n;
+    for (int i = 0; i < n; i++) if (op1_drum_rows[i] == id) return op1_drums[i];
+    return 0;
+}
+/* a voice stays with the plugin that started it (a slot change mid-sound must not hand it to another engine) */
+static const op1_drum_t *voice_owner[12];
+static int voice_of(void *self) { for (int i = 0; i < 12; i++) if (VOICE_OBJ[i] == self) return i; return -1; }
+static const op1_drum_t *drum_for_voice(void *self)
+{
+    int v = voice_of(self);
+    if (v >= 0 && voice_owner[v]) return voice_owner[v];
+    return drum_for_slot(DRUM_SLOT);
+}
 
 #define DP_SLOTS      8
 #define DRUM_PATCHES  0x01DDD9A8                              /* 8 drum patch objects x 0x38 (JSON at +4) */
 #define SYNTH_PATCHES 0x01DDD7E8                              /* 8 synth patch objects x 0x38 (JSON at +4) */
 void sp_slot_loaded(int slot, void *op1r);                    /* samplerplus/sp_core.c */
+#ifndef STOCK_RENDER
 #define STOCK_RENDER   ((void (*)(void *, int16_t *, const void *))0x019789EC)
+#endif
+#ifndef STOCK_NOTE_ON
 #define STOCK_NOTE_ON  ((void (*)(void *, const void *))0x01978926)
+#endif
+#ifndef STOCK_NOTE_OFF
 #define STOCK_NOTE_OFF ((void (*)(void *, const void *))0x01978898)
+#endif
 
 /* ---- voice slots (audio interrupt) ---- */
 void dp_fw_render(void *self, int16_t *out, const void *pad)
 {
-    const op1_drum_t *d = op1_drum;
+    const op1_drum_t *d = drum_for_voice(self);
     uint32_t t0 = op1_cycles();
     if (d) d->render(self, out, pad); else STOCK_RENDER(self, out, pad);
     sm_cy[SMC_DRUM] += op1_cycles() - t0;
 }
-void dp_fw_note_on(void *self, const void *pad) { if (op1_drum) op1_drum->note_on(self, pad); else STOCK_NOTE_ON(self, pad); }
-void dp_fw_note_off(void *self, const void *pad) { if (op1_drum) op1_drum->note_off(self, pad); else STOCK_NOTE_OFF(self, pad); }
+void dp_fw_note_on(void *self, const void *pad)
+{
+    const op1_drum_t *d = drum_for_slot(DRUM_SLOT);
+    int v = voice_of(self);
+    if (v >= 0) voice_owner[v] = d;
+    if (d) d->note_on(self, pad); else STOCK_NOTE_ON(self, pad);
+}
+void dp_fw_note_off(void *self, const void *pad)
+{
+    const op1_drum_t *d = drum_for_voice(self);
+    if (d) d->note_off(self, pad); else STOCK_NOTE_OFF(self, pad);
+}
 
 /* ---- patch JSON: keep "op1r" (parse_patch_json rebuilds the patch from its known keys and assigns the result over
  * the patch at 0x01A044A8: operator=(patch, fresh)); load_drum_patch's parser call (0x01A04BC0) tells the slot ---- */
@@ -35,7 +89,9 @@ void dp_fw_note_off(void *self, const void *pad) { if (op1_drum) op1_drum->note_
 #define JV_IDX    ((void *(*)(void *, unsigned))0x019BFAF8)
 #define JV_ASSIGN ((void *(*)(void *, const void *))0x019BDDC0)
 #define JV_SIZE   ((unsigned (*)(const void *))0x019BE8D8)
+#ifndef JV_CGET
 #define JV_CGET   ((const void *(*)(const void *, const char *))0x019BEB70)
+#endif
 #define JV_FROM_INT ((void *(*)(void *, int))0x019BD890)
 #define JV_DTOR   ((void (*)(void *, int))0x019BDD18)
 #define PARSE_PATCH ((int (*)(void *, int))0x01A037A8)
@@ -48,7 +104,8 @@ void *dp_keep_op1r(void *patch, void *fresh)
     void *old = JV_KEY(patch, "op1r");                 /* (adds a null member if absent: patch is overwritten next) */
     int keep = jv_type(old) == JV_OBJECT;
     if (keep) JV_ASSIGN(JV_KEY(fresh, "op1r"), old);
-    if (dp_loading_slot >= 0 && op1_drum) op1_drum->slot_loaded(dp_loading_slot, keep ? JV_KEY(fresh, "op1r") : 0);
+    if (dp_loading_slot >= 0)
+        for (int i = 0; i < op1_drum_n; i++) op1_drums[i]->slot_loaded(dp_loading_slot, keep ? JV_KEY(fresh, "op1r") : 0);
     uint32_t off = (uint32_t)patch - (SYNTH_PATCHES + 4);              /* a synth slot's patch (sampler+, docs/46) */
     if (off < 8 * 0x38 && off % 0x38 == 0) sp_slot_loaded((int)(off / 0x38), keep ? JV_KEY(fresh, "op1r") : 0);
     return JV_ASSIGN(patch, fresh);
@@ -94,7 +151,9 @@ int dp_load_parse(void *json, int mode)
 #define DP_TYPE_ID   2
 #define DP_DRUM_ID   ((int (*)(int, uint8_t *))0x01A01FFE)
 #define DP_TYPE_LIST ((uint8_t *(*)(void))0x01A025E8)
+#ifndef TYPE_JOB
 #define TYPE_JOB     ((void (*)(void *))0x0193F86C)
+#endif
 static int dp_list_has(int id)
 {
     uint8_t *l = DP_TYPE_LIST();                              /* rows 0x30 (+0x1c id, +0x24/+0x28 items 0x20) */
@@ -108,17 +167,44 @@ static int dp_list_has(int id)
 int dp_browser_id(int slot, uint8_t *found)
 {
     int id = DP_DRUM_ID(slot, found);
-    if (op1_drum && op1_drum->is_plus(slot & 7)) return DP_TYPE_ID;
+    const op1_drum_t *own = drum_owner(slot);
+    for (int i = 0; own && i < op1_drum_n; i++) if (op1_drums[i] == own) return op1_drum_rows[i];
     if (!dp_list_has(id)) { id = 0; *found = 0; }
     return id;
 }
 void pj_begin(void), pj_end(void);                                /* patchjob.c: a patch job runs (docs/66) */
-void dp_type_job(void *job) { pj_begin(); if (op1_drum) op1_drum->type_job(job); else TYPE_JOB(job); pj_end(); }
+void dpu_sync_auto(void);                                         /* dispatcher.c: the drum pages for the shown slot */
+/* job +4 slot, +8 selection (<= 0 a kit, 1 dbox, >= 2 a plugin's row). A plugin row goes to that plugin (it claims the
+ * kit; the others are told so they let go); any other selection to the slot's plugin (it lets go and runs the stock
+ * job), else to drum+ as before; a plugin row whose plugin is not loaded does nothing (the stock job has no such row). */
+void dp_type_job(void *job)
+{
+    pj_begin();
+    int slot = *(int32_t *)((uint8_t *)job + 4), sel = *(int32_t *)((uint8_t *)job + 8);
+    const op1_drum_t *to = sel >= 2 ? drum_by_row(sel) : 0;
+    if (to) {
+        to->type_job(job);
+        if ((uint32_t)slot < DP_SLOTS) {
+            const void *op = JV_CGET((uint8_t *)(DRUM_PATCHES + slot * 0x38) + 4, "op1r");
+            for (int i = 0; i < op1_drum_n; i++)
+                if (op1_drums[i] != to) op1_drums[i]->slot_loaded(slot, (void *)op);
+        }
+        dpu_sync_auto();                                      /* the pages again, now that only the new owner claims it */
+    } else if (sel < 2) {
+        const op1_drum_t *d = (uint32_t)slot < DP_SLOTS ? drum_for_slot(slot) : op1_drum;
+        if (d) d->type_job(job); else TYPE_JOB(job);
+    }
+    pj_end();
+}
 
 /* ---- the drum+ pages: the plugin's screens (built at boot from dispatcher.c), the forwarded calls ---- */
-void dpu_ui_build(void) { if (op1_drum) op1_drum->ui_build(); }
-void dpu_ui_load(void) { if (op1_drum) op1_drum->ui_load(); }
-void *dpu_screen_for(int id) { return op1_drum ? op1_drum->screen_for(id) : 0; }
-void dpu_sync(int editor_open_on_10) { if (op1_drum) op1_drum->sync(editor_open_on_10); }
-int dpu_knob(int knob, int delta) { return op1_drum ? op1_drum->knob(knob, delta) : 0; }
-int dpu_key(int code, int pressed) { return op1_drum ? op1_drum->key(code, pressed) : 0; }
+void dpu_ui_build(void) { for (int i = 0; i < op1_drum_n; i++) op1_drums[i]->ui_build(); }
+void dpu_ui_load(void) { for (int i = 0; i < op1_drum_n; i++) op1_drums[i]->ui_load(); }
+static const op1_drum_t *ui_drum(void) { const op1_drum_t *d = drum_for_slot(UI_SLOT_CUR); return d ? d : op1_drum_n ? op1_drums[0] : 0; }
+void *dpu_screen_for(int id) { const op1_drum_t *d = ui_drum(); return d ? d->screen_for(id) : 0; }
+/* only the shown slot's plugin sets the page table (its page or the stock ones): one writer per key event, as with drum+
+ * alone. (Letting every plugin restore the stock pages first flipped the table on every key press while the GUI thread
+ * may draw from it.) */
+void dpu_sync(int editor_open_on_10) { const op1_drum_t *d = ui_drum(); if (d) d->sync(editor_open_on_10); }
+int dpu_knob(int knob, int delta) { const op1_drum_t *d = ui_drum(); return d ? d->knob(knob, delta) : 0; }
+int dpu_key(int code, int pressed) { const op1_drum_t *d = ui_drum(); return d ? d->key(code, pressed) : 0; }

@@ -37,6 +37,7 @@ void pj_patch_job_b(void *job) { run(0x019407DCu, job); }
 
 /* before changing a live patch's JSON from a thread above the BgFileWorker: wait while a patch job runs (at most
  * ~2 s, then go on as before). 1 = had to wait. Never call it from inside a patch job. */
+int op1_patch_idle(void) { return !pj_busy; }               /* no patch job now (no wait) */
 int op1_patch_wait(void)
 {
     int waited = 0;
