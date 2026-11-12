@@ -729,7 +729,15 @@ void clouds_process(clouds_t *c, const clouds_params_t *p, const int16_t *input,
     int32_t dw = c->dry_wet_q15, inc = (p->dry_wet - dw) / n;
     for (int i = 0; i < n; i++) {
         dw += inc;
+        /* dry x 2 sqrt 2 on the equal-power curve: 2.0 at mix 0, which soft_convert's halving (as the original's
+         * SoftConvert) brings back to unity, so MIX fully dry is the level of FX off (it was -9 dB); the wet side as in
+         * the original (op1r-src PR #40 by Hundekraft, dry end only) */
+#ifdef CLOUDS_ORIGINAL_DRY                                        /* harness/clouds_compare.py: the original's dry gain */
         int32_t fin = interp_q15(cl_lut_xfade_in, dw, 4), fout = interp_q15(cl_lut_xfade_out, dw, 4);
+#else
+        int32_t fin = interp_q15(cl_lut_xfade_in, dw, 4), fout = mulq15(interp_q15(cl_lut_xfade_out, dw, 4), 92682);
+        if (fout > 65536) fout = 65536;                           /* (mul16: 32767 x 65536 < 2^31) */
+#endif
         int32_t x = mul16(input[i], fout) + mulq15(mulq15(out[i], 39322), fin);        /* post gain 1.2 */
         output[i] = soft_convert(x);
     }

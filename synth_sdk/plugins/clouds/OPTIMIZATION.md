@@ -76,3 +76,12 @@ them; it compares the patched tree with the base revision directly.
 | reference | dynamic | 790680 | `3f83b142b6a36036783f465d00849a560def7f399a87ef1c9d09530fc414069b` |
 | reference | rails | 3072000 | `3d01158fec803fbbed8ed771ec78d6f60468bc6ea651dde1864fbe654ba590fb` |
 | reference | edge | 13200 | `784e6df1b4ff4afa9b57407c74c03b14c523a3b92c2fe6b3b542b7f126dc0555` |
+
+## Dry end (2026-11-12, op1r-src PR #40 by Hundekraft, dry end only)
+
+With MIX fully dry the effect was about 9 dB quieter than FX off: the original's equal-power dry gain (0.707 at mix 0)
+and its halving before the soft limiter (SoftConvert = SoftLimit(x * 0.5)). The dry gain is now the curve x 2 sqrt 2
+(2.0 at mix 0, unity after the halving); the wet side and the halving are as in the original, so MIX fully wet keeps
+its level (the middle of MIX has more dry than before: mix 0.5 -4.0 -> -0.7 dB vs FX off). `CLOUDS_ORIGINAL_DRY`
+restores the original dry gain; `harness/clouds_compare.py` builds with it (11 / 11 against the original), and
+`harness/clouds_mix_test.c` checks the levels. The capture hashes above are from before this change.

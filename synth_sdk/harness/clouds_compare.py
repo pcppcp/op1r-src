@@ -44,7 +44,8 @@ SCENARIOS = [
 ]
 
 
-EXTRA = os.environ.get('CLOUDS_FLAGS', '').split()        # e.g. "-DCLOUDS_LINEAR_READ -DCLOUDS_MAX_GRAINS=16"
+EXTRA = ['-DCLOUDS_ORIGINAL_DRY'] + os.environ.get('CLOUDS_FLAGS', '').split()   # CLOUDS_FLAGS e.g. "-DCLOUDS_LINEAR_READ"; the
+# original's dry gain: the port's dry end is unity on purpose (op1r-src PR #40)
 
 
 def build():
