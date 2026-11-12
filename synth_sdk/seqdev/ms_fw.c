@@ -16,6 +16,7 @@
 #include "../seq/seq_text.h"
 #include "ms_core.h"
 #include "ms_draw.h"
+#include "../screens/slotown.h"
 
 #define TAPE_STATE  (*(volatile int32_t *)0x018C17D4)
 #define TAPE_POS    (*(volatile int32_t *)0xFF802974)            /* 1/64 samples */
@@ -53,7 +54,7 @@ static ms_t *ms;                            /* heap (~60 KB), allocated by the m
 #define SVG_LOAD      ((void *(*)(void *))0x01A503D8)
 static uint32_t ms_scr[32], ms_vt[10];
 static int ms_scr_id = -1;
-static void *tape_obj;
+static so_owner ms_own = { .obj = ms_scr };           /* the slot shared with FREE and devupd (screens/slotown.h) */
 static volatile uint8_t view, seq_open_req, rec_held, rec_latch, seq_down, seq_chord, sel_set, own_play;
 static volatile uint8_t rec_arm, arm_go, ci_latch, take_done;     /* armed (first note starts), its PLAY wanted, count-in */
 int ci_start_ext(void), ci_pending(void), ci_counting(void);   /* tape/countin.c */
@@ -315,10 +316,10 @@ static void view_set(int on)                          /* key thread */
         ms_scr[3] = (uint32_t)ms_vt;
         ms_scr[0] = (uint32_t)SVG_LOAD((void *)ms_scr[2]);
         if (!ms_scr[0]) return;
-        tape_obj = saved; ms_scr_id = id;
+        ms_scr_id = id;
     }
     view = (uint8_t)on;
-    if (ms_scr_id >= 0) SCREEN_TABLE[ms_scr_id] = on ? (void *)ms_scr : tape_obj;
+    if (ms_scr_id >= 0) { if (on) so_install(&ms_own, SCREEN_TABLE, ms_scr_id); else so_restore(&ms_own, SCREEN_TABLE); }
 }
 int ms_key(int code, int pressed, int on_tape)
 {

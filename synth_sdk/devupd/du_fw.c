@@ -7,6 +7,7 @@
  * du_guard (logical and physical after the bad-block mapping) -> staging removed -> "restart" (as the stock updater).
  * Never called: 0x019EAC08 (erases te-boot), flash_te_boot; paths with te-boot are refused by du_path_ok. */
 #include "du.h"
+#include "../screens/slotown.h"
 
 #define Y_OPEN    ((int (*)(const char *, int, int))0x01A997F4)
 #define Y_CLOSE   ((int (*)(int))0x01A99908)
@@ -262,18 +263,14 @@ static int f_remove(void *c, const char *p) { (void)c; return Y_UNLINK(p); }
 void *du_prompt_obj;                                              /* screen object (dispatcher.c, boot) */
 extern int dp_files, dp_kb, dp_restarting, dp_fw;
 static volatile int prompt, confirmed, cancel_req, restart_req;
-static void *saved_scr; static int saved_id = -1;
+static so_owner du_own;                                           /* .obj = du_prompt_obj (set at boot) */
 
 static void prompt_show(int on)                                   /* over the current screen, follows screen changes */
 {
     int cur = CURRENT_SCREEN;
-    if (saved_id >= 0 && (!on || saved_id != cur || SCREEN_TABLE[saved_id] != du_prompt_obj)) {
-        if (SCREEN_TABLE[saved_id] == du_prompt_obj) SCREEN_TABLE[saved_id] = saved_scr;   /* (else someone swapped it) */
-        saved_id = -1;
-    }
-    if (on && du_prompt_obj && saved_id < 0 && cur >= 0 && cur < 0x44) {
-        saved_scr = SCREEN_TABLE[cur]; saved_id = cur; SCREEN_TABLE[cur] = du_prompt_obj;
-    }
+    if (du_own.in && (!on || du_own.id != cur || SCREEN_TABLE[du_own.id] != du_prompt_obj))
+        so_restore(&du_own, SCREEN_TABLE);                         /* (covered: put back later by whoever covered it) */
+    if (on && du_prompt_obj && !du_own.in && cur >= 0 && cur < 0x44) { du_own.obj = du_prompt_obj; so_install(&du_own, SCREEN_TABLE, cur); }
 }
 
 int du_prompt_active(void) { return prompt; }                    /* midi_cc_hook: no MIDI key events while shown */
@@ -444,7 +441,7 @@ void du_service(void)
         if (n > 0) send_sysex(rep, n);
     }
     if (cancel_req && inited) { du_abort(&sess); cancel_req = 0; prompt = 0; }   /* next COMMIT: STATE = cancelled */
-    if (prompt || saved_id >= 0) prompt_show(prompt);
+    if (prompt || du_own.in) prompt_show(prompt);
     if (restart_req) {
         dp_restarting = 1;
         DELAY_MS(400);                                             /* reply out, "RESTARTING" drawn (GUI thread) */

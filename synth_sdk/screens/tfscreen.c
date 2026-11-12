@@ -12,6 +12,7 @@
  * screen's slot of the screen table; R246's object back when the machine is off. */
 #include "../op1_synth.h"
 #include "stroke_font.h"
+#include "slotown.h"
 
 typedef struct { int32_t speed; int32_t lin, lout; uint8_t lon, lset, mute, stop; } tm_track;   /* stop: Shift + STOP / PLAY, per track */
 extern volatile tm_track tm_tr[4];
@@ -54,7 +55,7 @@ static int32_t bpm_q8(void)                                      /* as seqdev/ms
 }
 
 static uint32_t tfs_scr[32], tfs_vt[10];
-static void *tape_obj;
+static so_owner tfs_own = { .obj = tfs_scr };                  /* the slot shared with the MIDI seq view and devupd */
 static int tfs_id = -1;
 static uint8_t tfs_in, sel;
 
@@ -771,11 +772,10 @@ static void tfs_set(int on)                                      /* main loop */
         tfs_scr[3] = (uint32_t)tfs_vt;
         tfs_scr[0] = (uint32_t)SVG_LOAD((void *)tfs_scr[2]);
         if (!tfs_scr[0]) return;
-        tape_obj = saved; tfs_id = id;
+        tfs_id = id;
     }
     if (tfs_id < 0) return;
-    if (!on && SCREEN_TABLE[tfs_id] != (void *)tfs_scr) { tfs_in = 0; return; }   /* someone else (MIDI seq view) holds the slot */
-    SCREEN_TABLE[tfs_id] = on ? (void *)tfs_scr : tape_obj;
+    if (on) so_install(&tfs_own, SCREEN_TABLE, tfs_id); else so_restore(&tfs_own, SCREEN_TABLE);
     tfs_in = (uint8_t)on;
 }
 static int8_t wind;                                              /* -1 / +1 while < / > is held on this screen */
