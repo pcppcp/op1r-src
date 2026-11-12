@@ -52,6 +52,24 @@ STATES_BY_NAME['aether'] = [                     # HOST_ACCEL: sensor X,Y,Z afte
     ('blue + white page 2 (dead zone, rate)', None, 1, 40, -1, 0b0101, 20000, 0, 26000),
     ('all knobs max, front up 40 deg', (32767,) * 4, 1, 60, -1, 0, 0, 0, 0, {'HOST_ACCEL': '0,-10531,12551'}),
 ]
+STATES_BY_NAME['percsyn'] = [                       # neon drum on a stage: blue head, green rings, white strike, orange floor
+    ('kick, idle', None, 0, 10, -1),
+    ('kick, hit: strike + rings', None, 1, 3, -1),
+    ('kick, long, rings out (frame 18)', (16384, 30000, 16384, 16384), 1, 18, -1),
+    ('snare, hit', None, 1, 6, -1, 0, 1890, 0, 0),
+    ('hi-hat, hit', None, 1, 6, -1, 0, 3150, 0, 0),
+    ('clap, hit', None, 1, 6, -1, 0, 4411, 0, 0),
+    ('perc, hit', None, 1, 6, -1, 0, 5671, 0, 0),
+    ('tom, hit', None, 1, 6, -1, 0, 6931, 0, 0),
+    ('cymbal, hit', None, 1, 6, -1, 0, 8192, 0, 0),
+    ('rimshot, hit', None, 1, 6, -1, 0, 9452, 0, 0),
+    ('cowbell, hit', None, 1, 6, -1, 0, 10712, 0, 0),
+    ('shaker, hit', None, 1, 6, -1, 0, 11972, 0, 0),
+    ('po-32 slot 1 (empty), hit', None, 1, 6, -1, 0, 13233, 0, 0),
+    ('Shift held: type, drive 50 %, level +6 dB', (8000, 12000, 26000, 30000), 0, 10, -1, 0, 630, 16384, 24576, {'HOST_SHIFT': '1'}),
+    ('high pitch, short, punchy, bright: hit', (30000, 4000, 32767, 32767), 1, 4, -1),
+    ('blue pressed (page): blue lane edits type', None, 0, 10, -1, 0b0001, 21424, 0, 0),
+]
 FX_STATES_BY_NAME = {
     'tape': [('defaults, input bursts (page 2 unset: mix 50 %)', None, 12, 50, -1),
              ('blue page 2: heads 3 (bright), dial dimmed', None, 12, 50, -1, 0b0001, 15000, 16384, 0),

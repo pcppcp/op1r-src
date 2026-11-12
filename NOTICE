@@ -42,6 +42,9 @@ THIRD-PARTY CODE (MIT License, compatible with the GPL; their notices are kept)
   Open303's TeeBeeFilter (rosic_TeeBeeFilter), (c) 2009 Robin Schmidt (rs-met.com), MIT License.
 - hail (plugins/hail): a port of Mutable Instruments Beads, (c) 2017 Emilie Gillet, MIT License
   (plugins/hail/LICENSE.beads).
+- perc (plugins/percsyn, plugins/percdrum): the PO-32 patch model, parameter maps and signal path follow libpo32's
+  documented reference renderer, and the transfer reader (DPSK demodulator, framing) is an integer port of libpo32's,
+  (c) 2026 Eric Lewis, MIT License (https://github.com/ericlewis/libpo32).
 - sid (plugins/sid): oscillator / filter primitives and 8580 tables from cRSID 1.58 by Hermit (Mihaly Horvath),
   under its permissive notice (kept in the sources).
 - iter-lab.svg and the LZMA settings of op1repacker: (c) 2016 op1hacks, MIT License
