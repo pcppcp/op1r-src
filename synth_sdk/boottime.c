@@ -12,10 +12,16 @@ static void l1_read_test(void);
 #ifdef L1RUNTIME
 static void l1_runtime_apply(void);
 #endif
+#ifdef L1SLOT
+static void l1slot_setup(void);
+#endif
 void bt_db_open(const char *root)                /* CALL @0x019F02E0 db2::open(root) */
 {
 #ifdef L1RUNTIME
     l1_runtime_apply();                          /* first: before anything could run the patched L1 */
+#endif
+#ifdef L1SLOT
+    l1slot_setup();                              /* test (docs/56): Pulse to SDRAM, mixtur's passes into its L1 slot */
 #endif
 #ifdef L1READ
     l1_read_test();                              /* after the patches: the checksum of the L1 that runs */
@@ -55,7 +61,7 @@ void lp_set_synth(uint32_t *e, int slot, uint32_t *json) { lp_set(e, slot, json,
 void lp_set_drum(uint32_t *e, int slot, uint32_t *json)  { lp_set(e, slot, json, 0x01A04C48, 0x01A04BB0); }
 
 /* DTEST access to L1 instruction SRAM (docs/56, the Linux kernel's isram_read / isram_write; measured on the unit) */
-#if defined(L1READ) || defined(L1RUNTIME)
+#if defined(L1READ) || defined(L1RUNTIME) || defined(L1SLOT)
 static uint32_t dtest_cmd(uint32_t a)            /* instruction memory, data array (the Linux kernel's IADDR2DTEST) */
 {
     return ((a & (1u << 11)) << (26 - 11)) | (1u << 24) | ((a & (1u << 15)) << (23 - 15)) | ((a & (3u << 12)) << (16 - 12))
@@ -130,5 +136,42 @@ static void l1_read_test(void)
         if (a + 4 < 0xFFA00000u + 0xBFB4u) h = (h ^ d1) * 0x01000193u;
     }
     l1rd[2] = h; l1rd[0] = 1;
+}
+#endif
+
+/* OP1R_L1SLOT test (docs/56): Pulse's render (L1 0xFFA04B88, 1 682 B, position independent) is copied to SDRAM and its
+ * producer vtable entry 0x019111E0 pointed at the copy; the slot then gets mixtur's two passes (section .l1pulse,
+ * linked there; make_firmware.py loads its bytes into l1slot_img: a length word, then the code). Runs before the
+ * audio interrupt starts, so nothing executes the slot meanwhile. Red turn on the monitor flips l1slot_on (mixtur.c:
+ * the passes from L1 or from SDRAM). */
+#ifdef L1SLOT
+#define SLOT_A   0xFFA04B88u
+#define SLOT_N   1688u                           /* 1 682 rounded up to 8 (the 6 bytes past it are Pulse's padding) */
+#define PULSE_VT (*(volatile uint32_t *)0x019111E0)
+volatile uint8_t l1slot_on, l1slot_ok;
+volatile uint32_t l1slot_chk[2];                 /* OP1R_L1SLOT_CHECK: mixtur blocks compared, mismatches */
+uint32_t l1slot_img[1 + 1024 / 4] __attribute__((aligned(8)));
+static uint8_t pulse_copy[SLOT_N] __attribute__((aligned(32)));
+static void l1slot_setup(void)
+{
+    if (PULSE_VT != SLOT_A || l1slot_img[0] == 0 || l1slot_img[0] > 1024) return;
+    for (uint32_t a = 0; a < SLOT_N; a += 8) {
+        uint32_t d0, d1; dtest_read(SLOT_A + a, &d0, &d1);
+        ((uint32_t *)pulse_copy)[a / 4] = d0; ((uint32_t *)pulse_copy)[a / 4 + 1] = d1;
+    }
+    uint8_t *q0 = (uint8_t *)((uintptr_t)pulse_copy & ~31u), *e = pulse_copy + SLOT_N;
+    for (uint8_t *q = q0; q < e; q += 32) __asm__ volatile ("FLUSH [%0];" : : "a"(q) : "memory");
+    __asm__ volatile ("SSYNC;" : : : "memory");
+    for (uint8_t *q = q0; q < e; q += 32) __asm__ volatile ("IFLUSH [%0];" : : "a"(q) : "memory");
+    __asm__ volatile ("CSYNC;" : : : "memory");
+    PULSE_VT = (uint32_t)pulse_copy;             /* Pulse renders from SDRAM from now on */
+    const uint32_t n = (l1slot_img[0] + 7) & ~7u;
+    for (uint32_t a = 0; a < n; a += 8) {
+        uint32_t d0 = l1slot_img[1 + a / 4], d1 = l1slot_img[2 + a / 4], r0, r1;
+        dtest_write(SLOT_A + a, d0, d1);
+        dtest_read(SLOT_A + a, &r0, &r1);
+        if (r0 != d0 || r1 != d1) return;        /* l1slot_ok stays 0: mixtur keeps its SDRAM passes */
+    }
+    l1slot_ok = 1; l1slot_on = 1;
 }
 #endif

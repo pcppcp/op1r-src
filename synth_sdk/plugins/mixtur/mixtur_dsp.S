@@ -24,7 +24,13 @@
  * Copyright (C) 2026 ultralazr, Hundekraft. GPL-3.0-or-later with the OP-1 firmware permission (see LICENSE and NOTICE).
  */
 #ifdef __bfin__
+#ifdef MX_L1SLOT                                 /* OP1R_L1SLOT test (docs/56): the same passes, linked in Pulse's L1 slot */
+	.section .l1pulse,"ax"
+#define _mx_pass1 _mx_pass1_l1
+#define _mx_pass2 _mx_pass2_l1
+#else
 	.text
+#endif
 
 /* mx_p1_t offsets (P5) and those past 60 (P3 = P5 + 64) */
 #define S_P	0

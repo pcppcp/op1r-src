@@ -99,6 +99,15 @@ void sm_turn(int delta)
     sm_acc -= st * 1024;
     sm_page = ((sm_page + st) % PG_N + PG_N) % PG_N;
 }
+#ifdef L1SLOT
+extern volatile uint8_t l1slot_on, l1slot_ok;                /* boottime.c (docs/56 test) */
+static int32_t sm_lacc;
+void sm_l1slot(int delta)                                   /* red turn: mixtur's passes from L1 / SDRAM (one flip per detent) */
+{
+    sm_lacc += delta; if (sm_lacc > -1024 && sm_lacc < 1024) return;
+    sm_lacc = 0; if (l1slot_ok) l1slot_on = (uint8_t)!l1slot_on;
+}
+#endif
 extern int plug_loaded, plug_refused, plug_last_err, plug_skipped;
 
 /* ---------------- state ---------------- */
@@ -357,6 +366,9 @@ static void sm_update(void *scr, int dt)
         q = put_u(put_s(q, " out "), (uint32_t)st_pct[11]); q = put_u(put_s(q, " dec "), (uint32_t)st_pct[4]);
         q = put_u(put_s(q, " tp "), (uint32_t)st_pct[7]);
         q = put_u(put_s(q, " fr "), (uint32_t)fr_pct);           /* free tape engine (tape/tm.c) */
+#ifdef L1SLOT
+        q = put_s(q, !l1slot_ok ? " mx --" : l1slot_on ? " mx l1" : " mx sd");   /* red turn flips (docs/56 test) */
+#endif
     } else if (sm_page == PG_BOOT || sm_page == PG_BOOTR) {
         /* boot (docs/79): the firmware's own stage timers (OP_Main 0x019EFEEC: 25 x ms at 0x01AB3030; +0x10 mount +
          * display, +0x18 db / clips / FAT with op1r's plugin loader, +0x28 sounds, +0x50 screens with op1r's screens),

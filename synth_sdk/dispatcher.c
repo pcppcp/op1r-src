@@ -1400,6 +1400,9 @@ void knob_event_hook(int knob, int16_t *delta)
     if (dpu_knob(knob, *delta)) return;                          /* drum+ pages (pitch / volume: stock) */
     if (spc_knob(knob, *delta)) return;                          /* sampler+ pages */
     if (knob == 0 && sm_on == 1 && CUR_MODE_ID == 0x0C) { extern void sm_turn(int); sm_turn(*delta); return; }   /* monitor: metrics */
+#ifdef L1SLOT
+    if (knob == 3 && sm_on == 1 && CUR_MODE_ID == 0x0C) { extern void sm_l1slot(int); sm_l1slot(*delta); return; }   /* test: L1 / SDRAM */
+#endif
     if (knob == 0 && sm_on == 2 && CUR_MODE_ID == 0x0C) { usbout_turn(*delta); return; }   /* usb out: blue */
     if (knob == 1 && sm_on == 2 && CUR_MODE_ID == 0x0C) { usbout_seq_turn(*delta); return; }   /* sequencer on / off: green */
     if (knob >= 0 && knob < 4 && sm_on == 3 && CUR_MODE_ID == 0x0C) { settings_turn(knob, *delta); return; }

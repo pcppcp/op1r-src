@@ -208,6 +208,7 @@ MASTER_IN_L1 = os.environ.get('OP1R_MASTER') != 'stock' and not any(os.environ.g
 L1_MASTER, L1_MASTER_MAX = 0xFFA00E50, 0xFFA017EC - 0xFFA00E50
 MIX_IN_L1 = MIX_MODE not in ('check', 'stress', 'stock') and not MASTER_IN_L1
 L1_TAPE, L1_TAPE_MAX = 0xFFA01D60, 0xFFA020A8 - 0xFFA01D60   # docs/56: dead Lander audio range -> tape/tm_l1.S
+L1SLOT = os.environ.get('OP1R_L1SLOT') == '1'           # docs/56 test: Pulse to SDRAM, mixtur's passes into its L1 slot
 L1_DEC, L1_DEC_MAX = 0xFFA005D4, 0xFFA00684 - 0xFFA005D4   # docs/81: synth_bus_decimate (176 bytes)
 DEC_IN_L1 = os.environ.get('OP1R_DEC') not in ('check', 'stress', 'stock')
 assert MIX_IN_L1 or MASTER_IN_L1 or not DEC_IN_L1, 'the L1 decimator needs the L1 mix (its hp builder is in .l1mix): OP1R_DEC=stock'
@@ -339,6 +340,9 @@ def build(engs, fxs):
     srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'seq/tombola.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/pcpage.c', 'screens/usbtrack.c', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'boottime.c', 'build/l1_runtime.c', 'dsp/outstage.c', 'dsp/outstage_l1.c', 'dsp/eq.c', 'dsp/fir.S', 'dsp/eq_l1.c', 'dsp/fir_l1.S', 'dsp/mix.c', 'dsp/mix_l1.S', 'dsp/dec.c', 'dsp/dec_l1.S', 'dsp/dc.c', 'dsp/cw.c', 'dsp/mon.c', 'plugload/op1p_load.c', 'screens/settings.c', 'screens/stxt.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/tm.c', 'tape/tm_loop.S', 'tape/tm_l1.S', 'screens/tfscreen.c', 'tape/mixdrop.c', 'crash.c', 'patchjob.c', 'l1pool.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxgroups.c', 'screens/guiskip.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c', 'input/in_host.c'] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
     objs = []
     cmds = []
+    if L1SLOT:                                       # docs/56 test: mixtur's passes in Pulse's L1 slot (needs --builtin mixtur)
+        assert any(e['name'] == 'mixtur' for e in engs), 'OP1R_L1SLOT=1 needs --builtin mixtur'
+        srcs += ['plugins/mixtur/mixtur_dsp_l1.S']
     if MASTER_IN_L1: srcs += ['dsp/master_l1.c', 'dsp/master_loops.S']   # docs/81 3b-3
     flags = {}                                       # plugin.json "source_cflags": e.g. -O3 after the default -O2
     for e in engs + fxs:
@@ -358,6 +362,10 @@ def build(engs, fxs):
     if os.environ.get('OP1R_SPKDIAG') == '1': flags['screens/sysmon.c'] = flags.get('screens/sysmon.c', []) + ['-DSPK_DIAG']   # speaker amp state on page 9
     if os.environ.get('OP1R_TAPEFREE') == '1': flags['tape/tm.c'] = ['-DTAPE_FREE'] + (['-DTM_DBGRING'] if os.environ.get('OP1R_TMDBG') == '1' else [])
     if os.environ.get('OP1R_TMXTEST') == '1': flags['tape/tm.c'] = flags.get('tape/tm.c', []) + ['-DTM_XHI=441000', '-DTM_XSPAN=220500']   # emulator: transport wrap at 10 s
+    if L1SLOT:
+        for f in ('boottime.c', 'screens/sysmon.c', 'dispatcher.c'): flags[f] = flags.get(f, []) + ['-DL1SLOT']
+        for f in [x for x in flags] + ['plugins/mixtur/mixtur.c']:
+            if f.endswith('mixtur/mixtur.c'): flags[f] = flags.get(f, []) + ['-DMX_L1SLOT'] + (['-DMX_L1SLOT_CHECK'] if os.environ.get('OP1R_L1SLOT_CHECK') == '1' else [])
     if os.environ.get('OP1R_TMCHECK') == '1': flags['tape/tm.c'] = flags.get('tape/tm.c', []) + ['-DTM_CHECK']   # asm loop vs C per block (docs/82)   # test: the free tape machine on (docs/82)
     if os.environ.get('OP1R_TAPEIO') == '1':          # docs/82: tape read / write times on page 9
         for f in ('tape/safewrite.c', 'screens/sysmon.c'): flags[f] = flags.get(f, []) + ['-DTAPE_IO']
@@ -394,6 +402,7 @@ def build(engs, fxs):
     cmds.append('bfin-elf-objcopy -O binary -j .l1mix build/synth.elf build/l1mix.bin')
     cmds.append('bfin-elf-objcopy -O binary -j .l1dec build/synth.elf build/l1dec.bin')
     cmds.append('bfin-elf-objcopy -O binary -j .l1tape build/synth.elf build/l1tape.bin')
+    cmds.append('bfin-elf-objcopy -O binary -j .l1pulse build/synth.elf build/l1pulse.bin')
     cmds.append('bfin-elf-objcopy -O binary -j .l1master build/synth.elf build/l1master.bin')
     cmds.append('bfin-elf-nm build/synth.elf > build/synth.sym')
     cmds.append('bfin-elf-objdump -d build/synth.elf > build/synth.lst && bfin-elf-size build/synth.elf')
@@ -602,6 +611,13 @@ def patch_ldr(src, dst, code, hooks, syms, opz=False, release=True):
         l1o += b'\0' * (-len(l1o) % 4)
         blk += ldr_hdr(0x0006, base, len(l1o), 0) + l1o
         print(f'  L1 {sec}: {len(l1o)} of {room} bytes at {base:#x}')
+    if L1SLOT:                                                  # its bytes into l1slot_img (boottime.c writes the slot)
+        lp = open(os.path.join(HERE, 'build', 'l1pulse.bin'), 'rb').read()
+        assert 0 < len(lp) <= 1024, len(lp)
+        img = struct.pack('<I', len(lp)) + lp
+        img += b'\0' * (-len(img) % 4)
+        blk += ldr_hdr(0x0006, syms['l1slot_img'], len(img), 0) + img
+        print(f'  L1 slot (test): mixtur passes {len(lp)} of 1682 bytes -> l1slot_img')
     tramp = open(os.path.join(HERE, 'build', 'l1tramp.bin'), 'rb').read()
     if tramp:                                                   # L1 trampolines: plain block in free L1 instruction SRAM
         assert len(tramp) <= L1_TRAMP_MAX, len(tramp)

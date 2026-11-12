@@ -180,8 +180,27 @@ static void mx_render(void *self, int16_t *out, const int16_t *params)
     b2->f2l = MX_F2_LEVEL; b2->cm = MX_KNEE + MX_KNEE_T; b2->kn = MX_KNEE; b2->zero = 0; b2->ka = MX_KNEE_A;
     b2->lp1 = clamp(v->lp1, SMAX); b2->bp1 = clamp(v->bp1, SMAX); b2->lp2 = clamp(v->lp2, SMAX); b2->bp2 = clamp(v->bp2, SMAX);
 #if defined(__bfin__) && !defined(MIXTUR_C_REF)
-    mx_pass1(b1, mx_xbuf);
-    mx_pass2(b2, mx_xbuf, out);
+#ifdef MX_L1SLOT                                /* OP1R_L1SLOT test: the passes from Pulse's L1 slot or from SDRAM */
+    extern volatile uint8_t l1slot_on;
+    void mx_pass1_l1(mx_p1_t *, int16_t *) __attribute__((longcall));
+    void mx_pass2_l1(mx_p2_t *, const int16_t *, int16_t *) __attribute__((longcall));
+#ifdef MX_L1SLOT_CHECK                          /* OP1R_L1SLOT=check: both copies on the same state, compared */
+    extern volatile uint32_t l1slot_chk[2];
+    if (l1slot_on) {
+        static mx_p1_t c1; static mx_p2_t c2; static int16_t cx[OP1_BLOCK], co[OP1_BLOCK];
+        c1 = *b1; c2 = *b2;
+        mx_pass1(&c1, cx); mx_pass2(&c2, cx, co);
+        mx_pass1_l1(b1, mx_xbuf); mx_pass2_l1(b2, mx_xbuf, out);
+        int bad = c1.p != b1->p || c1.c01 != b1->c01 || c1.c23 != b1->c23 || c2.lp1 != b2->lp1 || c2.bp1 != b2->bp1 || c2.lp2 != b2->lp2 || c2.bp2 != b2->bp2;
+        for (int i = 0; i < OP1_BLOCK && !bad; i++) bad = co[i] != out[i];
+        l1slot_chk[0]++; if (bad) l1slot_chk[1]++;
+    } else
+#else
+    if (l1slot_on) { mx_pass1_l1(b1, mx_xbuf); mx_pass2_l1(b2, mx_xbuf, out); } else
+#endif
+#endif
+    { mx_pass1(b1, mx_xbuf);
+      mx_pass2(b2, mx_xbuf, out); }
 #else
     mx_pass1_c(b1, mx_xbuf);
     mx_pass2_c(b2, mx_xbuf, out);
