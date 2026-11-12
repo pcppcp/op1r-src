@@ -149,8 +149,7 @@ void tm_turn(int delta)                                    /* Shift + red: one j
 /* ---- drawing, after the stock tape screen (vtable slot 0x01911B78) ---- */
 #define TM_Y0 OP1_Q10(115)                                  /* caret above the ruler (y 122), below the heads */
 static const uint8_t tm_red[4] = { 0xFF, 0x3A, 0x5D, 0xFF };
-static const uint8_t tm_green[4] = { 0x00, 0xED, 0x95, 0xFF }, tm_white[4] = { 0xFF, 0xFF, 0xFF, 0xFF },
-                     tm_grey[4] = { 0x6F, 0x71, 0x73, 0xFF };
+static const uint8_t tm_white[4] = { 0xFF, 0xFF, 0xFF, 0xFF }, tm_grey[4] = { 0x6F, 0x71, 0x73, 0xFF };
 static void tm_line(void *r, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t w, const uint8_t *c)
 {
     op1_pt a = { x0, y0 }, b = { x1, y1 };
@@ -177,8 +176,8 @@ void tm_draw(void)
         int64_t x = TM_CENTRE_X + (((int64_t)(tm_pos[i] - c) * k) >> 16);
         if (x < OP1_Q10(3) || x > OP1_Q10(317)) continue;
         int32_t d = tm_pos[i] > c ? tm_pos[i] - c : c - tm_pos[i];
-        const uint8_t *col = d <= tol ? tm_white : punch ? tm_red : tm_green;
-        tm_line(r, (int32_t)x, OP1_Q10(124), x, OP1_Q10(146), 0x400, tm_grey);               /* through the tracks */
+        const uint8_t *col = d <= tol ? tm_white : tm_red;                 /* red: the encoder that sets them */
+        tm_line(r, (int32_t)x, OP1_Q10(124), x, OP1_Q10(146), 0x400, punch ? tm_red : tm_grey);  /* through the tracks; red: punch */
         int32_t xi = (int32_t)x;
         tm_line(r, xi - OP1_Q10(3), TM_Y0, xi, TM_Y0 + OP1_Q10(5), 0x600, col);       /* caret v */
         tm_line(r, xi + OP1_Q10(3), TM_Y0, xi, TM_Y0 + OP1_Q10(5), 0x600, col);

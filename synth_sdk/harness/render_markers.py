@@ -9,7 +9,7 @@ import render as R
 def main(svg_path, out):
     exe = os.path.join(HERE, 'build', 'markers_test')
     subprocess.run(['cc', '-O1', '-Wall', '-DOP1_HOST', '-I', SDK, os.path.join(HERE, 'markers_test.c'), '-o', exe], check=True)
-    frames = [('markers, punch off', 335160, 40, 0), ('punch armed: red markers, [o]', 335160, 40, 1),
+    frames = [('markers, punch off', 335160, 40, 0), ('punch armed: red lines, [o]', 335160, 40, 1),
               ('punched in', 335160, 40, 2), ('cursor on a marker, punch armed', 264600, 40, 1)]
     svg = ET.parse(svg_path).getroot()
     cairo = R.cairo; S, W, H, pad, lab = 2, 640, 320, 12, 22

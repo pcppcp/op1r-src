@@ -60,6 +60,18 @@ int main(int argc, char **argv)
         float want = zs[i] < 1 ? 1 : zs[i] > 4096 ? 4096 : zs[i];
         assert(abs(tm_zoom_q10() - (int)(want * 1024)) <= 1);
     }
+    /* colours: caret red like the encoder that sets markers (white under the cursor); punch: the line turns red */
+    tm_n = 2; tm_pos[0] = 220500; tm_pos[1] = 264600; tm_host_cursor = 220500; tm_host_zoom = 40.f;
+    for (int pm = 0; pm <= 1; pm++) {
+        pu_mode = (uint8_t)pm; nl = 0; tm_draw();
+        int car = 0;
+        for (int i = 0; i < nl; i++) {
+            if (L[i].w == 0x400) assert(!memcmp(L[i].c, pm ? tm_red : tm_grey, 4));
+            else if (L[i].y0 == TM_Y0) { int on = abs(L[i].x1 - TM_CENTRE_X) < OP1_Q10(1); assert(!memcmp(L[i].c, on ? tm_white : tm_red, 4)); car++; }
+        }
+        assert(car == 4);
+    }
+    pu_mode = 0;
     printf("ok\n");
     return 0;
 }
