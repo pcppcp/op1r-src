@@ -26,16 +26,26 @@ void host_seq_note_on(int mode, int note, int vel);             /* harness/plugi
 void host_seq_note_off(int mode, int note);
 #define MY_NOTE_ON(m, n, k, v) (host_seq_note_on((m), (n), (v)), (n))
 #define MY_NOTE_OFF(m, id)     host_seq_note_off((m), (id))
+static uint32_t my_irq_off(void) { return 0; }
+static void my_irq_on(uint32_t m) { (void)m; }
 #else
 int  eu_fw_note_on(int pos, int note, int key, int vel);        /* core (seq/seq_core.c): notes through VoiceCtl */
 void eu_fw_note_off(int midi);
 #define MY_NOTE_ON(m, n, k, v) eu_fw_note_on((m), (n), (k), (v))
 #define MY_NOTE_OFF(m, id)     eu_fw_note_off(id)
+static uint32_t my_irq_off(void) { uint32_t m; __asm__ volatile ("cli %0;" : "=d"(m) : : "memory"); return m; }
+static void my_irq_on(uint32_t m) { __asm__ volatile ("sti %0;" : : "d"(m) : "memory"); }
 #endif
 
+/* the key thread and the player tick both end the note: take its id with interrupts off, send the note-off after.
+ * (Clearing after the note-off would lose a note the tick starts meanwhile: it would never get its note-off.) */
 static void my_silence(int m)
 {
-    if (my[m].sounding) { MY_NOTE_OFF(m, my[m].sounding - 1); my[m].sounding = 0; }
+    uint32_t im = my_irq_off();
+    int id = my[m].sounding;
+    my[m].sounding = 0;
+    my_irq_on(im);
+    if (id) MY_NOTE_OFF(m, id - 1);
 }
 
 /* a note key on the sequencer's page: this note from now on */
