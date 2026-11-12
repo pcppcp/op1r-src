@@ -9,9 +9,9 @@
     op1push.py --port ... --list                          # plugin files on the OP-1 (protocol 3)
     op1push.py --port ... --delete plugins/x.op1p         # delete plugin files (staged, T1 confirm, at restart)
 
-What differs is asked from the device: STAT gives the size of each content file on the OP-1 and, from protocol 4,
-its CRC-32 (missing, other size or other CRC: sent; with protocol 2 / 3 a same-size file with other content is NOT
-detected: --files / --force), IDENT gives the running firmware's version text, compared with the tree's OP1_vdk.ldr
+What differs is asked from the device: STAT gives the size of each content file on the OP-1; from protocol 4, a
+file of the same size is also compared by its CRC-32 (CRC, in 32 KB steps). Missing, other size or other CRC: sent
+(with protocol 2 / 3 a same-size file with other content is NOT detected: --files / --force), IDENT gives the running firmware's version text, compared with the tree's OP1_vdk.ldr
 boot text ("op1r <n> [build time]"; release builds of one version are taken as equal).
 
 At the end the OP-1 asks: T1 restarts it (the update is applied at boot), T2 cancels.
@@ -20,7 +20,7 @@ Never sends te-boot files (the device refuses them too). Message: F0 00 20 76 7D
 import argparse, binascii, os, struct, sys
 
 HDR = bytes([0xF0, 0x00, 0x20, 0x76, 0x7D])
-HELLO, BEGIN, DATA, END, COMMIT, ABORT, STAT, IDENT, DELETE, LIST = 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+HELLO, BEGIN, DATA, END, COMMIT, ABORT, STAT, IDENT, DELETE, LIST, CRC = 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
 MAX_MSG, MAX_DATA = 256, 192
 WINDOW = 8                                        # DATA messages in flight (device queue: 16, RX ring ~3 KB)
 
@@ -180,15 +180,19 @@ def push(port, tree, paths, select=True, dry=False, timeout=2.0, log=print, dele
         log(f'{i} plugin files')
         return
     def stat(path, data):
-        """STAT -> status, same as data (protocol 4: size + CRC, read DU_CRC_STEP bytes per message; else size)"""
+        """STAT -> status, same as data: the size; equal and protocol 4: the CRC too (CRC, the device reads at most
+        32 KB per message: the host carries offset and CRC until the end)"""
+        st, pl = ask(STAT, path.encode() + b'\0')
+        if st or struct.unpack('<I', pl[:4])[0] != len(data): return st, False
+        if proto < 4: return st, True                             # (size only)
         off = crc = 0
-        while True:
-            st, pl = ask(STAT, path.encode() + b'\0' + (struct.pack('<II', off, crc) if proto >= 4 else b''))
-            if st in (5, 7): return 0, False                        # changed while read: send it
-            if st or struct.unpack('<I', pl[:4])[0] != len(data): return st, False
-            if proto < 4 or len(pl) < 12: return st, True            # (size only)
-            crc, off = struct.unpack('<II', pl[4:12])
-            if off >= len(data): return st, crc == binascii.crc32(data)
+        while off < len(data):
+            st, pl = ask(CRC, path.encode() + b'\0' + struct.pack('<II', off, crc))
+            if st: return 0, False                                # changed while read (E_IO / E_OFFSET): send it
+            crc, nxt = struct.unpack('<II', pl[:8])
+            if nxt <= off: return 0, False                        # (no progress: send it)
+            off = nxt
+        return 0, crc == binascii.crc32(data)
     if select:
         if proto < 2: sys.exit('the OP-1 cannot report its files (protocol 1): use --files')
         t0 = time.time(); keep = []

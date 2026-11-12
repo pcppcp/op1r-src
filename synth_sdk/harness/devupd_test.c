@@ -147,46 +147,52 @@ int main(int argc, char **argv)
     uint8_t data[5000]; for (int i = 0; i < 5000; i++) data[i] = (uint8_t)(i * 7);
     send(&s, DU_HELLO, 0, 0, 0, DU_OK); assert(lastn == 4 && last[0] == DU_PROTOCOL);
     send(&s, DU_IDENT, 0, 0, 0, DU_OK); assert(lastn == 24 && !memcmp(last, "op1r 31 2026-10-14 20:28", 24));
-    {   /* STAT: present (size, CRC), missing, refused path */
+    {   /* STAT: size; CRC (protocol 4): the checksum in steps */
         f_open(0, "/yaffs2/content/display/s.svg"); f_write(0, data, 3000); f_close(0);
         uint32_t v, c, o;
         send(&s, DU_STAT, 0, (const uint8_t *)"content/display/s.svg", 22, DU_OK);
-        memcpy(&v, last, 4); memcpy(&c, last + 4, 4); memcpy(&o, last + 8, 4);
-        assert(lastn == 12 && v == 3000 && o == 3000 && c == du_crc32(0, data, 3000));
-        data[1234] ^= 1;                                            /* same size, other content: other CRC */
-        assert(c != du_crc32(0, data, 3000)); data[1234] ^= 1;
-        {   /* protocol 3 firmware (no read callback): size only */
-            du_session t; du_init(&t, &fs3);
-            send(&t, DU_STAT, 0, (const uint8_t *)"content/display/s.svg", 22, DU_OK);
-            memcpy(&v, last, 4); assert(lastn == 4 && v == 3000);
-        }
+        memcpy(&v, last, 4); assert(lastn == 4 && v == 3000);
         send(&s, DU_STAT, 0, (const uint8_t *)"content/display/x.svg", 22, DU_E_NOFILE);
         send(&s, DU_STAT, 0, (const uint8_t *)"te-boot.ldr", 12, DU_E_PATH);
         send(&s, DU_STAT, 0, (const uint8_t *)"content/x", 9, DU_E_FORMAT);   /* not 0-terminated */
+        uint8_t pl[64]; uint32_t off = 0, crc = 0;
+#define CRCREQ(path, st) do { int l_ = (int)strlen(path) + 1; memcpy(pl, path, (size_t)l_); memcpy(pl + l_, &off, 4); \
+                              memcpy(pl + l_ + 4, &crc, 4); send(&s, DU_CRC, 0, pl, l_ + 8, st); } while (0)
+        CRCREQ("content/display/s.svg", DU_OK);                      /* small: one message */
+        memcpy(&c, last, 4); memcpy(&o, last + 4, 4);
+        assert(lastn == 8 && o == 3000 && c == du_crc32(0, data, 3000));
+        data[1234] ^= 1;                                            /* same size, other content: other CRC */
+        assert(c != du_crc32(0, data, 3000)); data[1234] ^= 1;
+        CRCREQ("content/display/x.svg", DU_E_NOFILE);
+        CRCREQ("te-boot.ldr", DU_E_PATH);
+        send(&s, DU_CRC, 0, (const uint8_t *)"content/display/s.svg", 22, DU_E_FORMAT);   /* no offset / CRC */
+        {   /* protocol 3 firmware (no read callback): no CRC */
+            du_session t; du_init(&t, &fs3);
+            int l = 22; memcpy(pl, "content/display/s.svg", 22); memset(pl + l, 0, 8);
+            send(&t, DU_CRC, 0, pl, l + 8, DU_E_STATE);
+        }
         f_remove(0, "/yaffs2/content/display/s.svg");
-        /* a big file: DU_CRC_STEP bytes per STAT, continued from the offset + CRC of the reply */
+        /* a big file: DU_CRC_STEP bytes per message, continued from the offset + CRC of the reply */
         uint32_t bn = 3 * DU_CRC_STEP + 777; uint8_t *bd = malloc(bn);
         for (uint32_t i = 0; i < bn; i++) bd[i] = (uint8_t)(i * 31 + (i >> 9));
         f_open(0, "/yaffs2/content/op1_factory.db"); f_write(0, bd, bn); f_close(0);
-        uint8_t pl[64]; int pn = 0; memcpy(pl, "content/op1_factory.db", 23);
-        uint32_t off = 0, crc = 0; int steps = 0;
+        int steps = 0;
         do {
-            memcpy(pl + 23, &off, 4); memcpy(pl + 27, &crc, 4); pn = 31;
-            reads = 0; send(&s, DU_STAT, 0, pl, pn, DU_OK); steps++;
-            memcpy(&v, last, 4); memcpy(&crc, last + 4, 4); memcpy(&o, last + 8, 4);
-            assert(lastn == 12 && v == bn && o > off && o - off <= DU_CRC_STEP && reads <= 2);   /* bounded work */
+            reads = 0; CRCREQ("content/op1_factory.db", DU_OK); steps++;
+            memcpy(&crc, last, 4); memcpy(&o, last + 4, 4);
+            assert(lastn == 8 && o > off && o - off <= DU_CRC_STEP && reads <= 2);   /* bounded work */
             off = o;
         } while (off < bn);
         assert(steps == 4 && crc == du_crc32(0, bd, bn));
-        memcpy(pl + 23, &bn, 4); send(&s, DU_STAT, 0, pl, 31, DU_OK);          /* at the end: nothing read */
-        memcpy(&o, last + 8, 4); assert(o == bn);
-        off = bn + 1; memcpy(pl + 23, &off, 4); send(&s, DU_STAT, 0, pl, 31, DU_E_OFFSET);
-        send(&s, DU_STAT, 0, pl, 27, DU_E_FORMAT);                                /* offset without CRC */
-        fsf[find("/yaffs2/content/op1_factory.db")].size = 100;                  /* shrank meanwhile */
-        off = 0; memcpy(pl + 23, &off, 4); memcpy(pl + 27, &off, 4);
-        send(&s, DU_STAT, 0, pl, 31, DU_OK); memcpy(&o, last + 8, 4); assert(o == 100);
-        read_fail = 1; send(&s, DU_STAT, 0, pl, 31, DU_E_IO); read_fail = 0;
+        off = bn; CRCREQ("content/op1_factory.db", DU_OK);          /* at the end: nothing read */
+        memcpy(&o, last + 4, 4); assert(o == bn);
+        off = bn + 1; CRCREQ("content/op1_factory.db", DU_E_OFFSET);
+        fsf[find("/yaffs2/content/op1_factory.db")].size = 100;     /* shrank meanwhile */
+        off = 0; crc = 0; CRCREQ("content/op1_factory.db", DU_OK); memcpy(&o, last + 4, 4); assert(o == 100);
+        read_fail = 1; CRCREQ("content/op1_factory.db", DU_E_IO); read_fail = 0;
+#undef CRCREQ
         f_remove(0, "/yaffs2/content/op1_factory.db"); free(bd);
+        (void)v;
     }
     begin(&s, "te-boot.ldr", data, 10, DU_E_PATH);
     begin(&s, "content/te-boot.op1", data, 10, DU_E_PATH);
