@@ -2,6 +2,7 @@
 *.op1
 *.ldr
 *.elf
+*-symbols.json
 op1_246*/
 op1repacker/
 synth_sdk/build/

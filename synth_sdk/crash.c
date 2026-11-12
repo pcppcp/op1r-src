@@ -5,7 +5,7 @@
  *   the first values on the interrupted stack (above the vector stub's return address 0xFFA035A8, i.e. past the
  *   exception frames) that look like code addresses (stock firmware, op1r core, L1, plugin images): return
  *   addresses of the calls that led to the crash. Plugin addresses as file+offset, the others
- *   raw for tools/op1crash.py (with that release's synth.sym).
+ *   raw for tools/op1crash.py (with that release's symbol map, symmap.py).
  * Exception context: no allocation, reads only plausible stack memory, text into the stock buffer. */
 #include "op1_synth.h"
 
