@@ -105,11 +105,12 @@ static const int16_t *tm_chunk(int t, int c, int want)
     return 0;
 }
 
+volatile uint32_t tm_miss_t[4];                                  /* misses per track (OP1R_TFDIAG line) */
 static inline int16_t tm_sample(int t, int32_t i, const int16_t **cache, int32_t *cache_c)
 {
     const int32_t c = i >> 15;
     if (c != *cache_c) { *cache_c = c; *cache = tm_chunk(t, c, 1); }
-    if (!*cache) { tm_miss++; return 0; }
+    if (!*cache) { tm_miss++; tm_miss_t[t & 3]++; return 0; }
     return (*cache)[i & (CHUNK - 1)];
 }
 
@@ -142,8 +143,11 @@ static inline int32_t tm_herm(int t, int64_t h, const int16_t **cache, int32_t *
     int32_t s = (((((c3 * f >> 12) + c2) * f >> 12) + c1) * f >> 12) + s0;
     return s > 32767 ? 32767 : s < -32768 ? -32768 : s;
 }
+#ifdef TM_DBGRING
+int16_t tm_dbg[32768]; uint32_t tm_dbg_n;
+#endif
 static int32_t fade_prev;                                        /* output gain of the last block (tm_block) */
-#define TM_SEAM 512                                              /* seam jump threshold (sum of both sides, ~-36 dBFS) */
+#define TM_SEAM 512                                             /* seam jump threshold (sum of both sides, ~-36 dBFS) */
 #define TM_XF 256                                                /* loop crossfade, samples (power of 2) */
 static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32_t *accL, int32_t *accR)
 {
@@ -186,7 +190,14 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
     if (h < 0) h = 0;
     head[t] = h;
     const int32_t c = (int32_t)(h >> 32) >> 15, d = step < 0 ? -1 : 1;   /* prefetch ahead, and the loop start */
-    for (int k = 1; k <= 3; k++) tm_chunk(t, c + k * d, 1);
+    for (int k = 1; k <= 3; k++) {                               /* ahead along the loop (wrapping), not past loop out: the
+                                                                  * chunks after loop in must be there at the wrap (device
+                                                                  * loads take 10..15 ms; a miss plays 0 = the loop-end pop) */
+        int64_t p = h + (int64_t)k * d * ((int64_t)CHUNK << 32);
+        if (hi - lo < ((int64_t)(TM_CHUNKS * CHUNK) << 32)) { int64_t r = (p - lo) % (hi - lo); if (r < 0) r += hi - lo; p = lo + r; }
+        tm_chunk(t, (int32_t)(p >> 32) >> 15, 1);
+    }
+    (void)c;
     if (hi - lo < ((int64_t)(TM_CHUNKS * CHUNK) << 32)) tm_chunk(t, (int32_t)((d > 0 ? lo : hi - 1) >> 32) >> 15, 1);
     if (looped) tm_chunk(t, (int32_t)((d > 0 ? lo - ((int64_t)TM_XF << 32) : hi + ((int64_t)TM_XF << 32)) >> 32) >> 15, 1);   /* the crossfade's other side */
 }
@@ -241,6 +252,9 @@ void tm_block(void)                                              /* audio ISR, a
         const int32_t g = f0 + ((fade - f0) * (i + 1) >> 6);
         const int32_t l = accL[i] * g >> 15, r = accR[i] * g >> 15;
         OUT_L[i] = (int16_t)(l > 32767 ? 32767 : l < -32768 ? -32768 : l);
+#ifdef TM_DBGRING
+        { extern int16_t tm_dbg[32768]; extern uint32_t tm_dbg_n; tm_dbg[tm_dbg_n++ & 32767] = OUT_L[i]; }
+#endif
         OUT_R[i] = (int16_t)(r > 32767 ? 32767 : r < -32768 ? -32768 : r);
     }
 }

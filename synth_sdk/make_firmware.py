@@ -352,7 +352,7 @@ def build(engs, fxs):
     if os.environ.get('OP1R_FORCE_HP') == '1': flags['tape/countin.c'] = flags.get('tape/countin.c', []) + ['-DFORCE_HP']   # emulator: headphone path
     if os.environ.get('OP1R_TFDIAG') == '1': flags['screens/tfscreen.c'] = flags.get('screens/tfscreen.c', []) + ['-DTF_DIAG']   # free tape: REC gates
     if os.environ.get('OP1R_SPKDIAG') == '1': flags['screens/sysmon.c'] = flags.get('screens/sysmon.c', []) + ['-DSPK_DIAG']   # speaker amp state on page 9
-    if os.environ.get('OP1R_TAPEFREE') == '1': flags['tape/tm.c'] = ['-DTAPE_FREE']   # test: the free tape machine on (docs/82)
+    if os.environ.get('OP1R_TAPEFREE') == '1': flags['tape/tm.c'] = ['-DTAPE_FREE'] + (['-DTM_DBGRING'] if os.environ.get('OP1R_TMDBG') == '1' else [])   # test: the free tape machine on (docs/82)
     if os.environ.get('OP1R_TAPEIO') == '1':          # docs/82: tape read / write times on page 9
         for f in ('tape/safewrite.c', 'screens/sysmon.c'): flags[f] = flags.get(f, []) + ['-DTAPE_IO']
     flags['dsp/eq_l1.c'] = ['-Os']                                          # docs/81: the L1 room (1 204 bytes)

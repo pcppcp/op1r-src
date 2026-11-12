@@ -202,12 +202,13 @@ static void tfs_update(void *scr, int dt)
 #ifdef TF_DIAG
     {                                                            /* OP1R_TFDIAG=1: why REC may be refused (docs/82) */
         extern volatile uint8_t pu_mode;
-        char d[32], *q = d;
+        char d[48], *q = d;
         q = put(q, "s"); q = put_u(q, (uint32_t)UI_STATE, 1);
         q = put(q, " q"); q = put_u(q, *(volatile uint32_t *)0x01AA7330 == *(volatile uint32_t *)0x01AA7334, 1);
         q = put(q, " a"); q = put_u(q, *(volatile uint32_t *)0xFF9002B4, 1);
         q = put(q, " c"); q = put_u(q, (uint32_t)*(volatile int32_t *)(0x01AA8D70 + 0x1A00), 1);
-        q = put(q, " p"); put_u(q, pu_mode, 1);
+        q = put(q, " p"); q = put_u(q, pu_mode, 1);
+        { extern volatile uint32_t tm_miss_t[4]; q = put(q, " m"); put_u(q, tm_miss_t[sel], 1); }   /* misses of the active track */
         txt(r, T_DIAG, d);
     }
 #endif
