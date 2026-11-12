@@ -312,10 +312,10 @@ static void audio_bar(void *r, int y)
 
 static void bottom_text(void *r, const char *t)            /* the shared bottom line: rebuilt only on change */
 {
-    static char last[48];
+    static char last[96];
     int k = 0;
-    while (t[k] && t[k] == last[k]) k++;
-    if (t[k] != last[k]) { op1_text_set(txt_mem[2 * SM_ROWS + 2], t); for (k = 0; (last[k] = t[k]) != 0; k++) ; }
+    while (k < 95 && t[k] && t[k] == last[k]) k++;
+    if (t[k] != last[k]) { op1_text_set(txt_mem[2 * SM_ROWS + 2], t); for (k = 0; k < 95 && (last[k] = t[k]) != 0; k++) ; last[95] = 0; }
     op1_text_draw(txt_mem[2 * SM_ROWS + 2], r, ident);
 }
 
@@ -364,7 +364,8 @@ static void sm_update(void *scr, int dt)
         op1_text_draw(txt_mem[2 * row + 1], r, ident);
     }
     extern int32_t op1_db_last_err __attribute__((weak));
-    char t[48], *q = t;
+    char t[96], *q = t;                                      /* was 48: page 5 with mx / fr went past it (overwrote the
+                                                              * saved FP: Screen::frame faulted, the OP-1 froze; docs/18) */
     q = put_u(q, (uint32_t)sm_page + 1); *q++ = '/'; q = put_u(q, PG_N); *q++ = ' ';
     if (ps_prof) {                                           /* "paul 41 f12 m5 s9 b1 i12 o2" (% of the audio time) */
         static const char tag[7] = { 'g', 'f', 'm', 's', 'b', 'i', 'o' };
@@ -494,6 +495,8 @@ static void sm_update(void *scr, int dt)
         if (&op1_db_last_err && op1_db_last_err) q = put_u(put_s(q, "err "), (uint32_t)op1_db_last_err); else q = put_s(q, "ok");
         if (&tape_save_failures && tape_save_failures) q = put_u(put_s(q, " tape fail "), tape_save_failures);
     }
+    *q = 0;
+    if (q - t > 60) q = t + 60;                              /* the longest line is ~55; the display shows less */
     *q = 0;
     bottom_text(r, t);
 }
