@@ -171,7 +171,7 @@ void perc_draw_page(void *scr, int dt, const perc_view_t *pv)
     const int16_t *k = pv->k;
     if (!tx_made) {
         op1_text_ctor(tx[TX_NAME], Q(8), 22, TS, c_white);
-        op1_text_ctor(tx[TX_IDX], Q(120), 22, TS, c_grey);   /* centred: the top-right corner is under the bezel */
+        op1_text_ctor(tx[TX_IDX], Q(262), 4, TS, c_grey);    /* top right, where drum+ shows its name */
         for (int i = 0; i < 4; i++) {
             op1_text_ctor(tx[TX_LAB + i], Q(8 + 78 * i), 114, TS, col4[i]);
             op1_text_ctor(tx[TX_VAL + i], Q(8 + 78 * i), 127, TS, c_white);
