@@ -128,6 +128,10 @@ static void tm_resync(int32_t pos)
     }
 }
 
+#ifndef TM_XHI
+#define TM_XHI   (5 * 60 * 44100)                                  /* transport kept below 5:00 (test builds: lower) */
+#define TM_XSPAN (3 * 60 * 44100)
+#endif
 static int32_t xlast = -1;                                       /* transport position last block (jump detection) */
 volatile int16_t tm_in_peak;                                     /* the recorded signal (the instrument bus) for the meter */
 void tm_set_head(int t, int32_t pos) { head[t & 3] = (int64_t)(pos < 0 ? 0 : pos) << 32; }   /* GUI: bar jumps */
@@ -307,6 +311,17 @@ static void tm_block_body(void)
         }
         if (d > 1024 || d < -1024) tm_resync(pos);
         xlast = pos;
+#ifndef OP1_HOST
+        /* FREE runs the clock: R246's transport is kept away from the tape ends (it stops at 6:00, and FREE with it);
+         * our heads have their own positions, so the transport is moved back by 3 min without a resync */
+        if (tm_on && (mode == 1 || mode == 2 || v) && !LOOP_ON) {
+            const int32_t span = TM_XSPAN;
+            int32_t np = pos;
+            if (v >= 0 && pos > TM_XHI) np = pos - span;
+            else if (v < 0 && pos < 60 * 44100) np = pos + span;
+            if (np != pos) { TPOS = np << 6; xlast = np; }
+        }
+#endif
     }
     {                                                            /* scrubbing: spin up / down to +-8x like stock winding */
         const int32_t target = tm_scrub * (8 << 16), dv = 0x2000;

@@ -353,6 +353,7 @@ def build(engs, fxs):
     if os.environ.get('OP1R_TFDIAG') == '1': flags['screens/tfscreen.c'] = flags.get('screens/tfscreen.c', []) + ['-DTF_DIAG']   # free tape: REC gates
     if os.environ.get('OP1R_SPKDIAG') == '1': flags['screens/sysmon.c'] = flags.get('screens/sysmon.c', []) + ['-DSPK_DIAG']   # speaker amp state on page 9
     if os.environ.get('OP1R_TAPEFREE') == '1': flags['tape/tm.c'] = ['-DTAPE_FREE'] + (['-DTM_DBGRING'] if os.environ.get('OP1R_TMDBG') == '1' else [])
+    if os.environ.get('OP1R_TMXTEST') == '1': flags['tape/tm.c'] = flags.get('tape/tm.c', []) + ['-DTM_XHI=441000', '-DTM_XSPAN=220500']   # emulator: transport wrap at 10 s
     if os.environ.get('OP1R_TMCHECK') == '1': flags['tape/tm.c'] = flags.get('tape/tm.c', []) + ['-DTM_CHECK']   # asm loop vs C per block (docs/82)   # test: the free tape machine on (docs/82)
     if os.environ.get('OP1R_TAPEIO') == '1':          # docs/82: tape read / write times on page 9
         for f in ('tape/safewrite.c', 'screens/sysmon.c'): flags[f] = flags.get(f, []) + ['-DTAPE_IO']
