@@ -137,19 +137,18 @@ typedef struct {
     int (*ser)(int pos, char *out, int n);              /* row text of mode pos */
     int (*parse)(int pos, const char *s, int len);
     char *sql; int16_t cap, maxlen;                     /* statement buffer, longest row text accepted */
-    uint8_t ready;
+    uint8_t ready;                                      /* 1: loaded + saver, 2: no table, not saved */
 } sq_store_t;
 #ifdef OCC_TEXT_IMPL
 #define SQ_BG_REGISTER ((void (*)(void *))0x0193F010)
 #define SQ_BG_DIRTY    ((void (*)(void *))0x0193EF3C)
 #define SQ_DB_HANDLE   ((void *(*)(void))0x0196DD44)
-#define SQ_DB_EXEC     ((void (*)(void *, const char *))0x0196F950)
 #define SQ_DB_GET      ((void (*)(void *, void *, const char *))0x0196FBD0)
 typedef struct { uint32_t alloc; union { char buf[16]; char *ptr; } u; uint32_t size, cap; uint32_t pad; } sq_dstr;
-static void sq_create(sq_store_t *st, void *db)
+static int sq_create(sq_store_t *st, void *db)          /* no db2::exec assert (euclid.c eu_load); 0 = table there */
 {
     sq_cat(sq_cat(sq_cat(st->sql, "CREATE TABLE IF NOT EXISTS "), st->name), " (is_synth INTEGER PRIMARY KEY, data TEXT NOT NULL)");
-    SQ_DB_EXEC(db, st->sql);
+    return op1_db_write(db, st->sql);
 }
 static void sq_bg_nop(void *self) { (void)self; }
 static void sq_bg_save(void *self)                      /* saver thread */
@@ -167,14 +166,14 @@ static void sq_bg_save(void *self)                      /* saver thread */
     }
 }
 static const uint32_t sq_bg_vt[6] = { 0, 0, 0, (uint32_t)sq_bg_nop, 0, (uint32_t)sq_bg_save };
-void sq_store_dirty(sq_store_t *st) { if (st->ready) SQ_BG_DIRTY(st); }
+void sq_store_dirty(sq_store_t *st) { if (st->ready == 1) SQ_BG_DIRTY(st); }
 #pragma GCC push_options
 #pragma GCC optimize("O2")                              /* (-Os clears the string with a memset call: none here) */
 void sq_store_load(sq_store_t *st)
 {
     if (st->ready) return;
     void *db = SQ_DB_HANDLE();
-    sq_create(st, db);
+    if (sq_create(st, db)) { st->ready = 2; return; }
     for (int pos = 0; pos < 2; pos++) {
         sq_dstr s = { 0 };
         sq_cat(sq_cat(sq_cat(st->sql, "SELECT data FROM "), st->name), pos ? " WHERE is_synth=0" : " WHERE is_synth=1");

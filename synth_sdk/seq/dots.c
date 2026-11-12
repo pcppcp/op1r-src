@@ -844,7 +844,6 @@ volatile uint8_t dt_active[2];                          /* dots selected (synth,
 #define DT_BG_REGISTER ((void (*)(void *))0x0193F010)
 #define DT_BG_DIRTY    ((void (*)(void *))0x0193EF3C)
 #define DT_DB_HANDLE   ((void *(*)(void))0x0196DD44)
-#define DT_DB_EXEC     ((void (*)(void *, const char *))0x0196F950)
 #define DT_DB_GET      ((void (*)(void *, void *, const char *))0x0196FBD0)
 typedef struct { uint32_t alloc; union { char buf[16]; char *ptr; } u; uint32_t size, cap; uint32_t pad; } dt_dstr;
 static const char DT_CREATE[] = "CREATE TABLE IF NOT EXISTS dotsseq (id INTEGER PRIMARY KEY, data TEXT NOT NULL)";
@@ -855,7 +854,7 @@ static void dt_bg_save(void *self)                      /* saver thread */
 {
     (void)self;
     void *db = DT_DB_HANDLE();
-    DT_DB_EXEC(db, DT_CREATE);
+    op1_db_write(db, DT_CREATE);
     for (int id = 0; id < 6 * DT_PATS; id++) {          /* id = mode * 4 + pattern (steps), + 8 (fx locks), + 16 (synth locks) */
         static const char head[] = "INSERT OR REPLACE INTO dotsseq VALUES (";
         char *o = dt_sql;
@@ -871,12 +870,12 @@ static void dt_bg_save(void *self)                      /* saver thread */
 }
 static const uint32_t dt_bg_vt[6] = { 0, 0, 0, (uint32_t)dt_bg_nop, 0, (uint32_t)dt_bg_save };
 static struct { uint8_t dirty, saving, pad[2]; const uint32_t *vt; uint32_t more[2]; } dt_bg;
-static uint8_t dt_bg_ready;
-static void dt_changed(void) { if (dt_bg_ready) DT_BG_DIRTY(&dt_bg); }
+static uint8_t dt_bg_ready;                             /* 1: loaded + saver, 2: no table (as euclid) */
+static void dt_changed(void) { if (dt_bg_ready == 1) DT_BG_DIRTY(&dt_bg); }
 static void dt_load(void)
 {
     void *db = DT_DB_HANDLE();
-    DT_DB_EXEC(db, DT_CREATE);
+    if (op1_db_write(db, DT_CREATE)) { dt_bg_ready = 2; return; }   /* (no assert: euclid.c eu_load) */
     for (int id = 0; id < 6 * DT_PATS; id++) {          /* steps first (ids 0..7), then their locks (8..15, 16..23) */
         static char q[] = "SELECT data FROM dotsseq WHERE id=00";
         q[sizeof q - 3] = (char)('0' + id / 10); q[sizeof q - 2] = (char)('0' + id % 10);
