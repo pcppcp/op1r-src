@@ -152,6 +152,7 @@ static int32_t fade_prev;                                        /* output gain 
 #ifndef OP1_HOST
 void tm_hloop(const int16_t *d, int32_t r, int32_t st, uint32_t gains, int32_t shift, int32_t *accL, int32_t *accR);
 #endif
+volatile uint32_t tm_cyc_loop;                                   /* cycles in tm_hloop (sysmon "fr total/loop") */
 volatile uint32_t tm_chk_n, tm_chk_bad;                          /* OP1R_TMCHECK: blocks compared, mismatches */
 static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32_t *accL, int32_t *accR)
 {
@@ -186,7 +187,9 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
                 int32_t r = (int32_t)((h - ((int64_t)base << 32)) >> 16);   /* Q16 inside the chunk (< 2^31) */
                 const int32_t st = (int32_t)(step >> 16);
 #if !defined(OP1_HOST) && !defined(TM_CHECK)
-                tm_hloop(d, r, st, (uint16_t)gl | (uint32_t)(uint16_t)gr << 16, gain_shift, accL, accR);   /* tm_loop.S */
+                { uint32_t c0, c1; __asm__ volatile ("%0 = CYCLES;" : "=d"(c0));
+                  tm_hloop(d, r, st, (uint16_t)gl | (uint32_t)(uint16_t)gr << 16, gain_shift, accL, accR);   /* tm_loop.S */
+                  __asm__ volatile ("%0 = CYCLES;" : "=d"(c1)); tm_cyc_loop += c1 - c0; }
 #else
 #ifdef TM_CHECK
                 int32_t cl[64], cr[64];
@@ -234,12 +237,15 @@ done:
     if (h < 0) h = 0;
     head[t] = h;
     const int32_t c = (int32_t)(h >> 32) >> 15, d = step < 0 ? -1 : 1;   /* prefetch ahead, and the loop start */
-    for (int k = 1; k <= 3; k++) {                               /* ahead along the loop (wrapping), not past loop out: the
-                                                                  * chunks after loop in must be there at the wrap (device
-                                                                  * loads take 10..15 ms; a miss plays 0 = the loop-end pop) */
-        int64_t p = h + (int64_t)k * d * ((int64_t)CHUNK << 32);
-        if (hi - lo < ((int64_t)(TM_CHUNKS * CHUNK) << 32)) { int64_t r = (p - lo) % (hi - lo); if (r < 0) r += hi - lo; p = lo + r; }
-        tm_chunk(t, (int32_t)(p >> 32) >> 15, 1);
+    /* ahead along the loop (wrapping), not past loop out: the chunks after loop in must be there at the wrap (device
+     * loads take 10..15 ms; a miss plays 0 = the loop-end pop). No 64-bit modulo here (a software division per call) */
+    const int32_t L0 = (int32_t)(lo >> 32), L1 = (int32_t)(hi >> 32), len = L1 - L0, hn = (int32_t)(h >> 32);
+    if (len < TM_CHUNKS * CHUNK && len <= 3 * CHUNK) {           /* short loop: all of it */
+        for (int k = L0 >> 15; k <= (L1 - 1) >> 15; k++) tm_chunk(t, k, 1);
+    } else for (int k = 1; k <= 3; k++) {
+        int32_t p = hn + k * d * CHUNK;
+        if (len < TM_CHUNKS * CHUNK) { if (p >= L1) p -= len; else if (p < L0) p += len; }   /* k CHUNK <= len: one wrap */
+        tm_chunk(t, p >> 15, 1);
     }
     (void)c;
     if (hi - lo < ((int64_t)(TM_CHUNKS * CHUNK) << 32)) tm_chunk(t, (int32_t)((d > 0 ? lo : hi - 1) >> 32) >> 15, 1);
