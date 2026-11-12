@@ -40,11 +40,12 @@ static const op1_drum_t *drum_by_row(int id)
 }
 /* a voice stays with the plugin that started it (a slot change mid-sound must not hand it to another engine) */
 static const op1_drum_t *voice_owner[12];
+static uint8_t voice_set[12];                                 /* voice_owner valid (0 there: stock, without drum+) */
 static int voice_of(void *self) { for (int i = 0; i < 12; i++) if (VOICE_OBJ[i] == self) return i; return -1; }
 static const op1_drum_t *drum_for_voice(void *self)
 {
     int v = voice_of(self);
-    if (v >= 0 && voice_owner[v]) return voice_owner[v];
+    if (v >= 0 && voice_set[v]) return voice_owner[v];
     return drum_for_slot(DRUM_SLOT);
 }
 
@@ -74,7 +75,7 @@ void dp_fw_note_on(void *self, const void *pad)
 {
     const op1_drum_t *d = drum_for_slot(DRUM_SLOT);
     int v = voice_of(self);
-    if (v >= 0) voice_owner[v] = d;
+    if (v >= 0) { voice_owner[v] = d; voice_set[v] = 1; }
     if (d) d->note_on(self, pad); else STOCK_NOTE_ON(self, pad);
 }
 void dp_fw_note_off(void *self, const void *pad)
