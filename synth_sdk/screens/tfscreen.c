@@ -43,7 +43,7 @@ void tm_set_head(int t, int32_t pos);
 #define TAPE_VT        0x01911B5C                                 /* R246's TapeScreen vtable (docs/22) */
 #define TPOS           (*(volatile int32_t *)0xFF802974)          /* samples << 6 */
 #define LOCATE(s)      (((void (*)(int32_t))0x01A55024)(s))       /* tape_c::check_pos (0 .. 0xF2BFA0) */
-#define TM_MAXPOS      0xF2BFA0
+#define TM_MAXPOS      (0x1E5 * 0x8000)                           /* FREE's tape end: tm.c's last chunk (R246's own: 0xF2BFA0) */
 #define TE_BPM_BITS    (*(volatile uint32_t *)0x018C1878)         /* tempo, float (read as bits) */
 static inline uint32_t now(void) { uint32_t c; __asm__ volatile ("%0 = CYCLES;" : "=d"(c)); return c; }
 static int32_t bpm_q8(void)                                      /* as seqdev/ms_fw.c: float bits -> Q8, 120 if odd */
@@ -374,7 +374,8 @@ int tfs_key(int code, int pressed)                               /* key thread: 
     } else if (SHIFT) {                                          /* Shift + s3: the loop = the clip under the head */
         for (int i = 0; i < NCLIPS; i++)
             if (CLIP_USED[i] && CLIPS[i * 3] == sel && CLIPS[i * 3 + 1] <= h && h < CLIPS[i * 3 + 2]) {
-                tr->lin = CLIPS[i * 3 + 1]; tr->lout = CLIPS[i * 3 + 2]; tr->lset = 1; tr->lon = 1;
+                tr->lin = CLIPS[i * 3 + 1]; tr->lout = CLIPS[i * 3 + 2] > TM_MAXPOS ? TM_MAXPOS : CLIPS[i * 3 + 2];
+                tr->lset = 1; tr->lon = tr->lout > tr->lin;
                 break;
             }
     } else tr->lon = (uint8_t)(!tr->lon && tr->lout > tr->lin);   /* s3: on / off */
@@ -442,8 +443,10 @@ void tfs_state_load(void)
         const int32_t h = op1r_setting_get(sv_key(k, t, 'h'), -1), li = op1r_setting_get(sv_key(k, t, 'i'), -1),
                       lo = op1r_setting_get(sv_key(k, t, 'o'), -1), sp = op1r_setting_get(sv_key(k, t, 's'), 0),
                       fl = op1r_setting_get(sv_key(k, t, 'f'), -1);
-        if (h >= 0 && h <= TM_MAXPOS) tm_set_head(t, h);
-        if (li >= 0 && li <= TM_MAXPOS && lo >= 0 && lo <= TM_MAXPOS) { tr->lin = li; tr->lout = lo; }
+        if (h >= 0 && h <= 0xF2BFA0) tm_set_head(t, h);             /* (saved up to R246's end before: clamped) */
+        if (li >= 0 && li <= 0xF2BFA0 && lo >= 0 && lo <= 0xF2BFA0) {
+            tr->lin = li > TM_MAXPOS ? TM_MAXPOS : li; tr->lout = lo > TM_MAXPOS ? TM_MAXPOS : lo;
+        }
         if ((sp >= 0x2000 && sp <= 0x40000) || (sp <= -0x2000 && sp >= -0x40000)) tr->speed = sp;   /* 1/8 .. 4x, either way */
         if (fl >= 0 && fl <= 15) { tr->lon = (uint8_t)(fl & 1 && tr->lout > tr->lin); tr->lset = (uint8_t)(fl >> 1 & 1); tr->mute = (uint8_t)(fl >> 2 & 1); tr->stop = (uint8_t)(fl >> 3 & 1); }
         sv[t][0] = h; sv[t][1] = li; sv[t][2] = lo; sv[t][3] = sp; sv[t][4] = fl;
