@@ -17,7 +17,11 @@ typedef int32_t tr_word;                                    /* layout written by
 volatile tr_word tr_rec[1 + 16 * 4];                      /* count, then {src, dest, track, N} (hook.S) */
 int16_t tr_out[TR_N][64];
 volatile int16_t tr_peak[TR_N];
-static int16_t tr_src[TR_N][TR_SRC];
+/* the tracks' gathered samples as pairs: word i of pair p = track 2p (low half) | track 2p + 1 (high half), so one
+ * dual MAC filters two tracks (screens/tr_rs.S); the gather writes the halves through int16 views */
+static uint32_t tr_pair[2][TR_SRC + 1] __attribute__((aligned(4)));   /* + 1: the kernel's last read-ahead */
+static uint8_t tr_clean;                                    /* tracks whose half is all zero */
+#define TR_SRC16(t) ((int16_t *)tr_pair[(t) >> 1] + ((t) & 1))     /* track t's samples, stride 2 */
 
 #ifdef OP1_HOST
 extern const int16_t *tr_host_coef; extern int16_t tr_host_gain;
@@ -33,6 +37,42 @@ extern const int16_t *tr_host_coef; extern int16_t tr_host_gain;
 #endif
 
 static inline int16_t sat16(int32_t v) { return v > 32767 ? 32767 : v < -32768 ? -32768 : (int16_t)v; }
+
+/* One pair's 64 outputs, R246's resampler arithmetic (tape_resample_read 0xFFA06194, per channel): per output
+ * p += inc, idx = p >> 6, ph = 63 - (p & 63); A = sum over k = 0..15 of 2 c[ph + 64 k] s[idx + k], saturated to 32 bits
+ * after every tap (W32); out = 2 g (A >> 16) >> 16 rounded ties to even, saturated (R.H = R.L * R.H); g += gi (S).
+ * idx .. idx + 15 must lie in the source for all 64 outputs (the caller checks). */
+typedef struct { const uint32_t *src; const int16_t *coef; int16_t *out_a, *out_b; int32_t pos, inc; int16_t g, gi; } tr_rs_job;
+static inline int32_t sat32(int64_t v) { return v > 0x7FFFFFFF ? 0x7FFFFFFF : v < -0x7FFFFFFF - 1 ? -0x7FFFFFFF - 1 : (int32_t)v; }
+static inline int16_t rmul(int16_t g, int16_t h)            /* R.H = g * h, fractional, rounded ties to even (the
+                                                             * Blackfin default, docs/81), saturated */
+{
+    if (g == -32768 && h == -32768) return 32767;
+    const int32_t p = 2 * (int32_t)g * h, q = p >> 16, r = p & 0xFFFF;
+    return (int16_t)(r > 0x8000 || (r == 0x8000 && (q & 1)) ? q + 1 : q);
+}
+#if defined(__bfin__) && !defined(TR_RS_C_REF)
+void tr_rs_pair(const tr_rs_job *j);                         /* screens/tr_rs.S */
+#else
+static void tr_rs_pair(const tr_rs_job *j)
+{
+    int32_t p = j->pos; int16_t g = j->g;
+    for (int n = 0; n < 64; n++) {
+        p += j->inc;
+        const int32_t idx = p >> 6, ph = 63 - (p & 63);
+        int32_t a = 0, b = 0;
+        for (int k = 0; k < 16; k++) {
+            const int32_t c = j->coef[ph + 64 * k], w = (int32_t)j->src[idx + k];
+            const int32_t sa = (int16_t)w, sb = (int16_t)(w >> 16);   /* fractional MAC: -1 x -1 saturates */
+            a = sat32((int64_t)a + (c == -32768 && sa == -32768 ? 0x7FFFFFFF : 2 * c * sa));
+            b = sat32((int64_t)b + (c == -32768 && sb == -32768 ? 0x7FFFFFFF : 2 * c * sb));
+        }
+        j->out_a[n] = rmul(g, (int16_t)(a >> 16));
+        j->out_b[n] = rmul(g, (int16_t)(b >> 16));
+        g = sat16(g + j->gi);
+    }
+}
+#endif
 
 /* USB out setting (screens/usbout.c): 0 = master (track channels silent, no track work: saves CPU),
  * 1 = master + tracks. Always 6 channels, so it switches at once without re-enumeration. */
@@ -53,34 +93,33 @@ void tr_resample(int32_t pos, int32_t inc, const int16_t *gain_inc)
                     : dst >= SRC_R && dst < SRC_R + 2 * TR_SRC ? (int32_t)(dst - SRC_R) / 2 : -1;
         if (t < 0 || t >= TR_N || off < 0 || cnt <= 0) continue;
         if (off + cnt > TR_SRC) cnt = TR_SRC - off;
-        if (!(got >> t & 1)) { for (int i = 0; i < TR_SRC; i++) tr_src[t][i] = 0; got |= (uint8_t)(1 << t); }
+        int16_t *d = TR_SRC16(t);
+        if (!(got >> t & 1)) { for (int i = 0; i < TR_SRC; i++) d[2 * i] = 0; got |= (uint8_t)(1 << t); tr_clean &= (uint8_t)~(1 << t); }
         for (int i = 0; i < cnt; i++) {                    /* add: at the loop wrap the mixer makes 2 passes into */
-            int32_t v = tr_src[t][off + i] + src[i];          /* the same region (end + start of the loop), like L += */
-            tr_src[t][off + i] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+            int32_t v = d[2 * (off + i)] + src[i];            /* the same region (end + start of the loop), like L += */
+            d[2 * (off + i)] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
         }
     }
     tr_rec[0] = 0;
     extern volatile uint8_t sc_blk, tr_at;
     tr_at = (uint8_t)(sc_blk + 1);                         /* fresh for the block fr_snap counts next */
+    /* the 64 outputs read idx .. idx + 15 with idx = (pos + n inc) >> 6, n = 1 .. 64 (monotonic): all inside the
+     * source, else that pair is silent (R246's own read is the same span; never seen out of range) */
+    const int32_t i0 = (pos + inc) >> 6, i1 = (pos + 64 * inc) >> 6;
+    const int ok = i0 >= 0 && i1 >= 0 && i0 + 16 <= TR_SRC && i1 + 16 <= TR_SRC;
+    for (int pr = 0; pr < 2; pr++) {
+        const int a = 2 * pr, b = a + 1, ga = got >> a & 1, gb = got >> b & 1;
+        for (int t = a; t <= b; t++)                       /* a half without records: silent (cleared once) */
+            if (!(got >> t & 1) && !(tr_clean >> t & 1)) { int16_t *d = TR_SRC16(t); for (int i = 0; i < TR_SRC; i++) d[2 * i] = 0; tr_clean |= (uint8_t)(1 << t); }
+        if ((ga | gb) && ok) {
+            const tr_rs_job j = { tr_pair[pr], COEF, tr_out[a], tr_out[b], pos, inc, GAIN0, (int16_t)(gain_inc ? *gain_inc : 0) };
+            tr_rs_pair(&j);
+        } else for (int n = 0; n < 64; n++) tr_out[a][n] = tr_out[b][n] = 0;
+    }
     for (int t = 0; t < TR_N; t++) {
-        int16_t *o = tr_out[t];
+        const int16_t *o = tr_out[t];
         int peak = 0;
-        if (!(got >> t & 1)) { for (int j = 0; j < 64; j++) o[j] = 0; }
-        else {
-            int32_t p = pos, g = GAIN0, gi = gain_inc ? *gain_inc : 0;
-            for (int j = 0; j < 64; j++) {
-                p += inc;                                  /* as the master: advance first */
-                int32_t idx = p >> 6, ph = 63 - (p & 63), acc = 0;
-                if (idx >= 0 && idx + 16 <= TR_SRC) {
-                    const int16_t *s = &tr_src[t][idx], *c = COEF + ph;
-                    for (int k = 0; k < 16; k++) acc += c[64 * k] * s[k];
-                }
-                int16_t v = sat16(((acc >> 15) * g) >> 15);
-                o[j] = v;
-                if (v > peak) peak = v; else if (-v > peak) peak = -v;
-                g = sat16(g + gi);
-            }
-        }
+        for (int j = 0; j < 64; j++) { const int v = o[j] < 0 ? -o[j] : o[j]; if (v > peak) peak = v; }
         tr_peak[t] = (int16_t)(peak > tr_peak[t] ? peak : tr_peak[t] - (tr_peak[t] >> 6));
     }
 }
@@ -91,6 +130,9 @@ void tr_resample(int32_t pos, int32_t inc, const int16_t *gain_inc)
 #define USB_ISO_IN      ((int (*)(void *, const void *, int))0x01A6A474)   /* smxUSBD iso IN queue (dev, buf, bytes) */
 #define USB_CH          6
 #define USB_MAXPKT      (46 * USB_CH * 3)                            /* 828 bytes, <= 1023 (full-speed iso) */
+#define T_VOL           ((volatile int16_t *)0xFF801928)              /* mixer, per track (docs/54): volume */
+#define T_LEV           ((volatile int16_t *)0xFF8018B4)              /* level */
+#define T_MUTE          ((volatile int16_t *)0xFF8018C4)              /* mute fade (Core::update_mutes) */
 static uint8_t usb6_pkt[USB_MAXPKT + 4] __attribute__((aligned(4)));
 
 /* CALL @0x01A6ED96: after the stock template fill, widen the to-host stream */
@@ -124,9 +166,14 @@ static void ring_put(uint32_t wr0, int silent)
 #ifndef USB_RAWIN
     if (!usb_tracks_live) silent = 1;
 #endif
+    int32_t g[TR_N];                                                /* post fader (usb_tracks_live 2): the track's mixer volume
+                                                                     * x level x mute fade, as Core_mix_master (and the FX2 aux
+                                                                     * sends, fxroute.c); pan left out (mono channels); Q15 */
+    for (int t = 0; t < TR_N; t++)
+        g[t] = usb_tracks_live == 2 ? (((T_VOL[t] * T_LEV[t]) >> 15) * T_MUTE[t]) >> 15 : 32768;
     for (int f = 0; f < 64; f++) {
         int32_t *d = usb6_ring[(wr0 + f) & 0x1FF];
-        for (int t = 0; t < TR_N; t++) d[t] = silent ? 0 : (int32_t)tr_out[t][f] << 8;
+        for (int t = 0; t < TR_N; t++) d[t] = silent ? 0 : (tr_out[t][f] * g[t]) >> 7;   /* int16 << 8, x gain */
 #ifdef USB_RAWIN
         const int32_t *raw = pc_in_b;
         if (raw) { d[0] = raw[2 * f] >> 8; d[1] = raw[2 * f + 1] >> 8; }   /* always, also with tracks off */
