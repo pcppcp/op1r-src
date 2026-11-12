@@ -1348,6 +1348,8 @@ void key_event_hook(int code, int pressed)
         }
     }
     KEY_DISPATCH(code, pressed);
+    se_swap();                                  /* again: a mode key (DRUM) changed the mode only now; else the stock
+                                                 * drum page shows until the next key event (its release) */
     if (eu_rec_play) {                          /* euclid Shift+C# with REC held: press PLAY like the user would */
         eu_rec_play = 0;
         volatile uint8_t *shift = (volatile uint8_t *)0x01DD7F78;   /* without Shift: else it is Shift + PLAY */
@@ -1643,8 +1645,12 @@ static int lazy_parse(uint32_t *scr, const op1_screen_t *sc)
     t = op1_cycles() - t; lazy_stat[0]++; if (t > lazy_stat[2]) lazy_stat[2] = t;
     return 1;
 }
+static void fx_screen_pick(void);
 void lazy_screens_frame(void)
 {
+    /* the FX page between positions (master -> instrument): the screen id stays 0x0B, so for_fx is not asked again
+     * and the other position's FX screen would draw until it is (~0.3 s): pick it every frame, before any draw */
+    if (*(volatile int *)0x018B65C8 == FILTER_SCREEN_ID) fx_screen_pick();
     if (!gs_lazy) return;
     lz_frame();                                              /* stock screens (lazy) */
     void *s = SCREEN_TABLE[ITER_SCREEN_ID];
@@ -1668,15 +1674,18 @@ void lazy_screens_frame(void)
 }
 
 /* ScreenId::for_fx case 5 (filter) -> asm stub fx_screen_case5 -> here; returns the screen id */
+static void fx_screen_pick(void)                            /* table[0x0B] = the screen of the shown position's FX */
+{
+    if (!filter_screen) return;
+    int e = current_fx();
+    void *s = filter_screen;
+    if (e && e < MAX_ENG && fx_ready[e]) s = fx_scr[e];
+    else if (e && fxscr_ready) s = fxscr;
+    SCREEN_TABLE[FILTER_SCREEN_ID] = s;
+}
 int fx_screen_select(void)
 {
     fx_sanitize();
-    if (filter_screen) {
-        int e = current_fx();
-        void *s = filter_screen;
-        if (e && e < MAX_ENG && fx_ready[e]) s = fx_scr[e];
-        else if (e && fxscr_ready) s = fxscr;
-        SCREEN_TABLE[FILTER_SCREEN_ID] = s;
-    }
+    fx_screen_pick();
     return FILTER_SCREEN_ID;
 }
