@@ -141,7 +141,10 @@ static void tm_resync(int32_t pos)
 #endif
 static int32_t xlast = -1;                                       /* transport position last block (jump detection) */
 volatile int16_t tm_in_peak;                                     /* the recorded signal (the instrument bus) for the meter */
-void tm_set_head(int t, int32_t pos) { head[t & 3] = (int64_t)(pos < 0 ? 0 : pos) << 32; }   /* GUI: bar jumps */
+void tm_set_head(int t, int32_t pos)                             /* GUI: bar jumps (the tape end at most: no chunk after it) */
+{
+    head[t & 3] = (int64_t)(pos < 0 ? 0 : pos > TM_CHUNKS * CHUNK ? TM_CHUNKS * CHUNK : pos) << 32;
+}
 
 static int64_t rec_h0[4], rec_step[4], rec_lo[4], rec_hi[4];    /* this block's head path per track (for recording) */
 /* one interpolated sample at h (Q32): 4-point Hermite (Catmull-Rom), coefficients ~2^18, x Q12 stays in 32 bits */
@@ -458,15 +461,18 @@ static void tm_block_body(void)
  * overdub sat16(old + new), into R246's clip cache entry of the chunk (dirty + track bit: tape_c::service saves it)
  * and our read slot. A chunk not in R246's cache is queued and that part skipped (as R246 does). The take: range
  * reset at record start (0x01A54C1C), widened per block (0x01A54BB4): R246 closes it (Clips) on stop, onto its
- * selected track (= ours: tfscreen.c sets it). */
+ * selected track (= ours: tfscreen.c sets it). Without an own loop the take ends at the tape end (either way), as
+ * stock's (R246's transport stops there): a wrap to the other end would widen the range to the whole track. */
+#if !defined(OP1_HOST) || defined(TM_REC_HOST)                   /* host: tmrec_test.c fakes R246's parts */
 #ifndef OP1_HOST
 #define REC_LEVEL  (*(volatile int16_t *)0x01B4EF6E)
 #define QUEUE_CLIP ((void (*)(int))0x01A54CD4)
 #define RANGE_ADD  ((void (*)(int32_t))0x01A54BB4)
 #define RANGE_RST  ((void (*)(void))0x01A54C1C)
 #define REC_STOCK  ((void (*)(void *))0xFFA06334)
+#endif
 volatile uint32_t tm_rec_written, tm_rec_missed;
-static uint8_t rec_on;
+static uint8_t rec_on, rec_end;                                  /* rec_end: the tape end reached (no own loop) */
 /* our read copy gets the recorded samples one block late: the record track's own playback (4-point, reads n - 1 .. n + 2)
  * would otherwise hear the live input a few samples late (a comb: "resonance" at speeds != 1x); the next loop pass
  * hears them, R246's cache has them at once */
@@ -482,9 +488,10 @@ static void tm_record(const volatile int16_t *bus)
     pend_n = 0;
     if (MODE != 1) { rec_on = 0; return; }
     SEL_TRACK = t;                                               /* R246 closes the take onto this track */
-    if (!rec_on) { rec_on = 1; rec_fade = 0; RANGE_RST(); }
+    if (!rec_on) { rec_on = 1; rec_end = 0; rec_fade = 0; RANGE_RST(); }
     const int64_t step = rec_step[t], lo = rec_lo[t], hi = rec_hi[t];
-    if (!step) return;
+    if (!step || rec_end) return;
+    const int full = hi - lo >= (int64_t)(TM_CHUNKS * CHUNK) << 32;   /* no own loop */
     const int32_t lvl = REC_LEVEL < 0 ? 0 : REC_LEVEL;
     int32_t in[65];
     for (int i = 0; i < 64; i++) {                               /* level, fade-in over the first block */
@@ -506,24 +513,28 @@ static void tm_record(const volatile int16_t *bus)
         int32_t n = step > 0 ? (int32_t)((h + 0xFFFFFFFFLL) >> 32) : (int32_t)(h >> 32), nend = (int32_t)(h1 >> 32);
         int crossed = 0;
         for (int g = 0; g < 8; g++) {                            /* the integer positions crossed (at most 8: up to 4x + slack) */
-            if (step > 0 ? ((int64_t)n << 32) >= h1 : ((int64_t)n << 32) <= h1) break;
+            const int64_t nq = (int64_t)n * ((int64_t)1 << 32);   /* (n < 0 at 0:00 in reverse: no negative shift) */
+            if (step > 0 ? nq >= h1 : nq <= h1) break;
             int32_t pn = n;
             crossed = 1;
-            int64_t q = (int64_t)pn << 32;
-            if (q >= hi) pn -= (int32_t)((hi - lo) >> 32); else if (q < lo) pn += (int32_t)((hi - lo) >> 32);
+            int64_t q = (int64_t)pn * ((int64_t)1 << 32);
+            if (q >= hi || q < lo) {
+                if (full) { rec_end = 1; break; }                /* the tape end */
+                if (q >= hi) pn -= (int32_t)((hi - lo) >> 32); else pn += (int32_t)((hi - lo) >> 32);
+            }
             int32_t v;
             if (ast < ((int64_t)1 << 32)) {                      /* slower than 1x: the mean of the input since the last
                                                                   * position (box filter: no aliasing from the compression) */
                 v = box_n ? (box_sum + in[i]) * recip[box_n + 1 > 32 ? 32 : box_n + 1] >> 15 : in[i];
                 box_sum = 0; box_n = 0;
             } else {
-                const uint32_t fr = (uint32_t)(((uint64_t)(step > 0 ? ((int64_t)n << 32) - h : h - ((int64_t)n << 32)) >> 17) * inv >> 15) & 0x7FFF;
+                const uint32_t fr = (uint32_t)(((uint64_t)(step > 0 ? nq - h : h - nq) >> 17) * inv >> 15) & 0x7FFF;
                 v = in[i] + ((in[i + 1] - in[i]) * (int32_t)fr >> 15);
             }
             const int32_t c = pn >> 15;
             if (c != ec) {                                       /* R246's clip cache entry of this chunk, our slot */
-                ec = c; e = CLIP_IDX ? CLIP_IDX[c] : 0;
-                if (!(e && e[0] && *(const int16_t *)(e + 6) == c)) { e = 0; QUEUE_CLIP(c); }
+                ec = c; e = CLIP_IDX && c >= 0 && c < TM_CHUNKS ? CLIP_IDX[c] : 0;   /* (a loop out from before the clamp) */
+                if (!(e && e[0] && *(const int16_t *)(e + 6) == c)) { e = 0; if (c >= 0 && c < TM_CHUNKS) QUEUE_CLIP(c); }
                 const int s = c >= 0 && c < TM_CHUNKS ? map[t][c] - 1 : -1;
                 slot_d = s >= 0 && slot[s].state == 2 ? slot[s].data : 0;
             }
@@ -539,13 +550,18 @@ static void tm_record(const volatile int16_t *bus)
             } else tm_rec_missed++;
             n += step > 0 ? 1 : -1;
         }
+        if (rec_end) break;
         if (!crossed && ast < ((int64_t)1 << 32)) { box_sum += in[i]; if (box_n < 31) box_n++; }   /* waits for the next position */
         (void)nend;
         h = h1;
+        if ((h >= hi || h < lo) && full) { rec_end = 1; break; }
         if (h >= hi) h -= hi - lo; else if (h < lo) h += hi - lo;
     }
     if (first >= 0) { RANGE_ADD(first); RANGE_ADD(last); }
-    { const int32_t c = (int32_t)(h >> 32) >> 15, d = step < 0 ? -1 : 1; QUEUE_CLIP(c); QUEUE_CLIP(c + d); }   /* ahead */
+    for (int k = 0; k < 2 && !rec_end; k++) {                    /* ahead (not past the tape ends) */
+        const int32_t c = ((int32_t)(h >> 32) >> 15) + (k ? (step < 0 ? -1 : 1) : 0);
+        if (c >= 0 && c < TM_CHUNKS) QUEUE_CLIP(c);
+    }
 }
 #ifndef OP1_HOST
 static void tm_rec_body(void *bus);
