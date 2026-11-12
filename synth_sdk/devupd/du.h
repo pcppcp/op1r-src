@@ -14,8 +14,12 @@ enum { DU_HELLO = 1, DU_BEGIN = 2, DU_DATA = 3, DU_END = 4, DU_COMMIT = 5, DU_AB
        DU_STAT = 7,                         /* path -> u32 size of /yaffs2/<path> (DU_E_NOFILE: missing) */
        DU_IDENT = 8,                        /* -> running firmware's version text (boot screen "op1r <n> [time]") */
        DU_DELETE = 9,                       /* path (plugins/<name>.op1p only) -> staged delete, applied like files */
-       DU_LIST = 10 };                      /* u16 index -> u32 size + name of the index-th plugins/ file (E_NOFILE: end) */
-#define DU_PROTOCOL 3
+       DU_LIST = 10,                        /* u16 index -> u32 size + name of the index-th plugins/ file (E_NOFILE: end) */
+       DU_CRC = 11 };                       /* protocol 4: path, u32 offset, u32 crc -> u32 crc, u32 offset: the CRC-32 of
+                                               /yaffs2/<path> continued over at most DU_CRC_STEP bytes (ask again from
+                                               offset until = size; hosts ask only when STAT's size matches) */
+#define DU_PROTOCOL 4
+#define DU_CRC_STEP 32768u                  /* CRC: bytes read per message (main loop: a few ms, not the whole file) */
 #define DU_DEL_SIZE 0xFFFFFFFFu             /* manifest / session size of a delete entry (no staged data) */
 enum { DU_REPLY = 0x40 };                   /* reply: cmd | 0x40, seq, status, payload */
 enum { DU_OK = 0, DU_E_FORMAT = 1, DU_E_STATE = 2, DU_E_PATH = 3, DU_E_SIZE = 4, DU_E_OFFSET = 5, DU_E_CRC = 6,
@@ -44,6 +48,7 @@ typedef struct {                            /* file system callbacks (firmware: 
     int (*stat)(void *ctx, const char *path, uint32_t *size);     /* 0 ok, else missing */
     int (*ident)(void *ctx, char *out, int cap);                  /* version text, returns its length */
     int (*list)(void *ctx, int index, char *name, int cap, uint32_t *size);   /* plugins/ entry: 0 ok, else end */
+    int (*read)(void *ctx, const char *path, uint32_t off, uint8_t *buf, uint32_t n);   /* /yaffs2/<path>: bytes, < 0 error */
 } du_fs;
 typedef struct {
     char path[DU_MAX_PATH];
