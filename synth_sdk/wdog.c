@@ -1,4 +1,4 @@
-/* Hang detector (OP1R_WDOG=1, docs/18): the BF524 watchdog raises an NMI when neither the audio interrupt (fr_snap,
+/* Hang detector (on by default, OP1R_WDOG=0 builds without it; docs/18): the BF524 watchdog raises an NMI when neither the audio interrupt (fr_snap,
  * every block) nor the GUI (every frame) has reloaded it for ~4-5 s, i.e. the whole OP-1 froze (device: a looping
  * buzz, no error screen; the stock error screen can not be drawn from there). The NMI handler (wdog_nmi.S) saves
  * where the core was (RETN ...) and the stack into a record at the top of SDRAM, then resets via the watchdog; the
