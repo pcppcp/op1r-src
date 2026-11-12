@@ -72,18 +72,22 @@ static void stress_inputs(void)
 volatile uint32_t os_selftest[4];
 #ifndef OUTSTAGE_CHECK
 #include "stagecheck.h"
-static const stage_region os_st_regions[] = {
-    { (void *)0xFF801880, 0x24 }, { (void *)0xFF802BC8, 4 }, { (void *)0xFF801B50, 256 },
-    { (void *)0xFF800E34, 256 }, { (void *)0xFF800F34, 256 },
-};
+/* what the self-test saves and puts back: the table and keep[] from one list */
+#define OS_ST_REGIONS(X) X(0xFF801880, 0x24) X(0xFF802BC8, 4) X(0xFF801B50, 256) X(0xFF800E34, 256) X(0xFF800F34, 256)
+#define OS_ST_REGION(a, n) { (void *)a, n },
+#define OS_ST_LEN(a, n) + n
+#define OS_ST_BYTES (0 OS_ST_REGIONS(OS_ST_LEN))
+#define OS_ST_N (sizeof os_st_regions / sizeof os_st_regions[0])
+static const stage_region os_st_regions[] = { OS_ST_REGIONS(OS_ST_REGION) };
+_Static_assert(OS_ST_BYTES <= STAGE_CHECK_MAX, "os_st_regions: more than stage_check keeps");
 #endif
 void out_stage_selftest(void)
 {
 #ifndef OUTSTAGE_CHECK
-    static uint8_t keep[804], keep_in[256];
+    static uint8_t keep[OS_ST_BYTES], keep_in[256];
     volatile uint8_t *in = (volatile uint8_t *)0xFF800D34;                 /* L and R inputs: 128 int16 */
     uint32_t off = 0;
-    for (unsigned i = 0; i < 5; i++) { stage_copy(keep + off, (const volatile uint8_t *)os_st_regions[i].addr, os_st_regions[i].len); off += os_st_regions[i].len; }
+    for (unsigned i = 0; i < OS_ST_N; i++) { stage_copy(keep + off, (const volatile uint8_t *)os_st_regions[i].addr, os_st_regions[i].len); off += os_st_regions[i].len; }
     stage_copy(keep_in, in, 256);
     stage_check_t st = { 0 };
     uint32_t rng = 0x1234567u;
@@ -103,10 +107,10 @@ void out_stage_selftest(void)
         volatile int16_t *w = (volatile int16_t *)0xFF80189C;
         w[0] = gains[b % 6]; w[1] = gains[(b + 2) % 6]; w[2] = gains[(b + 1) % 6];
         w[3] = (int16_t)((b % 12) * 1024 - 4096);
-        stage_check(&st, os_st_regions, 5, (void (*)(void))0xFFA04280, out_stage_model);   /* "original" = the L1 copy */
+        stage_check(&st, os_st_regions, OS_ST_N, (void (*)(void))0xFFA04280, out_stage_model);   /* "original" = the L1 copy */
     }
     off = 0;
-    for (unsigned i = 0; i < 5; i++) { stage_put((volatile uint8_t *)os_st_regions[i].addr, keep + off, os_st_regions[i].len); off += os_st_regions[i].len; }
+    for (unsigned i = 0; i < OS_ST_N; i++) { stage_put((volatile uint8_t *)os_st_regions[i].addr, keep + off, os_st_regions[i].len); off += os_st_regions[i].len; }
     stage_put(in, keep_in, 256);
     os_selftest[0] = st.blocks; os_selftest[1] = st.bad; os_selftest[2] = st.first_off; os_selftest[3] = 1;
 #endif

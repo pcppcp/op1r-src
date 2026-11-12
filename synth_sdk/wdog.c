@@ -1,9 +1,10 @@
-/* Hang detector (on by default, OP1R_WDOG=0 builds without it; docs/18): the BF524 watchdog raises an NMI when neither the audio interrupt (fr_snap,
+/* Hang detector (on by default, OP1R_WDOG=0 builds without it; docs/18): the BF524 watchdog raises an NMI when neither the audio interrupt (sm_audio_cb,
  * every block) nor the GUI (every frame) has reloaded it for ~4-5 s, i.e. the whole OP-1 froze (device: a looping
  * buzz, no error screen; the stock error screen can not be drawn from there). The NMI handler (wdog_nmi.S) saves
  * where the core was (RETN ...) and the stack into a record at the top of SDRAM, then resets via the watchdog; the
- * next boot takes the record (sysmon pages "hang"). Off at power-off (tape flush). TE uses the watchdog only to
- * reboot (0x01A88794: CTL 0x0AD0, CNT 1, CTL 0x0FF0), which reprograms it. */
+ * next boot takes the record (sysmon pages "hang"). Off at power-off (tape flush) and on the crash screen (crash.c).
+ * Armed from the GUI frame (dispatcher.c lz_frame, via gs_frame): OP1R_GUISKIP=0 builds never arm it. TE uses the
+ * watchdog only to reboot (0x01A88794: CTL 0x0AD0, CNT 1, CTL 0x0FF0), which reprograms it. */
 #include <stdint.h>
 #define WDOG_CTL  (*(volatile uint16_t *)0xFFC00200)
 #define WDOG_CNT  (*(volatile uint32_t *)0xFFC00204)
@@ -32,4 +33,4 @@ void wd_arm(void)                                             /* GUI thread, onc
     WDOG_CTL = 0x0002;                                        /* enabled, event NMI */
     wd_armed = 1;
 }
-void wd_off(void) { WDOG_CTL = 0x0AD0; wd_armed = 0; }        /* power-off flush: no NMI while the OP-1 goes down */
+void wd_off(void) { WDOG_CTL = 0x0AD0; wd_armed = 0; }        /* power-off flush, crash screen: no NMI from here on */

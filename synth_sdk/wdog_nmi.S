@@ -20,6 +20,10 @@ _wd_nmi:
 	R0 = USP; [P0 + 40] = R0;
 	R0 = 0; [P0 + 44] = R0;
 	R1 = SP;                                      /* the stack copy: SDRAM 0x1000 .. 0x03FFFC00 or L1 scratch */
+	R2 = 3;
+	R2 = R1 & R2;
+	CC = R2 == 0;
+	if !CC jump .Lmagic;                          /* a misaligned SP would fault in here (no reset): no copy */
 	R2.L = 0x1000; R2.H = 0;
 	CC = R1 < R2 (IU);
 	if CC jump .Lscr;

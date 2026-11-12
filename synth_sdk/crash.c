@@ -33,6 +33,9 @@ static char *add(char *p, const char *s) { while (*s && p < CRASH_TXT + CRASH_MA
 
 void crash_print(const char *msg)
 {
+#ifdef WDOG
+    { extern void wd_off(void); wd_off(); }                     /* hang detector off (wdog.c): its NMI would reset the OP-1 under this screen */
+#endif
     char *p = CRASH_TXT, t[48];
     while (*p && p < CRASH_TXT + CRASH_MAX) p++;
     p = add(add(p, msg), "\n");

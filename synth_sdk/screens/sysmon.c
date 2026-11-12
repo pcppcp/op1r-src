@@ -47,6 +47,9 @@ void sm_audio_cb(void *a, void *b, void *c)                  /* replaces the cal
     { extern const int32_t *volatile pc_in_b, *volatile pc_in_c; pc_in_b = (const int32_t *)b; pc_in_c = (const int32_t *)c; }   /* pulse sync: codec input (midi/pclk.c) */
     l1_begin();                                              /* L1 pool: leases move only inside the callback */
     AUDIO_CB(a, b, c);
+#ifdef WDOG
+    { extern void wd_kick(void); wd_kick(); }                /* hang detector (wdog.c): an audio block was rendered */
+#endif
     l1_end();
     in_end();
     uint32_t d = READ_CYCLES() - t0, p = t0 - aud_last_t0;
