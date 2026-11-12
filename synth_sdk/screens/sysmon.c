@@ -440,9 +440,11 @@ static void sm_update(void *scr, int dt)
         for (int i = 1; i < ST_N; i++) oth -= st_pct[i];
         for (int i = 0; i < 6; i++) { if (i) *q++ = ' '; q = put_u(q, rec[i]); *q++ = ':'; q = put_u(q, (uint32_t)st_pct[rec[i]]); }
         q = put_u(put_s(q, " o"), (uint32_t)(oth < 0 ? 0 : oth));
-    } else {                                                 /* "4/6 db ok" / "db err 7" */
+    } else {                                                 /* "4/6 db ok" / "db err 7" (+ "tape fail 3": clip saves, safewrite.c) */
+        extern volatile uint32_t tape_save_failures __attribute__((weak));
         q = put_s(q, "db ");
         if (&op1_db_last_err && op1_db_last_err) q = put_u(put_s(q, "err "), (uint32_t)op1_db_last_err); else q = put_s(q, "ok");
+        if (&tape_save_failures && tape_save_failures) q = put_u(put_s(q, " tape fail "), tape_save_failures);
     }
     *q = 0;
     bottom_text(r, t);

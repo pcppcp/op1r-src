@@ -36,6 +36,16 @@ extern uint8_t *host_clip_data(const uint8_t *c), *host_clip_next(const uint8_t 
 #define CLIP_NEXT(c) (*(uint8_t **)((c) + 0x14))
 static inline uint32_t NOW(void) { uint32_t c; __asm__ volatile ("%0 = CYCLES;" : "=d"(c)); return c; }
 #endif
+#ifdef OP1_HOST
+static uint32_t irq_off(void) { return 0; }
+static void irq_on(uint32_t m) { (void)m; }
+int host_incremental;                                              /* host test: the device's 4 KB incremental saves */
+#define INCREMENTAL host_incremental
+#else
+static uint32_t irq_off(void) { uint32_t m; __asm__ volatile ("cli %0;" : "=d"(m) : : "memory"); return m; }
+static void irq_on(uint32_t m) { __asm__ volatile ("sti %0;" : : "d"(m) : "memory"); }
+#define INCREMENTAL 1
+#endif
 
 static uint32_t sw_buf[SW_PIECE / 4];
 
@@ -69,8 +79,16 @@ int tape_safe_write(int fd, const void *src, unsigned n)
 #define TS_HOLD  400000000u                                        /* cycles: 1 s at 400 MHz */
 #define TS_DEEP  12                                                /* MRU positions that may be held (of 24) */
 #define TS_N     24
+#define TS_FLUSH_TRIES 3                                           /* shutdown flush: tries per clip, then given up */
 
-static struct { const uint8_t *clip; uint32_t t; } ts_saved[TS_N];
+/* Failed clip saves since boot (resource monitor, page 4). A failed save (YAFFS full, I/O error, short write) keeps
+ * the clip dirty with the failed tracks' bits: it is tried again after TS_HOLD, so a full flash is not hammered on
+ * every main-loop pass. Before, the dirty flag and track bits were cleared first and the write results ignored: the
+ * take kept playing from the clip cache and silently went back to the old audio once the clip was evicted or the
+ * OP-1 restarted. (op1r-src PR #45 by tencur; here also for the incremental saves.) */
+volatile uint32_t tape_save_failures;
+
+static struct { const uint8_t *clip; uint32_t t; uint8_t fails; } ts_saved[TS_N];
 #ifdef TAPE_IO
 /* OP1R_TAPEIO=1 (docs/82): time of each 64 KB track read / write (lseek + call), us: reads n, sum, max, writes n,
  * sum, max (resource monitor page 9) */
@@ -83,16 +101,38 @@ static inline void ts_io_add(int w, uint32_t c0) { uint32_t us = (NOW() - c0) / 
 #define IO_ADD(w)
 #endif
 
-static uint32_t *ts_slot(const uint8_t *c)
+static int ts_find(const uint8_t *c)
 {
     int free_i = 0;
     for (int i = 0; i < TS_N; i++) {
-        if (ts_saved[i].clip == c) return &ts_saved[i].t;
+        if (ts_saved[i].clip == c) return i;
         if (!ts_saved[i].clip) free_i = i;
     }
     ts_saved[free_i].clip = c;                                     /* 24 cache entries: a free slot always exists */
     ts_saved[free_i].t = NOW() - TS_HOLD;
-    return &ts_saved[free_i].t;
+    ts_saved[free_i].fails = 0;
+    return free_i;
+}
+
+/* n bytes of track k of clip idx at offset off: 1 = all of it written (seek ok, no short write) */
+static int save_part(int k, int idx, const uint8_t *data, int off, int n)
+{
+    IO_T0();
+    int ok = Y_LSEEK(TAPE_FD, TRACK_BASE[k] + idx * 0x10000 + off, 0) >= 0 &&
+             tape_safe_write(TAPE_FD, data + k * 0x10000 + off, (unsigned)n) == n;
+    IO_ADD(1);
+    return ok;
+}
+
+/* end of a clip's save: failed tracks dirty again (only if the entry still holds that clip and buffer), back off */
+static void save_done(uint8_t *c, int s, int idx, const uint8_t *data, uint16_t failed)
+{
+    if (!failed) { ts_saved[s].fails = 0; return; }
+    tape_save_failures++;
+    if (ts_saved[s].fails < 255) ts_saved[s].fails++;
+    const uint32_t m = irq_off();
+    if (*(volatile int16_t *)(c + 6) == idx && CLIP_DATA(c) == data) { *(volatile uint16_t *)(c + 4) |= failed; c[2] = 1; }
+    irq_on(m);
 }
 
 int tape_service(int arg)
@@ -100,56 +140,52 @@ int tape_service(int arg)
 #ifndef OP1_HOST
     if (!arg) { extern void tfs_poll(void); tfs_poll(); }     /* free tape machine screen: setting, scrubbing (every pass) */
 #endif
-#ifndef OP1_HOST
     /* incremental save (main loop): one 4 KB piece per pass instead of a whole 64 KB track (38 .. 136 ms on the device,
-     * docs/82): keys / UI stay responsive while recording. A clip reassigned meanwhile drops the rest (it stays /
-     * becomes dirty again: saved again). The power-off flush (arg != 0) finishes it and writes whole tracks.
-     * shortcut: not covered by the host test (OP1_HOST keeps whole-track writes) */
-    static uint8_t *sv_c; static int sv_idx, sv_k, sv_off; static uint16_t sv_mask;
+     * docs/82): keys / UI stay responsive while recording. A clip reassigned meanwhile drops the rest (its new content
+     * is saved on its own). The power-off flush (arg != 0) finishes a started track in one write. A failed piece skips
+     * the rest of its track; at the end the failed tracks are dirty again (save_done). */
+    static uint8_t *sv_c; static const uint8_t *sv_data; static int sv_idx, sv_k, sv_off, sv_s; static uint16_t sv_mask, sv_failed;
     if (sv_c) {
-        if (*(volatile int16_t *)(sv_c + 6) != sv_idx) sv_c = 0;
+        if (*(volatile int16_t *)(sv_c + 6) != sv_idx || CLIP_DATA(sv_c) != sv_data) sv_c = 0;
         else {
             const int n = arg ? 0x10000 - sv_off : SW_PIECE;
-            IO_T0();
-            Y_LSEEK(TAPE_FD, TRACK_BASE[sv_k] + sv_idx * 0x10000 + sv_off, 0);
-            tape_safe_write(TAPE_FD, CLIP_DATA(sv_c) + sv_k * 0x10000 + sv_off, (unsigned)n);
-            IO_ADD(1);
-            sv_off += n;
+            if (save_part(sv_k, sv_idx, sv_data, sv_off, n)) sv_off += n;
+            else { sv_failed |= (uint16_t)(1u << sv_k); sv_off = 0x10000; }   /* the rest of this track: later */
             if (sv_off >= 0x10000) {
                 sv_off = 0; sv_mask &= (uint16_t)~(1u << sv_k);
                 while (sv_k < 4 && !(sv_mask >> sv_k & 1)) sv_k++;
-                if (sv_k >= 4) sv_c = 0;
+                if (sv_k >= 4) { save_done(sv_c, sv_s, sv_idx, sv_data, sv_failed); sv_c = 0; }
             }
             if (!arg || !sv_c) return 1;
             return tape_service(arg);
         }
     }
-#endif
     int pos = 0;
     for (uint8_t *c = CLIP_HEAD; c; c = CLIP_NEXT(c), pos++) {
         int idx = *(volatile int16_t *)(c + 6);
         if (c[2]) {                                                /* dirty */
-            uint32_t *t = ts_slot(c), now = NOW();
-            if (!arg && TAPE_MODE == 1 && c[0] && pos < TS_DEEP && now - *t < TS_HOLD) continue;
-            *t = now;
-            c[2] = 0;
+            const int s = ts_find(c);
+            const uint32_t now = NOW();
+            if (!arg && now - ts_saved[s].t < TS_HOLD &&
+                (ts_saved[s].fails || (TAPE_MODE == 1 && c[0] && pos < TS_DEEP))) continue;   /* held / backing off */
+            if (arg && ts_saved[s].fails >= TS_FLUSH_TRIES) continue;   /* power-off: given up on this clip */
+            ts_saved[s].t = now;
             volatile uint16_t *mask = (volatile uint16_t *)(c + 4);
-#ifndef OP1_HOST
-            if (!arg && *mask & 0xF) {                             /* start an incremental save (above) */
-                sv_mask = (uint16_t)(*mask & 0xF); *mask &= (uint16_t)~0xFu;
-                sv_c = c; sv_idx = idx; sv_off = 0; sv_k = 0;
+            const uint32_t m = irq_off();                          /* snapshot: the audio interrupt sets bits while recording */
+            const uint16_t bits = (uint16_t)(*mask & 0xF);
+            uint8_t *const data = CLIP_DATA(c);
+            *mask &= (uint16_t)~0xFu; c[2] = 0;
+            irq_on(m);
+            if (!bits) return 1;                                   /* (dirty without a track bit: nothing to write) */
+            if (!arg && INCREMENTAL) {                             /* start an incremental save (above) */
+                sv_mask = bits; sv_failed = 0; sv_c = c; sv_data = data; sv_idx = idx; sv_off = 0; sv_k = 0; sv_s = s;
                 while (!(sv_mask >> sv_k & 1)) sv_k++;
                 return 1;
             }
-#endif
-            for (int k = 0; k < 4; k++) {
-                if (!(*mask >> k & 1)) continue;
-                *mask &= (uint16_t)~(1u << k);
-                IO_T0();
-                Y_LSEEK(TAPE_FD, TRACK_BASE[k] + idx * 0x10000, 0);
-                tape_safe_write(TAPE_FD, CLIP_DATA(c) + k * 0x10000, 0x10000);
-                IO_ADD(1);
-            }
+            uint16_t failed = 0;                                   /* whole tracks (flush; host default) */
+            for (int k = 0; k < 4; k++)
+                if (bits >> k & 1 && !save_part(k, idx, data, 0, 0x10000)) failed |= (uint16_t)(1u << k);
+            save_done(c, s, idx, data, failed);
             return 1;
         }
         if (arg) continue;                                          /* flush: every dirty clip (stock stopped at the first clean one) */
