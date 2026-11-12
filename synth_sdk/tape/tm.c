@@ -63,8 +63,13 @@ volatile int16_t tm_g[8] = { 32767, 32767, 32767, 32767, 32767, 32767, 32767, 32
 #define GAIN_L(t)  (tm_g[t])
 #define GAIN_R(t)  (tm_g[4 + (t)])
 
-typedef struct { int16_t *data; volatile int16_t t, chunk; volatile uint8_t state; volatile uint8_t gen; uint32_t used; } tm_slot;
-static tm_slot slot[TM_SLOTS];                                   /* state 0 free, 1 wanted, 2 loaded */
+typedef struct { int16_t *data; volatile int16_t t, chunk; volatile uint8_t state; volatile uint8_t gen; volatile uint8_t refresh; uint32_t used; } tm_slot;
+static tm_slot slot[TM_SLOTS];                                   /* state 0 free, 1 wanted, 2 loaded; refresh: loaded, reread
+                                                                  * wanted (keeps playing the old data meanwhile: no gap) */
+static void tm_refresh_all(void)                                 /* reread every held chunk (recording, clip edits) */
+{
+    for (int i = 0; i < TM_SLOTS; i++) if (slot[i].t >= 0) { slot[i].refresh = 1; slot[i].gen++; }
+}
 static int8_t map[4][TM_CHUNKS];                                 /* chunk -> slot + 1 (0 none) */
 static int64_t head[4];
 static uint32_t blk;
@@ -101,7 +106,7 @@ static const int16_t *tm_chunk(int t, int c, int want)
     }
     if (v < 0) return 0;
     if (slot[v].t >= 0) map[slot[v].t][slot[v].chunk] = 0;
-    slot[v].state = 1; slot[v].gen++;
+    slot[v].state = 1; slot[v].refresh = 0; slot[v].gen++;
     slot[v].t = (int16_t)t; slot[v].chunk = (int16_t)c; slot[v].used = blk;
     map[t][c] = (int8_t)(v + 1);
     return 0;
@@ -398,7 +403,7 @@ static void tm_block_body(void)
     if (!playing && !scrub_v) { fade_prev = 0; return; }         /* stopped: R246's (silent) output stays; next start ramps from 0 */
     if (playing && rec_seen && mode == 2) {                      /* first play after a recording: reload every chunk */
         rec_seen = 0;
-        for (int i = 0; i < TM_SLOTS; i++) if (slot[i].t >= 0) { slot[i].state = 1; slot[i].gen++; }
+        tm_refresh_all();
     }
     int32_t accL[64], accR[64];
     for (int i = 0; i < 64; i++) accL[i] = accR[i] = 0;
@@ -613,7 +618,7 @@ int tm_service(void)                                             /* main loop (t
 #ifndef OP1_HOST
     {
         static uint32_t last; const uint32_t h = MODE == 1 ? last : clips_hash();   /* recording: the reload follows it */
-        if (h != last) { last = h; for (int i = 0; i < TM_SLOTS; i++) if (slot[i].t >= 0) { slot[i].state = 1; slot[i].gen++; } }
+        if (h != last) { last = h; tm_refresh_all(); }
     }
 #endif
 #ifndef OP1_HOST
@@ -623,15 +628,15 @@ int tm_service(void)                                             /* main loop (t
         if (!tm_reload_after_clip || !((int (*)(void))0x0191C750)()) idle_t = c;
         else if (c - idle_t > 200000000u) {
             tm_reload_after_clip = 0;
-            for (int i = 0; i < TM_SLOTS; i++) if (slot[i].t >= 0) { slot[i].state = 1; slot[i].gen++; }
+            tm_refresh_all();
         }
     }
 #endif
     if (!tm_on) return 0;
     if (!tm_alloc()) return 0;
-    for (int i = 0; i < TM_SLOTS; i++) {
-        tm_slot *s = &slot[i];
-        if (s->state != 1) continue;
+    for (int k = 0; k < 2 * TM_SLOTS; k++) {                     /* wanted (silent) chunks first, then the rereads */
+        tm_slot *s = &slot[k % TM_SLOTS];
+        if (k < TM_SLOTS ? s->state != 1 : !(s->state == 2 && s->refresh)) continue;
         const uint8_t gen = s->gen; const int t = s->t, c = s->chunk;
 #ifdef OP1_HOST
         host_tm_read(t, c, s->data);
@@ -648,7 +653,7 @@ int tm_service(void)                                             /* main loop (t
 #ifndef OP1_HOST
         tm_mask_clips(t, c, s->data);
 #endif
-        if (s->gen == gen) s->state = 2;                         /* reassigned meanwhile: stays wanted */
+        if (s->gen == gen) { s->state = 2; s->refresh = 0; }                         /* reassigned meanwhile: stays wanted */
         tm_loads++;
         return 1;
     }
