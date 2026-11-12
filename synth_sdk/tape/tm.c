@@ -169,6 +169,32 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
         const int32_t j1 = sa - (2 * sb - sb1), j2 = sb - (2 * sa - sa1);
         looped = (j1 < 0 ? -j1 : j1) + (j2 < 0 ? -j2 : j2) > TM_SEAM;
     }
+    {                                                            /* fast path (almost every block): the 4 Hermite points of all
+                                                                  * 64 samples in one loaded chunk, no wrap, no crossfade zone */
+        const int64_t h_end = h + 64 * step;
+        const int64_t mn = step > 0 ? h : h_end, mx = step > 0 ? h_end : h;
+        const int64_t xf = looped ? (int64_t)TM_XF << 32 : 0;
+        const int32_t n0 = (int32_t)(mn >> 32) - 1, n1 = (int32_t)(mx >> 32) + 2, c = n0 >> 15;
+        if (n0 >= 0 && c == n1 >> 15 && mn >= lo + xf && mx < hi - xf && c < TM_CHUNKS) {
+            const int16_t *d = tm_chunk(t, c, 1);
+            if (d) {
+                const int32_t base = c * CHUNK;
+                int32_t r = (int32_t)((h - ((int64_t)base << 32)) >> 16);   /* Q16 inside the chunk (< 2^31) */
+                const int32_t st = (int32_t)(step >> 16);
+                for (int i = 0; i < 64; i++) {
+                    const int32_t n = r >> 16, f = (r >> 4) & 0xFFF;
+                    const int32_t sm = d[n - 1], s0 = d[n], s1 = d[n + 1], s2 = d[n + 2];
+                    const int32_t c1 = (s1 - sm) >> 1, c2 = sm - (5 * s0 >> 1) + 2 * s1 - (s2 >> 1), c3 = ((s2 - sm) >> 1) + (3 * (s0 - s1) >> 1);
+                    int32_t v = (((((c3 * f >> 12) + c2) * f >> 12) + c1) * f >> 12) + s0;
+                    v = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
+                    accL[i] += v * gl >> gain_shift; accR[i] += v * gr >> gain_shift;
+                    r += st;
+                }
+                h = h_end;
+                goto done;
+            }
+        }
+    }
     for (int i = 0; i < 64; i++) {
         if (h >= hi) h -= hi - lo; else if (h < lo) h += hi - lo;
         int32_t s = tm_herm(t, h, &cache, &cache_c);
@@ -187,6 +213,7 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
         h += step;
         if (h >= hi) h -= hi - lo; else if (h < lo) h += hi - lo;   /* the stored head stays inside its loop */
     }
+done:
     if (h < 0) h = 0;
     head[t] = h;
     const int32_t c = (int32_t)(h >> 32) >> 15, d = step < 0 ? -1 : 1;   /* prefetch ahead, and the loop start */
@@ -202,7 +229,20 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
     if (looped) tm_chunk(t, (int32_t)((d > 0 ? lo - ((int64_t)TM_XF << 32) : hi + ((int64_t)TM_XF << 32)) >> 32) >> 15, 1);   /* the crossfade's other side */
 }
 
+volatile uint32_t tm_cyc;                                        /* cycles in tm_block + recording (sysmon page 5 "fr") */
+static void tm_block_body(void);
 void tm_block(void)                                              /* audio ISR, after tape_play_mix */
+{
+#ifndef OP1_HOST
+    uint32_t c0; __asm__ volatile ("%0 = CYCLES;" : "=d"(c0));
+    tm_block_body();
+    uint32_t c1; __asm__ volatile ("%0 = CYCLES;" : "=d"(c1));
+    tm_cyc += c1 - c0;
+#else
+    tm_block_body();
+#endif
+}
+static void tm_block_body(void)
 {
     blk++;
     {                                                            /* the meter: the bus R246 records (last block's) */
@@ -354,8 +394,20 @@ static void tm_record(const volatile int16_t *bus)
     if (first >= 0) { RANGE_ADD(first); RANGE_ADD(last); }
     { const int32_t c = (int32_t)(h >> 32) >> 15, d = step < 0 ? -1 : 1; QUEUE_CLIP(c); QUEUE_CLIP(c + d); }   /* ahead */
 }
+#ifndef OP1_HOST
+static void tm_rec_body(void *bus);
+#endif
 void tm_rec_entry(void *bus)                                     /* audio ISR, in place of tape_record_block (hook.S) */
 {
+#ifndef OP1_HOST
+    uint32_t c0; __asm__ volatile ("%0 = CYCLES;" : "=d"(c0));
+    tm_rec_body(bus);
+    uint32_t c1; __asm__ volatile ("%0 = CYCLES;" : "=d"(c1));
+    tm_cyc += c1 - c0;
+}
+static void tm_rec_body(void *bus)
+{
+#endif
     if (!tm_on || !slot[0].data) { REC_STOCK(bus); return; }
     tm_record((const volatile int16_t *)bus);
 }
