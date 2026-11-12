@@ -913,6 +913,7 @@ void screens_load_hook(void *table)
     { extern void pc_load(void); pc_load(); }                    /* pulse clock in: source setting (midi/pclk.c) */
     pcp_load();                                                  /* pulse sync page settings (screens/pcpage.c) */
     { extern volatile uint8_t tm_on; extern int op1r_setting_get(const char *, int); tm_on = (uint8_t)(op1r_setting_get("tapemach", tm_on) == 1); }   /* tape machine (docs/82) */
+    { extern void tfs_state_load(void); tfs_state_load(); }      /* FREE tracks: heads, loops, speeds (screens/tfscreen.c) */
     { extern void cc_load(void); cc_load(); }                    /* CC channels / feedback (midi/ccmap.c) */
     dpu_ui_load();                                               /* drum+ plugin: load its pages, take the stock ones */
     spc_ui_load();                                               /* sampler+ plugin: the same for 6 / 0x16 */
@@ -1125,6 +1126,7 @@ void key_event_hook(int code, int pressed)
     if (code == 0x3F && pressed == 0xA5) { extern void mx_apply(void); mx_apply(); return; }   /* MX_KEY_DOWN */
     { extern void cc_fb_key(int, int); cc_fb_key(code, pressed); }   /* CC feedback (midi/ccmap.c) */
     if (du_prompt_key(code, pressed)) return;                    /* dev update prompt: T1 restart / T2 cancel */
+    if (pressed) { extern void tfs_state_flush(void); tfs_state_flush(); }   /* FREE tracks saved first: its screen consumes keys */
     { extern int tfs_key(int, int); if (tfs_key(code, pressed)) return; }   /* free tape machine screen: T1..T4 */
     extern int ms_key(int code, int pressed, int on_tape);
     if (ms_key(code, pressed, tape_page())) return;              /* MIDI sequencer device: SEQ + TAPE (docs/39) */
@@ -1196,7 +1198,8 @@ void key_event_hook(int code, int pressed)
     { extern uint8_t fr_send_dirty;                             /* aux sends (encoder or MIDI): saved at the next key event */
       if (mx_changed || fr_send_dirty) { mx_changed = 0; fr_send_dirty = 0; fr_save_sends(); } }
     { extern void scale_flush(void), fxroute_flush(void), settings_flush(void);   /* page settings, likewise */
-      scale_flush(); fxroute_flush(); settings_flush(); ml_flush(); }
+      scale_flush(); fxroute_flush(); settings_flush(); ml_flush();
+      { extern void tfs_state_flush(void); tfs_state_flush(); } }   /* FREE tracks (screens/tfscreen.c) */
     if (code >= 0x3B && code <= 0x3E && fr_src == 2 && CUR_SCREEN_ID == MIXER_SCREEN_ID) {   /* press: pan / aux */
         if (pressed) mx_pan[press_knob[code - 0x3B]] ^= 1;
         return;

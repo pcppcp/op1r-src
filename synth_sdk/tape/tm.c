@@ -71,6 +71,7 @@ static uint32_t blk;
 static uint8_t rec_seen;
 volatile int8_t tm_scrub;                                        /* -1 / +1: < / > held on our screen (tfscreen.c) */
 volatile uint8_t tm_scrub_track;                                 /* the active track: only it scrubs (and sounds) */
+volatile uint8_t tm_hold_heads;                                  /* heads restored at boot (tfscreen.c): no resync yet */
 volatile uint8_t tm_live;                                        /* free on with its cache: R246's gather skipped (tm_l1.S) */
 volatile uint8_t tm_sel;                                         /* the active track (tfscreen.c): what FREE records */
 static int32_t scrub_v;                                          /* current scrub speed, Q16 (ramps to +-8x) */
@@ -160,15 +161,6 @@ void tm_hloop(const int16_t *d, int32_t r, int32_t st, uint32_t gains, int32_t s
 void tm_hloop_near(const int16_t *d, int32_t r, int32_t st, uint32_t gains, int32_t shift, int32_t *accL, int32_t *accR,
                    int16_t *out) __asm__("_tm_hloop");           /* the same, from tm_fast (both in .l1tape) */
 #endif
-#ifdef OP1_HOST
-#define TM_CYCLES() 0u
-#else
-static inline uint32_t TM_CYCLES(void) { uint32_t c; __asm__ volatile ("%0 = CYCLES;" : "=d"(c)); return c; }
-#endif
-volatile uint32_t tm_cyc_t[4], tm_blocks;                       /* per-track cycles, blocks (sysmon page 5) */
-volatile uint32_t tm_slow;                                       /* blocks through the slow path (sysmon "s") */
-volatile uint32_t tm_cyc_tracks;                                 /* cycles in the 4 tm_track_block calls */
-volatile uint32_t tm_cyc_loop;                                   /* cycles in tm_hloop (sysmon "fr total/loop") */
 volatile uint32_t tm_chk_n, tm_chk_bad;                          /* OP1R_TMCHECK: blocks compared, mismatches */
 static int16_t tm_v[4][64];                                      /* this block's samples per track, pre-fader */
 typedef struct { int32_t lo, hi, lin, lout; int64_t rlo, rhi; const int16_t *d; int16_t c; int8_t s; uint8_t lon, ok; } tm_win;
@@ -266,9 +258,7 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
                 int32_t r = (int32_t)((h - ((int64_t)base << 32)) >> 16);   /* Q16 inside the chunk (< 2^31) */
                 const int32_t st = (int32_t)(step >> 16);
 #if !defined(OP1_HOST) && !defined(TM_CHECK)
-                { uint32_t c0, c1; __asm__ volatile ("%0 = CYCLES;" : "=d"(c0));
-                  tm_hloop(d, r, st, (uint16_t)gl | (uint32_t)(uint16_t)gr << 16, gain_shift, accL, accR, tm_v[t]);   /* tm_loop.S */
-                  __asm__ volatile ("%0 = CYCLES;" : "=d"(c1)); tm_cyc_loop += c1 - c0; }
+                tm_hloop(d, r, st, (uint16_t)gl | (uint32_t)(uint16_t)gr << 16, gain_shift, accL, accR, tm_v[t]);   /* tm_loop.S */
 #else
 #ifdef TM_CHECK
                 int32_t cl[64], cr[64]; int16_t cv[64];
@@ -295,7 +285,6 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
             }
         }
     }
-    tm_slow++;
     for (int i = 0; i < 64; i++) {
         if (h >= hi) h -= hi - lo; else if (h < lo) h += hi - lo;
         int32_t s = tm_herm(t, h, &cache, &cache_c);
@@ -365,7 +354,6 @@ void tm_block(void)                                              /* audio ISR, a
 }
 static void tm_block_body(void)
 {
-    tm_blocks++;
     blk++;
     {                                                            /* the meter: the bus R246 records (last block's) */
         int32_t pk = tm_in_peak * 31 >> 5;
@@ -387,7 +375,8 @@ static void tm_block_body(void)
             const int32_t L = LOOP_E - LOOP_S;
             d %= L; if (d > L / 2) d -= L; else if (d < -L / 2) d += L;
         }
-        if (d > 1024 || d < -1024) tm_resync(pos);
+        if (mode == 1 || mode == 2) tm_hold_heads = 0;
+        if ((d > 1024 || d < -1024) && !tm_hold_heads) tm_resync(pos);   /* restored heads: kept until the first play */
         xlast = pos;
 #ifndef OP1_HOST
         /* FREE runs the clock: R246's transport is kept away from the tape ends (it stops at 6:00, and FREE with it);
@@ -414,14 +403,12 @@ static void tm_block_body(void)
     int32_t accL[64], accR[64];
     for (int i = 0; i < 64; i++) accL[i] = accR[i] = 0;
     for (int t = 0; t < 4; t++) {
-        uint32_t tb0 = TM_CYCLES();
         if (scrub_v && t == sc) tm_track_block(t, (int64_t)scrub_v << 16, 0, 16, accL, accR);   /* -6 dB, no loops */
         else if (playing) {
             const int64_t step = ((int64_t)v * tm_tr[t].speed) >> 11;   /* (1x = 2^27) x Q16 -> Q32 */
             if (!tm_fast(t, step, accL, accR)) tm_track_block(t, step, 1, 15, accL, accR);
         }
         else for (int i = 0; i < 64; i++) tm_v[t][i] = 0;
-        { uint32_t tb1 = TM_CYCLES(); tm_cyc_tracks += tb1 - tb0; tm_cyc_t[t] += tb1 - tb0; }
     }
     int32_t fade = 0x7FFF;                                       /* starting / stopping: below 1/4x the volume follows the speed,
                                                                   * so neither the first sample nor the held near-DC of an almost

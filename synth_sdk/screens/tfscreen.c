@@ -390,6 +390,8 @@ int tfs_knob(int knob, int delta)                                /* key thread: 
                 const int32_t v = tm_pos[i];
                 if (st > 0 ? (v > h + m && (best < 0 || v < best)) : (v < h - m && (best < 0 || v > best))) best = v;
             }
+            if (best < 0)                                        /* past the last / before the first: wrap to the first / last */
+                for (int i = 0; i < tm_n; i++) if (best < 0 || (st > 0 ? tm_pos[i] < best : tm_pos[i] > best)) best = tm_pos[i];
             if (best >= 0) tm_set_head(sel, best);
             return 1;
         }
@@ -408,4 +410,45 @@ int tfs_knob(int knob, int delta)                                /* key thread: 
         i += st; i = i < 0 ? 0 : i >= NR ? NR - 1 : i; sp = ratios[i]; }
     tr->speed = neg ? -sp : sp;
     return 1;
+}
+
+/* FREE track state across reboots (op1rsettings, docs/82): per track head, loop in / out, speed, flags (loop on | in
+ * set << 1 | mute << 2), and the active track. Saved at key events when changed (as the settings pages, KeyHandler
+ * thread), heads only while the tape stands still; loaded at boot. Only changed values are written. */
+extern int op1r_setting_get(const char *, int); extern void op1r_setting_put(const char *, int);
+static int32_t sv[4][5]; static int32_t sv_sel = -1; static uint8_t sv_have;
+static char *sv_key(char *k, int t, char c) { k[0] = 't'; k[1] = 'f'; k[2] = (char)('0' + t); k[3] = c; k[4] = 0; return k; }
+void tfs_state_load(void)
+{
+    extern volatile uint8_t tm_sel, tm_hold_heads;
+    char k[5];
+    for (int t = 0; t < 4; t++) {
+        volatile tm_track *tr = &tm_tr[t];
+        const int32_t h = op1r_setting_get(sv_key(k, t, 'h'), -1), li = op1r_setting_get(sv_key(k, t, 'i'), -1),
+                      lo = op1r_setting_get(sv_key(k, t, 'o'), -1), sp = op1r_setting_get(sv_key(k, t, 's'), 0),
+                      fl = op1r_setting_get(sv_key(k, t, 'f'), -1);
+        if (h >= 0 && h <= TM_MAXPOS) tm_set_head(t, h);
+        if (li >= 0 && li <= TM_MAXPOS && lo >= 0 && lo <= TM_MAXPOS) { tr->lin = li; tr->lout = lo; }
+        if ((sp >= 0x2000 && sp <= 0x40000) || (sp <= -0x2000 && sp >= -0x40000)) tr->speed = sp;   /* 1/8 .. 4x, either way */
+        if (fl >= 0 && fl <= 7) { tr->lon = (uint8_t)(fl & 1 && tr->lout > tr->lin); tr->lset = (uint8_t)(fl >> 1 & 1); tr->mute = (uint8_t)(fl >> 2 & 1); }
+        sv[t][0] = h; sv[t][1] = li; sv[t][2] = lo; sv[t][3] = sp; sv[t][4] = fl;
+    }
+    const int32_t sl = op1r_setting_get("tfsel", -1);
+    if (sl >= 0 && sl <= 3) { tm_sel = (uint8_t)sl; SEL_TRACK = sl; }
+    sv_sel = sl; sv_have = 1;
+    tm_hold_heads = 1;                                           /* tm.c: no resync to the transport before the first play */
+}
+void tfs_state_flush(void)
+{
+    extern volatile uint8_t tm_on, tm_sel;
+    if (!tm_on || !sv_have) return;
+    const int still = T_MODE == 0 && TSPEED_RAW == 0;
+    char k[5];
+    for (int t = 0; t < 4; t++) {
+        const volatile tm_track *tr = &tm_tr[t];
+        const int32_t v[5] = { still ? tm_head_pos(t) : sv[t][0], tr->lin, tr->lout, tr->speed, tr->lon | tr->lset << 1 | tr->mute << 2 };
+        static const char key[5] = { 'h', 'i', 'o', 's', 'f' };
+        for (int j = 0; j < 5; j++) if (v[j] != sv[t][j]) { op1r_setting_put(sv_key(k, t, key[j]), v[j]); sv[t][j] = v[j]; }
+    }
+    if (tm_sel != sv_sel) { op1r_setting_put("tfsel", tm_sel); sv_sel = tm_sel; }
 }
