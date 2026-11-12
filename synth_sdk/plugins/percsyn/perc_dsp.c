@@ -424,8 +424,9 @@ int perc_render(perc_voice_t *v, int16_t *out, unsigned cnt, int32_t key_l2)
                 int32_t e3 = s - v->e2;
                 int32_t e1 = mul30(p->eq_a1, v->e1) + mul30(p->eq_a2, e3);
                 int32_t e2 = v->e2 + mul30(p->eq_a2, v->e1) + mul30(p->eq_a3, e3);
-                v->e1 = 2 * e1 - v->e1; v->e2 = 2 * e2 - v->e2;
-                s = clampi(s + SHL(mul30(e1, p->eq_m1), 4), -(1 << 30), 1 << 30);
+                v->e1 = clampi(2 * e1 - v->e1, -(1 << 29), 1 << 29);    /* states bounded as the noise filter's */
+                v->e2 = clampi(2 * e2 - v->e2, -(1 << 29), 1 << 29);
+                s = clampi(s + SHL(clampi(mul30(e1, p->eq_m1), -(1 << 26), 1 << 26), 4), -(1 << 30), 1 << 30);   /* (s <= 2^27: no overflow) */
             }
             s = mul30(clampi(s, -(1 << 29), 1 << 29), p->level);                          /* Q22 */
             s = clampi(s, -(1 << 22), (1 << 22) - 1);
