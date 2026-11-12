@@ -302,6 +302,8 @@ GUISKIP = os.environ.get('OP1R_GUISKIP', '1') != '0'                         # o
 if GUISKIP:                                                                 # OP1R_GUISKIP=sec,sec: only those (bisecting)
     _only = os.environ['OP1R_GUISKIP'].split(',') if os.environ.get('OP1R_GUISKIP', '1') != '1' else None
     HOOKS.update({a: v for a, v in GUISKIP_HOOKS.items() if not _only or v[0] in _only})
+WDOG_HOOKS = {0x019F0B9E: ('hook_wdshut', bytes.fromhex('01e393f7'))}   # shutdown: CALL setter 0x01A2FAC4 -> wd_shutdown (hang detector off, wdog.c)
+if os.environ.get('OP1R_WDOG', '1') == '1': HOOKS.update(WDOG_HOOKS)      # only with wdog.c / wdog_nmi.S (OP1R_WDOG=0 builds without)
 DEV_HOOKS = {0x019F01B8: ('hook_devboot', bytes.fromhex('05e37c52')),   # boot: access(te-boot.op1) -> apply a staged dev update first (docs/35)
              0x019E3CC8: ('hook_devrx', bytes.fromhex('ffe36efa'))}    # midi_poll: CALL midi_rx_parse -> copy our SysEx first
 OPZ_HOOKS = {0x019E0CFC: ('hook_opzget', bytes.fromhex('00601000')),   # midi_opz_mode_enabled: R0=0; RTS
