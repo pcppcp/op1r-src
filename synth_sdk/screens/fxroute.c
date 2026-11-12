@@ -76,9 +76,6 @@ int16_t fr_host_vol[4] = { 0x7FFF, 0x7FFF, 0x7FFF, 0x7FFF }, fr_host_lev[4] = { 
 
 void fr_snap(void)                                          /* audio ISR, after the tape mix */
 {
-#ifdef WDOG
-    { extern void wd_kick(void); wd_kick(); }               /* hang detector (wdog.c): the audio runs */
-#endif
 #ifndef OP1_HOST
     *(volatile uint8_t *)0x01DD591E = 0;                    /* the stock body of 0x019C9D04 */
 #endif

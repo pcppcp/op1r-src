@@ -367,7 +367,7 @@ def build(engs, fxs):
     if os.environ.get('OP1R_TAPEMIX') in ('stock', 'check', 'checkx', 'exact'): flags['screens/usbtrack.c'] = flags.get('screens/usbtrack.c', []) + ['-DTAPEMIX_' + os.environ['OP1R_TAPEMIX'].upper()]   # docs/83: R246's tape mix / compared
     if os.environ.get('OP1R_CRASHTEST') == '1': flags['dispatcher.c'] = flags.get('dispatcher.c', []) + ['-DCRASH_TEST']   # Shift + help crashes (docs/65)
     if os.environ.get('OP1R_WDOG', '1') == '1':
-        for f in ('screens/fxroute.c', 'dispatcher.c', 'boottime.c', 'tape/safewrite.c', 'screens/sysmon.c', 'crash.c'): flags[f] = flags.get(f, []) + ['-DWDOG']
+        for f in ('crash.c', 'dispatcher.c', 'boottime.c', 'tape/safewrite.c', 'screens/sysmon.c'): flags[f] = flags.get(f, []) + ['-DWDOG']
         if os.environ.get('OP1R_WDOG_NORESET') == '1': flags['wdog_nmi.S'] = flags.get('wdog_nmi.S', []) + ['-DWD_NORESET']
     if L1SLOT:
         for f in ('boottime.c', 'screens/sysmon.c', 'dispatcher.c'): flags[f] = flags.get(f, []) + ['-DL1SLOT']
