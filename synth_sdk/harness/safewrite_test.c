@@ -145,11 +145,25 @@ static void incremental_test(void)
     assert(ent[6][2] == 1 && *(uint16_t *)(ent[6] + 4) == 8 && tape_save_failures == f0 + 2);
     host_now += 400000001u; memset(tbytes, 0, sizeof tbytes);
     assert(run0() == 17 && tbytes[3][106] == 65536 && !ent[6][2]);
-    /* the entry reassigned mid-save: the rest is dropped, nothing re-dirtied for the old clip */
+    /* the entry reassigned mid-save (eviction: another clip index, unloaded, dirty flag dropped): the old clip's buffer
+     * is not reused before tape_service loads the new clip, so the rest is written from it at once, to the old index
+     * (before: the rest was dropped, nothing re-dirtied it -> the take went back to the old audio after a reboot) */
+    memset(tbytes, 0, sizeof tbytes);
     dirty(7, 0); assert(tape_service(0) == 1 && tape_service(0) == 1);
-    *(int16_t *)(ent[7] + 6) = 200;                      /* (eviction gave the entry another clip index) */
-    run0();
-    assert(!ent[7][2] && tape_save_failures == f0 + 2);
+    *(int16_t *)(ent[7] + 6) = 200; ent[7][0] = 0; ent[7][1] = 1;
+    reads = 0;
+    assert(tape_service(0) == 1 && tbytes[0][107] == 65536 && tbytes[0][200 & 127] == 0 && reads == 0);
+    assert(tape_service(0) == 1 && reads == 4 && ent[7][0] == 1);   /* then the new clip is loaded */
+    assert(run0() == 0 && tape_save_failures == f0 + 2);
+    /* reassigned and already loaded, or another buffer: cannot be written any more, counted as a failed save */
+    memset(tbytes, 0, sizeof tbytes);
+    dirty(10, 0); assert(tape_service(0) == 1 && tape_service(0) == 1);
+    *(int16_t *)(ent[10] + 6) = 201;                     /* (loaded: ent[10][0] still 1) */
+    run0(); assert(tbytes[0][201 & 127] == 0 && tbytes[0][110] == 4096 && tape_save_failures == f0 + 3);
+    *(int16_t *)(ent[10] + 6) = 110;
+    dirty(10, 0); assert(tape_service(0) == 1 && tape_service(0) == 1);
+    uint8_t *keep = cdata[10]; cdata[10] = calloc(4, 65536);
+    run0(); assert(tape_save_failures == f0 + 4); free(cdata[10]); cdata[10] = keep;
     /* recording sets a bit during a save: kept (the snapshot cleared only what it saves) */
     dirty(8, 0); assert(tape_service(0) == 1);            /* started: bits taken */
     dirty(8, 1);                                         /* the audio interrupt, mid-save */
@@ -161,6 +175,33 @@ static void incremental_test(void)
     assert(ent[9][2] == 1 && (*(uint16_t *)(ent[9] + 4) & 1));
     fail_all = 0; host_incremental = 0;
 }
+/* eviction (0x01A53E40) takes the MRU tail and drops its dirty flag unsaved: clips near the tail are saved whole and
+ * first; clip loads are not held up by a save (recording misses audio into an unloaded chunk) */
+static void evict_test(void)
+{
+    caller = NULL; host_incremental = 1;
+    list(24); host_tape_mode = 2; host_now = 100000000u;
+    memset(tbytes, 0, sizeof tbytes); uint32_t f0 = tape_save_failures;
+    dirty(15, 1);                                        /* deep: one pass */
+    assert(tape_service(0) == 1 && tbytes[1][115] == 65536 && !ent[15][2]);
+    dirty(2, 0); dirty(20, 0); dirty(13, 3);             /* the deepest first, whole; then 13; then 2 in pieces */
+    assert(tape_service(0) == 1 && tbytes[0][120] == 65536 && tbytes[0][102] == 0 && tbytes[3][113] == 0);
+    assert(tape_service(0) == 1 && tbytes[3][113] == 65536 && tbytes[0][102] == 0);
+    assert(run0() == 17 && tbytes[0][102] == 65536);
+    /* a backlog behind an incremental save: the rest of it at once, then the backlog */
+    memset(tbytes, 0, sizeof tbytes);
+    dirty(3, 0); dirty(3, 1); assert(tape_service(0) == 1 && tape_service(0) == 1 && tbytes[0][103] == 4096);
+    dirty(22, 2);
+    assert(tape_service(0) == 1 && tbytes[0][103] == 65536 && tbytes[1][103] == 65536 && !ent[3][2]);
+    assert(tape_service(0) == 1 && tbytes[2][122] == 65536 && run0() == 0);
+    /* a clip to load during a save: loaded first, the save goes on */
+    memset(tbytes, 0, sizeof tbytes);
+    dirty(4, 0); assert(tape_service(0) == 1 && tape_service(0) == 1);
+    ent[5][0] = 0; reads = 0;
+    assert(tape_service(0) == 1 && reads == 4 && ent[5][0] == 1 && tbytes[0][104] == 4096);
+    assert(run0() == 15 && tbytes[0][104] == 65536 && tape_save_failures == f0);
+    host_incremental = 0;
+}
 int main(void)
 {
     static uint32_t clip[16384];
@@ -171,6 +212,7 @@ int main(void)
     service_test();
     failure_test();
     incremental_test();
+    evict_test();
     printf("safewrite_test: ok\n");
     return 0;
 }
