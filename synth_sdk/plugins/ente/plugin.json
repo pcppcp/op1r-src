@@ -6,7 +6,7 @@
   "symbol": "FX_ente",
   "sources": ["ente.c"],
   "stereo": true,
-  "defaults": [8192, 19840, 12000, 0],
+  "defaults": [32767, 19840, 12000, 0],
   "page2_defaults": [4000, 0, 9000],
   "screen": { "svg": "ente.svg", "symbol": "SCREEN_ente" }
 }
