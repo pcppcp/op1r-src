@@ -166,8 +166,16 @@ static void sample_ram(void)
         uint32_t *h = HEAP_LOOKUP(i);
         if (!h) { UNLOCK_SCHED(); continue; }
         uint32_t sz = h[1], used = h[3] - h[0], fr = 0;      /* desc: base, size, ?, bump; free list at +0x18 */
-        const uint32_t *b = (const uint32_t *)h[0x18 / 4];
-        for (int n = 0; b && n < 8192; n++) { fr += b[0]; b = (const uint32_t *)b[2]; }   /* {size, heap, next} */
+        /* the free list {size, heap, next}: every node checked before it is read (inside this heap, aligned). An
+         * exception here, with the scheduler locked, can not reach the error screen (a thread draws it): the OP-1
+         * froze with frozen audio (device, opening the monitor; docs/18). A bad node ends the walk instead. */
+        const uint32_t lo = h[0], hi = h[0] + sz;
+        uint32_t b = h[0x18 / 4];
+        for (int n = 0; b && n < 8192; n++) {
+            if (b < lo || b > hi - 12 || (b & 3)) break;
+            fr += ((const uint32_t *)b)[0];
+            b = ((const uint32_t *)b)[2];
+        }
         UNLOCK_SCHED();
         used = used > fr ? used - fr : 0;
 #endif
