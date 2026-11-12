@@ -13,7 +13,7 @@
 #define Y_READ    ((int (*)(int, void *, unsigned))0x01A99C90)
 #define Y_WRITE   ((int (*)(int, const void *, unsigned))0x01A99F84)
 #define Y_UNLINK  ((int (*)(const char *))0x01A9A3FC)
-#define Y_LSEEK   ((int (*)(int, int, int))0x01A9A0E4)        /* yaffs_lseek(fd, off, whence); 2 = SEEK_END -> size */
+#define Y_LSEEK   ((int (*)(int, int, int))0x01A9A0E4)        /* yaffs_lseek(fd, off, whence); 0 = SEEK_SET, 2 = SEEK_END -> size */
 #define Y_ACCESS  ((int (*)(const char *, int))0x01A9A6B0)        /* 0 = exists */
 #define Y_MKDIR   ((int (*)(const char *, int))0x01A9A886)   /* entry: P0 = R0 (path); 0x01A9A888 skips it */
 #define O_READ    0
@@ -310,6 +310,17 @@ static int f_stat(void *c, const char *rel, uint32_t *size)      /* /yaffs2/<rel
     *size = (uint32_t)n;
     return 0;
 }
+static int f_read(void *c, const char *rel, uint32_t off, uint8_t *buf, uint32_t n)   /* /yaffs2/<rel> from off */
+{
+    (void)c;
+    char p[DU_MAX_PATH + 16];
+    cat(p, "/yaffs2/", rel);
+    int fd = Y_OPEN(p, O_READ, 0x100);
+    if (fd < 0) return -1;
+    int k = Y_LSEEK(fd, (int)off, 0) == (int)off ? Y_READ(fd, buf, n) : -1;
+    Y_CLOSE(fd);
+    return k;
+}
 #define Y_OPENDIR  ((void *(*)(const char *))0x01A9B450)
 #define Y_READDIR  ((uint8_t *(*)(void *))0x01A9B648)            /* dirent: d_name at +0xB */
 #define Y_CLOSEDIR ((int (*)(void *))0x01A9B74C)
@@ -343,7 +354,7 @@ static int f_ident(void *c, char *out, int cap)                   /* "op1r <n> [
     while (i < 58 && BOOT_TEXT[i] && k < cap) out[k++] = BOOT_TEXT[i++];
     return k;
 }
-static const du_fs fw_fs = { f_open, f_write, f_close, f_remove, f_key, f_reboot, 0, f_stat, f_ident, f_list };
+static const du_fs fw_fs = { f_open, f_write, f_close, f_remove, f_key, f_reboot, 0, f_stat, f_ident, f_list, f_read };
 
 static void send_sysex(const uint8_t *m, int n)
 {

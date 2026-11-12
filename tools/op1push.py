@@ -9,10 +9,10 @@
     op1push.py --port ... --list                          # plugin files on the OP-1 (protocol 3)
     op1push.py --port ... --delete plugins/x.op1p         # delete plugin files (staged, T1 confirm, at restart)
 
-What differs is asked from the device (protocol 2): STAT gives the size of each content file on the OP-1
-(missing or other size: sent; same size with other content is NOT detected: --files / --force), IDENT gives the
-running firmware's version text, compared with the tree's OP1_vdk.ldr boot text ("op1r <n> [build time]"; release
-builds of one version are taken as equal).
+What differs is asked from the device: STAT gives the size of each content file on the OP-1 and, from protocol 4,
+its CRC-32 (missing, other size or other CRC: sent; with protocol 2 / 3 a same-size file with other content is NOT
+detected: --files / --force), IDENT gives the running firmware's version text, compared with the tree's OP1_vdk.ldr
+boot text ("op1r <n> [build time]"; release builds of one version are taken as equal).
 
 At the end the OP-1 asks: T1 restarts it (the update is applied at boot), T2 cancels.
 
@@ -179,6 +179,16 @@ def push(port, tree, paths, select=True, dry=False, timeout=2.0, log=print, dele
             i += 1
         log(f'{i} plugin files')
         return
+    def stat(path, data):
+        """STAT -> status, same as data (protocol 4: size + CRC, read DU_CRC_STEP bytes per message; else size)"""
+        off = crc = 0
+        while True:
+            st, pl = ask(STAT, path.encode() + b'\0' + (struct.pack('<II', off, crc) if proto >= 4 else b''))
+            if st in (5, 7): return 0, False                        # changed while read: send it
+            if st or struct.unpack('<I', pl[:4])[0] != len(data): return st, False
+            if proto < 4 or len(pl) < 12: return st, True            # (size only)
+            crc, off = struct.unpack('<II', pl[4:12])
+            if off >= len(data): return st, crc == binascii.crc32(data)
     if select:
         if proto < 2: sys.exit('the OP-1 cannot report its files (protocol 1): use --files')
         t0 = time.time(); keep = []
@@ -189,12 +199,11 @@ def push(port, tree, paths, select=True, dry=False, timeout=2.0, log=print, dele
                 same = mine is not None and dev == mine
                 log(f'  {"same    " if same else "differs "} {path}: OP-1 "{dev}", tree "{mine}"')
             else:
-                st, pl = ask(STAT, path.encode() + b'\0')
+                st, same = stat(path, data)
                 if st not in (0, 10): sys.exit(f'{path}: STAT refused ({ST.get(st, st)})')
-                same = st == 0 and struct.unpack('<I', pl[:4])[0] == len(data)
                 if not same: log(f'  {"missing " if st else "differs "} {path}')
             if not same: keep.append(path)
-        if 'OP1_vdk.ldr' in keep and FACTORY_DB in paths and FACTORY_DB not in keep:
+        if proto < 4 and 'OP1_vdk.ldr' in keep and FACTORY_DB in paths and FACTORY_DB not in keep:
             keep.append(FACTORY_DB)                               # engine / FX rows: often the same size
             log(f'  with the firmware: {FACTORY_DB}')
         log(f'{len(keep)} of {len(paths)} files differ (checked in {time.time() - t0:.1f} s)')

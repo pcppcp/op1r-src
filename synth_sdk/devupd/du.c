@@ -226,13 +226,27 @@ int du_handle(du_session *s, const uint8_t *msg, int n, uint8_t *rep)
         int k = 0; while (k < DU_MAX_REPLY - 6 && out[4 + k]) k++;
         return reply(rep, cmd, seq, DU_OK, out, 4 + k);
     }
-    case DU_STAT: {                                               /* path (0-terminated) */
-        if (pn < 2 || pl[pn - 1] != 0) return reply(rep, cmd, seq, DU_E_FORMAT, 0, 0);
-        if (!du_path_ok((const char *)pl)) return reply(rep, cmd, seq, DU_E_PATH, 0, 0);
+    case DU_STAT: {                                               /* path (0-terminated) [u32 offset, u32 crc] */
+        int k = 0;
+        while (k < pn && pl[k]) k++;
+        int more = pn - k - 1;
+        if (k == 0 || (more != 0 && more != 8)) return reply(rep, cmd, seq, DU_E_FORMAT, 0, 0);
+        const char *path = (const char *)pl;
+        if (!du_path_ok(path)) return reply(rep, cmd, seq, DU_E_PATH, 0, 0);
         uint32_t size;
-        if (!s->fs->stat || s->fs->stat(s->fs->ctx, (const char *)pl, &size)) return reply(rep, cmd, seq, DU_E_NOFILE, 0, 0);
+        if (!s->fs->stat || s->fs->stat(s->fs->ctx, path, &size)) return reply(rep, cmd, seq, DU_E_NOFILE, 0, 0);
         wr32(out, size);
-        return reply(rep, cmd, seq, DU_OK, out, 4);
+        if (!s->fs->read) return reply(rep, cmd, seq, DU_OK, out, 4);                  /* size only (as protocol 3) */
+        uint32_t off = more ? rd32(pl + k + 1) : 0, crc = more ? rd32(pl + k + 5) : 0;
+        if (off > size) return reply(rep, cmd, seq, DU_E_OFFSET, out, 4);
+        for (uint32_t end = size - off > DU_CRC_STEP ? off + DU_CRC_STEP : size; off < end;) {
+            uint32_t n = end - off > 16384 ? 16384 : end - off;   /* du_text: free outside COMMIT */
+            int got = s->fs->read(s->fs->ctx, path, off, (uint8_t *)du_text, n);
+            if (got <= 0 || (uint32_t)got > n) return reply(rep, cmd, seq, DU_E_IO, 0, 0);   /* shorter now: changed */
+            crc = du_crc32(crc, (const uint8_t *)du_text, (uint32_t)got); off += (uint32_t)got;
+        }
+        wr32(out + 4, crc); wr32(out + 8, off);
+        return reply(rep, cmd, seq, DU_OK, out, 12);
     }
     case DU_IDENT: {
         int k = s->fs->ident ? s->fs->ident(s->fs->ctx, (char *)out, DU_MAX_REPLY - 1) : 0;
