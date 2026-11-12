@@ -116,6 +116,8 @@ void host_ora_note_on(int pos, int note, int vel);
 void host_ora_note_off(int pos, int note);
 #define ORA_NOTE_ON(pos, n, k, v) (host_ora_note_on((pos), (n), (v)), (n))
 #define ORA_NOTE_OFF(pos, n)      host_ora_note_off((pos), (n))
+static uint32_t ora_irq_off(void) { return 0; }
+static void ora_irq_on(uint32_t m) { (void)m; }
 #else
 static void ora_changed(void);
 #define ORA_CHANGED() ora_changed()
@@ -123,6 +125,8 @@ int  eu_fw_note_on(int pos, int note, int key, int vel);   /* seq/euclid.c: Voic
 void eu_fw_note_off(int midi);
 #define ORA_NOTE_ON(pos, n, k, v) eu_fw_note_on((pos), (n), (k), (v))
 #define ORA_NOTE_OFF(pos, n)      eu_fw_note_off(n)
+static uint32_t ora_irq_off(void) { uint32_t m; __asm__ volatile ("cli %0;" : "=d"(m) : : "memory"); return m; }
+static void ora_irq_on(uint32_t m) { __asm__ volatile ("sti %0;" : : "d"(m) : "memory"); }
 #endif
 
 static int ora_clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
@@ -170,16 +174,20 @@ static void ora_pat_copy(ora_pat_t *d, const ora_pat_t *c)   /* byte loop: the f
     for (unsigned i = 0; i < sizeof *d; i++) ((uint8_t *)d)[i] = ((const uint8_t *)c)[i];
 }
 
-static void ora_silence(int pos, ora_bank_t *b)
-{
-    (void)pos;                                          /* (firmware note-off needs no mode) */
-    for (int r = 0; r < ORA_LANES; r++)
-        if (b->sounding[r]) { ORA_NOTE_OFF(pos, b->sounding[r] - 1); b->sounding[r] = 0; }
-}
+/* the key thread and the tick both release a lane's note: the id is taken with interrupts off, the note-off goes
+ * out after (as scale/sc_fw.c), so a tick inside the key thread's note-off can't lose the note it starts */
 static void ora_silence_lane(int pos, ora_bank_t *b, int r)
 {
-    (void)pos;
-    if (b->sounding[r]) { ORA_NOTE_OFF(pos, b->sounding[r] - 1); b->sounding[r] = 0; }
+    (void)pos;                                          /* (firmware note-off needs no mode) */
+    uint32_t m = ora_irq_off();
+    int id = b->sounding[r];
+    b->sounding[r] = 0;
+    ora_irq_on(m);
+    if (id) ORA_NOTE_OFF(pos, id - 1);
+}
+static void ora_silence(int pos, ora_bank_t *b)
+{
+    for (int r = 0; r < ORA_LANES; r++) ora_silence_lane(pos, b, r);
 }
 
 static void ora_start(ora_bank_t *b, int now_start)

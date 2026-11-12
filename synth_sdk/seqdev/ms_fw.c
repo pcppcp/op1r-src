@@ -101,7 +101,7 @@ static int e_loop(int32_t *a, int32_t *b) { *a = LOOP_IN; *b = LOOP_OUT; return 
 /* built-in sequencer: the note as a keyboard key (key i plays 53 + i at octave 0), through the KeyHandler queue like a
  * physical key, so the active stock sequencer gets it in order with the real keys */
 static const uint8_t kb_keys[24] = { 39, 13, 40, 14, 41, 15, 42, 28, 32, 29, 22, 30, 31, 23, 48, 24, 49, 25, 50, 51, 26, 52, 27, 53 };
-static uint8_t kb_down[24];
+static uint8_t kb_down[24], kb_of[128];                        /* kb_of: key + 1 a note went down on */
 static void kb_push(int code, int down)
 {
     volatile uint32_t *rd = (volatile uint32_t *)0x01DD5244, *wr = (volatile uint32_t *)0x01DD5248;
@@ -132,11 +132,15 @@ static void e_play(int t, int dest, int ch, int kind, int d1, int d2, int on)
     }
     if (dest == MS_DEST_SEQ) {
         extern int sc_key_note(int note);                         /* scale mode: the key that plays d1 (docs/55) */
-        int i = sc_key_note(d1) - 53;
-        while (i < 0) i += 12;
-        while (i > 23) i -= 12;
-        if (!on == !kb_down[i]) return;                           /* never a second down of a held key (stock asserts) */
-        kb_down[i] = (uint8_t)on;
+        int i = kb_of[d1 & 127] - 1;                              /* off: the key it went down on (scale / mode may */
+        if (on) {                                                 /* have changed since) */
+            if (i >= 0) return;                                   /* (still holds one) */
+            i = sc_key_note(d1) - 53;
+            while (i < 0) i += 12;
+            while (i > 23) i -= 12;
+        }
+        if (i < 0 || !on == !kb_down[i]) return;                  /* never a second down of a held key (stock asserts) */
+        kb_down[i] = (uint8_t)on; kb_of[d1 & 127] = (uint8_t)(on ? i + 1 : 0);
         kb_push(kb_keys[i], on);
         return;
     }
