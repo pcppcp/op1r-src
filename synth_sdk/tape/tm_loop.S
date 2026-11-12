@@ -5,7 +5,7 @@
  *   c1 = (s1 - sm) >> 1, c2 = sm - (5 s0 >> 1) + 2 s1 - (s2 >> 1), c3 = ((s2 - sm) >> 1) + (3 (s0 - s1) >> 1)
  *   v = sat16((((c3 f >> 12) + c2) f >> 12 + c1) f >> 12 + s0); accL += v gl >> shift, accR += v gr >> shift; r += st
  * void tm_hloop(const int16_t *d, int32_t r, int32_t st, uint32_t gains (gl low, gr high), int32_t shift,
- *               int32_t *accL, int32_t *accR) */
+ *               int32_t *accL, int32_t *accR, int16_t *out (v per sample, pre-fader: meters, track outs)) */
 	.text
 	.align 4
 	.global _tm_hloop
@@ -19,6 +19,7 @@ _tm_hloop:
 	R0 = [SP + 44]; I3 = R0;                    /* shift */
 	P1 = [SP + 48];                             /* accL */
 	P2 = [SP + 52];                             /* accR */
+	R0 = [SP + 56]; I0 = R0;                    /* out */
 	P4 = 64;
 	LSETUP (1f, 2f) LC0 = P4;
 1:	R0 = R7 >>> 16;
@@ -57,6 +58,7 @@ _tm_hloop:
 	R5 >>>= 12;
 	R5 = R5 + R2;
 	R5 = R5 << 16 (S);                          /* sat16, v in the high half */
+	W[I0++] = R5.H;
 	R1 = I2;
 	R3 = R5.H * R1.L (IS);                      /* v gl */
 	R5 = R5.H * R1.H (IS);                      /* v gr */

@@ -154,7 +154,7 @@ static int32_t fade_prev;                                        /* output gain 
 #define TM_SEAM 512                                             /* seam jump threshold (sum of both sides, ~-36 dBFS) */
 #define TM_XF 256                                                /* loop crossfade, samples (power of 2) */
 #ifndef OP1_HOST
-void tm_hloop(const int16_t *d, int32_t r, int32_t st, uint32_t gains, int32_t shift, int32_t *accL, int32_t *accR);
+void tm_hloop(const int16_t *d, int32_t r, int32_t st, uint32_t gains, int32_t shift, int32_t *accL, int32_t *accR, int16_t *out);
 #endif
 #ifdef OP1_HOST
 #define TM_CYCLES() 0u
@@ -165,6 +165,7 @@ volatile uint32_t tm_cyc_t[4], tm_blocks;                       /* per-track cyc
 volatile uint32_t tm_slow;                                       /* blocks through the slow path (sysmon "s") */
 volatile uint32_t tm_cyc_tracks;                                 /* cycles in the 4 tm_track_block calls */
 volatile uint32_t tm_cyc_loop;                                   /* cycles in tm_hloop (sysmon "fr total/loop") */
+static int16_t tm_v[4][64];                                      /* this block's samples per track, pre-fader */
 volatile uint32_t tm_chk_n, tm_chk_bad;                          /* OP1R_TMCHECK: blocks compared, mismatches */
 static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32_t *accL, int32_t *accR)
 {
@@ -207,13 +208,13 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
                 const int32_t st = (int32_t)(step >> 16);
 #if !defined(OP1_HOST) && !defined(TM_CHECK)
                 { uint32_t c0, c1; __asm__ volatile ("%0 = CYCLES;" : "=d"(c0));
-                  tm_hloop(d, r, st, (uint16_t)gl | (uint32_t)(uint16_t)gr << 16, gain_shift, accL, accR);   /* tm_loop.S */
+                  tm_hloop(d, r, st, (uint16_t)gl | (uint32_t)(uint16_t)gr << 16, gain_shift, accL, accR, tm_v[t]);   /* tm_loop.S */
                   __asm__ volatile ("%0 = CYCLES;" : "=d"(c1)); tm_cyc_loop += c1 - c0; }
 #else
 #ifdef TM_CHECK
-                int32_t cl[64], cr[64];
+                int32_t cl[64], cr[64]; int16_t cv[64];
                 for (int i = 0; i < 64; i++) { cl[i] = accL[i]; cr[i] = accR[i]; }
-                tm_hloop(d, r, st, (uint16_t)gl | (uint32_t)(uint16_t)gr << 16, gain_shift, cl, cr);
+                tm_hloop(d, r, st, (uint16_t)gl | (uint32_t)(uint16_t)gr << 16, gain_shift, cl, cr, cv);
 #endif
                 for (int i = 0; i < 64; i++) {
                     const int32_t n = r >> 16, f = (r >> 4) & 0xFFF;
@@ -222,10 +223,11 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
                     int32_t v = (((((c3 * f >> 12) + c2) * f >> 12) + c1) * f >> 12) + s0;
                     v = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
                     accL[i] += v * gl >> gain_shift; accR[i] += v * gr >> gain_shift;
+                    tm_v[t][i] = (int16_t)v;
                     r += st;
                 }
 #ifdef TM_CHECK
-                for (int i = 0; i < 64; i++) if (cl[i] != accL[i] || cr[i] != accR[i]) { tm_chk_bad++; break; }
+                for (int i = 0; i < 64; i++) if (cl[i] != accL[i] || cr[i] != accR[i] || cv[i] != tm_v[t][i]) { tm_chk_bad++; break; }
                 tm_chk_n++;
 #endif
 #endif
@@ -250,6 +252,7 @@ static void tm_track_block(int t, int64_t step, int loops, int gain_shift, int32
             }
         }
         accL[i] += s * gl >> gain_shift; accR[i] += s * gr >> gain_shift;
+        tm_v[t][i] = (int16_t)s;
         h += step;
         if (h >= hi) h -= hi - lo; else if (h < lo) h += hi - lo;   /* the stored head stays inside its loop */
     }
@@ -339,6 +342,7 @@ static void tm_block_body(void)
         uint32_t tb0 = TM_CYCLES();
         if (scrub_v && t == sc) tm_track_block(t, (int64_t)scrub_v << 16, 0, 16, accL, accR);   /* -6 dB, no loops */
         else if (playing) tm_track_block(t, ((int64_t)v * tm_tr[t].speed) >> 11, 1, 15, accL, accR);   /* (1x = 2^27) x Q16 -> Q32 */
+        else for (int i = 0; i < 64; i++) tm_v[t][i] = 0;
         { uint32_t tb1 = TM_CYCLES(); tm_cyc_tracks += tb1 - tb0; tm_cyc_t[t] += tb1 - tb0; }
     }
     int32_t fade = 0x7FFF;                                       /* starting / stopping: below 1/4x the volume follows the speed,
@@ -355,6 +359,25 @@ static void tm_block_body(void)
 #endif
         OUT_R[i] = (int16_t)(r > 32767 ? 32767 : r < -32768 ? -32768 : r);
     }
+#ifndef OP1_HOST
+    /* FREE's tracks downstream (docs/82): R246's mixer meters (cleared per block by Core_render_block, then the tape
+     * mix's block peaks, Core_mix_master adds the recording) and op1r's per-track outs (USB tracks, FX2 aux), pre-fader */
+    {
+        extern int16_t tr_out[4][64]; extern volatile uint8_t usb_tracks_live; extern int fr_tracks_needed(void);
+        const int outs = usb_tracks_live || fr_tracks_needed();
+        for (int t = 0; t < 4; t++) {
+            const int16_t *src = tm_v[t]; int32_t pk = 0;
+            for (int i = 0; i < 64; i++) { const int32_t a = src[i] < 0 ? -src[i] : src[i]; if (a > pk) pk = a; }
+            const int muted = tm_tr[t].mute;
+            ((volatile int16_t *)0xFF802990)[t] = (int16_t)(muted ? 0 : pk > 32767 ? 32767 : pk);
+            if (outs) {
+                int16_t *o = tr_out[t];
+                if (muted) for (int i = 0; i < 64; i++) o[i] = 0;
+                else for (int i = 0; i < 64; i++) o[i] = (int16_t)(src[i] * (f0 + ((fade - f0) * (i + 1) >> 6)) >> 15);
+            }
+        }
+    }
+#endif
 }
 
 /* ---- recording (FREE): the active track at its own head / speed / loop (docs/82) ----
