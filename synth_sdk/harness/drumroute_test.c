@@ -4,7 +4,8 @@
  * 1. drum+ alone: every voice, page, knob and type-job call goes where the one-plugin core sent it.
  * 2. drum+ and a second plugin (perc, row 3): its kits' voices, pages and keys go to it, a voice keeps its plugin
  *    across a slot change, the type job matrix (stock -> perc -> drum+ -> stock, perc row with perc absent), only the
- *    shown slot's plugin syncs the pages (one writer per key event). */
+ *    shown slot's plugin syncs the pages (one writer per key event).
+ * 3. perc without drum+: stock kits play stock, also a stock voice still sounding after a switch to a perc kit. */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -109,6 +110,12 @@ int main(void)
     job(2, 2); expect("");                                           /* drum+ row, drum+ absent: nothing */
     h_ui_slot = 2; job(2, 3); expect("perc.job auto: perc.sync(own) ");
     dp_fw_note_on(v[3], 0); expect("perc.on ");
+    h_drum_slot = 3;                                                 /* a stock voice, then the playing kit -> perc */
+    dp_fw_note_on(v[4], 0); expect("stock.on ");
+    h_drum_slot = 2;
+    dp_fw_render(v[4], out, 0); dp_fw_note_off(v[4], 0); expect("stock.render stock.off ");   /* stays stock */
+    h_drum_slot = 3;
+    dp_fw_render(v[3], out, 0); expect("perc.render ");               /* and a perc voice stays perc's */
     printf("drum routing: %d checks ok\n", checks);
     return 0;
 }
