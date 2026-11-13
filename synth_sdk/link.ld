@@ -3,7 +3,7 @@
 ENTRY(_synth_render)
 SECTIONS {
   . = 0x01E00000;
-  .text   : { KEEP(*(.l1vec)) *(.text*) }       /* .l1vec first: fixed L1 entry points (hook.S) */
+  .text   : { KEEP(*(.l1vec)) *(.text*) *(.near) }       /* .l1vec first: fixed L1 entry points (hook.S) */
   .rodata : { *(.rodata*) }
   .data   : { *(.data*) }
   __image_end = .;
@@ -115,6 +115,20 @@ SECTIONS {
   .hook_frsnap 0x019C9D04 : { KEEP(*(.hook_frsnap)) }
   .hook_bgsqueue 0x019411B8 : { KEEP(*(.hook_bgsqueue)) }
   .hook_bgsgc 0x019F0C46 : { KEEP(*(.hook_bgsgc)) }
+  .hook_coop_dsynth 0x0197E956 : { KEEP(*(.hook_coop_dsynth)) }
+  .hook_coop_cwo 0x019457D2 : { KEEP(*(.hook_coop_cwo)) }
+  .hook_coop_cwo_v0 0x0194569A : { KEEP(*(.hook_coop_cwo_v0)) }
+  .hook_coop_cwo_v1 0x019456B6 : { KEEP(*(.hook_coop_cwo_v1)) }
+  .hook_coop_cwo_v2 0x019456DC : { KEEP(*(.hook_coop_cwo_v2)) }
+  .hook_coop_cwo_v3 0x019456EE : { KEEP(*(.hook_coop_cwo_v3)) }
+  .hook_coop_phone 0x01A1BCAC : { KEEP(*(.hook_coop_phone)) }
+  .hook_coop_phonecap 0x01A1BBFC : { KEEP(*(.hook_coop_phonecap)) }
+  .hook_coop_grid 0x019AF92E : { KEEP(*(.hook_coop_grid)) }
+  .hook_coop_delay 0x0197DD46 : { KEEP(*(.hook_coop_delay)) }
+  .hook_coop_nitro 0x019A64A4 : { KEEP(*(.hook_coop_nitro)) }
+  .hook_coop_spring 0x01A3310A : { KEEP(*(.hook_coop_spring)) }
+  .hook_coop_voltage 0x01A49CB6 : { KEEP(*(.hook_coop_voltage)) }
+  .hook_coop_phase 0x01A0BCE0 : { KEEP(*(.hook_coop_phase)) }
   .hook_crash 0x0191995C : { KEEP(*(.hook_crash)) }
   .hook_smpover 0x01A05984 : { KEEP(*(.hook_smpover)) }
   .hook_diskprobe 0x0199DD7A : { KEEP(*(.hook_diskprobe)) }
@@ -137,3 +151,35 @@ SECTIONS {
   .hook_devrx 0x019E3CC8 : { KEEP(*(.hook_devrx)) }
   /DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) }
 }
+/* coop-fw DSP rewrites (dsp/coop): the stock re-entry points */
+PROVIDE(_stock_dsynth_loop_back = 0x0197ea6c);
+PROVIDE(_stock_dsynth_loop_entry = 0x0197e95a);
+PROVIDE(_stock_cwo_loop_entry = 0x019457d6);
+PROVIDE(_stock_cwo_loop_back = 0x01945ac8);
+PROVIDE(_stock_vec_ctor = 0x01aa3862);
+PROVIDE(_stock_phone_loop_top = 0x01a1bcb0);
+PROVIDE(_stock_phone_loop_bottom = 0x01a1bf34);
+PROVIDE(_stock_phone_loop_back = 0x01a1bf36);
+PROVIDE(_stock_phone_capture_top = 0x01a1bc00);
+PROVIDE(_stock_phone_capture_bottom = 0x01a1bc58);
+PROVIDE(_stock_phone_capture_back = 0x01a1bc5a);
+PROVIDE(_stock_punch_render = 0x019e662c);
+PROVIDE(_stock_nitro_loop_top = 0x019a64a8);
+PROVIDE(_stock_nitro_loop_bottom = 0x019a6682);
+PROVIDE(_stock_nitro_loop_back = 0x019a67f8);
+PROVIDE(_stock_grid_loop_top = 0x019af932);
+PROVIDE(_stock_grid_loop_bottom = 0x019afcc8);
+PROVIDE(_stock_grid_loop_back = 0x019afcca);
+PROVIDE(_stock_spring_loop_top = 0x01a3310e);
+PROVIDE(_stock_spring_loop_bottom = 0x01a33694);
+PROVIDE(_stock_spring_loop_back = 0x01a33696);
+PROVIDE(_stock_voltage_loop_top = 0x01a49cba);
+PROVIDE(_stock_voltage_loop_bottom = 0x01a49ed0);
+PROVIDE(_stock_voltage_loop_back = 0x01a49ed2);
+PROVIDE(_stock_delay_loop_top = 0x0197dd4a);
+PROVIDE(_stock_delay_loop_bottom = 0x0197df7a);
+PROVIDE(_stock_delay_loop_back = 0x0197df7c);
+PROVIDE(_stock_phase_loop_top = 0x01a0bce4);
+PROVIDE(_stock_phase_loop_bottom = 0x01a0bd5a);
+PROVIDE(_stock_phase_loop_back = 0x01a0bd5c);
+_l1_sine = 0xFF900820;   /* R246's sine table, op1r's L1 copy (l1pool.c L1_SINE): IMM_PATCHES targets */

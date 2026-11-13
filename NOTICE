@@ -35,6 +35,12 @@ NOT COVERED by this license
 - Oblique Strategies card texts: by Brian Eno and Peter Schmidt (list from
   https://github.com/ultralazr/op1-oblique-strategies). Not ours and not licensed by us.
 
+FROM COOP-FW (coldsoldr/co-op, firmware/core/sdram, GPL-3.0-or-later with the same additional permission; their
+copyright lines are kept)
+- The rewrites of stock DSP loops in synth_sdk/dsp/coop/*_fast.S: the DSynth voice loop (from stereo_thunks.S), the
+  cwo, punch, phone, nitro, grid, spring and delay effects and the Phase and Voltage engines. Copyright (C) 2026
+  coldsoldr. op1r adds a run counter for its test builds (OP1R_COOP_HITS) and the glue (dsp/coop/coop_fast.c).
+
 THIRD-PARTY CODE (MIT License, compatible with the GPL; their notices are kept)
 - Fixed-point ports of Mutable Instruments Clouds and the Elements reverb: original code (c) 2014 Emilie Gillet,
   MIT License.

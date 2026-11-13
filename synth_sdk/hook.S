@@ -613,6 +613,34 @@ _pj_sampler_over:
 /* disk-mode export (0x0199DA6C), sampler row: CALL yaffs_open at 0x0199DD7A, never closed -> pj_probe_open */
 	.section .hook_diskprobe,"ax"
 	call _pj_probe_open;
+	.section .hook_coop_dsynth,"ax"
+	jump.l _coop_dsynth_voice_loop;
+	.section .hook_coop_cwo,"ax"
+	jump.l _coop_cwo_loop_near;
+	.section .hook_coop_cwo_v0,"ax"
+	call _coop_cwo_vec_ctor;
+	.section .hook_coop_cwo_v1,"ax"
+	call _coop_cwo_vec_ctor;
+	.section .hook_coop_cwo_v2,"ax"
+	call _coop_cwo_vec_ctor;
+	.section .hook_coop_cwo_v3,"ax"
+	call _coop_cwo_vec_ctor;
+	.section .hook_coop_phone,"ax"
+	jump.l _coop_phone_loop_near;
+	.section .hook_coop_phonecap,"ax"
+	jump.l _coop_phone_capture_near;
+	.section .hook_coop_grid,"ax"
+	jump.l _coop_grid_loop_near;
+	.section .hook_coop_delay,"ax"
+	jump.l _coop_delay_loop_near;
+	.section .hook_coop_nitro,"ax"
+	jump.l _coop_nitro_loop_near;
+	.section .hook_coop_spring,"ax"
+	jump.l _coop_spring_loop_near;
+	.section .hook_coop_voltage,"ax"
+	jump.l _coop_voltage_loop_near;
+	.section .hook_coop_phase,"ax"
+	jump.l _coop_phase_loop_near;
 	.section .hook_crash,"ax"
 	jump.l _crash_stub;                      /* LINK 0x10 of the FP-chain printer 0x0191995C: our crash lines */
 	.section .hook_bgsgc,"ax"

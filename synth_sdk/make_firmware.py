@@ -130,7 +130,21 @@ HOOKS = {0x019B975C: ('hook_namecmp', bytes.fromhex('18300b32')),      # instr_t
          0x019C9D04: ('hook_frsnap', bytes.fromhex('09e11e59')),         # LFO/seq tick (after tape_play_mix) -> fr_snap (master FX source, docs/54)
          0x01A05984: ('hook_smpover', bytes.fromhex('00e1301e')),        # preset loader: sampler presets over the limit -> skip the row (patchjob.c)
          0x0199DD7A: ('hook_diskprobe', bytes.fromhex('07e33ddd')),      # disk-mode export: CALL yaffs_open never closed -> closed (patchjob.c)
-         0x0191995C: ('hook_crash', bytes.fromhex('00e80400')),          # exception FP-chain printer entry -> crash_print (crash.c, docs/65)
+         0x0191995C: ('hook_crash', bytes.fromhex('00e80400')),
+         0x0197E956: ('hook_coop_dsynth', bytes.fromhex('4f32b16f')),   # coop-fw DSP rewrite (dsp/coop, docs/84)
+         0x019457D2: ('hook_coop_cwo', bytes.fromhex('22e14000')),   # coop-fw DSP rewrite (dsp/coop, docs/84)
+         0x0194569A: ('hook_coop_cwo_v0', bytes.fromhex('0ae3e4f0')),   # coop-fw DSP rewrite (dsp/coop, docs/84)
+         0x019456B6: ('hook_coop_cwo_v1', bytes.fromhex('0ae3d6f0')),   # coop-fw DSP rewrite (dsp/coop, docs/84)
+         0x019456DC: ('hook_coop_cwo_v2', bytes.fromhex('0ae3c3f0')),   # coop-fw DSP rewrite (dsp/coop, docs/84)
+         0x019456EE: ('hook_coop_cwo_v3', bytes.fromhex('0ae3baf0')),   # coop-fw DSP rewrite (dsp/coop, docs/84)
+         0x01A1BCAC: ('hook_coop_phone', bytes.fromhex('b2e04421')),   # coop-fw DSP rewrite (dsp/coop, docs/84)
+         0x01A1BBFC: ('hook_coop_phonecap', bytes.fromhex('a2e02e00')),   # coop-fw DSP rewrite (dsp/coop, docs/84)
+         0x019AF92E: ('hook_coop_grid', bytes.fromhex('a2e0cd01')),   # coop-fw DSP rewrite (dsp/coop, docs/84)
+         0x0197DD46: ('hook_coop_delay', bytes.fromhex('b2e01a11')),   # coop-fw DSP rewrite (dsp/coop, docs/84)
+         0x019A64A4: ('hook_coop_nitro', bytes.fromhex('b2e0ef20')),   # coop-fw DSP rewrite (dsp/coop, docs/84)
+         0x01A3310A: ('hook_coop_spring', bytes.fromhex('a2e0c532')),   # coop-fw DSP rewrite (dsp/coop, docs/84)
+         0x01A49CB6: ('hook_coop_voltage', bytes.fromhex('a2e00d11')),   # coop-fw DSP rewrite (dsp/coop, docs/84)
+         0x01A0BCE0: ('hook_coop_phase', bytes.fromhex('a2e03d40')),   # coop-fw DSP rewrite (dsp/coop, docs/84)          # exception FP-chain printer entry -> crash_print (crash.c, docs/65)
          0x019F0C46: ('hook_bgsgc', bytes.fromhex('05e30150')),          # main loop idle: CALL yaffs_do_background_gc -> bgs_idle_gc (max 10/s, docs/58)
          0x019411B8: ('hook_bgsqueue', bytes.fromhex('00e80000')),       # queue SaveSlotJob(is_drum, slot): LINK -> bgs_queue_slot (delayed, bgsave.c)
          0x01912128: ('hook_spadsr', bytes.fromhex('e3052a32')),         # Adsr_render entry -> sp_adsr (sampler+ envelope, docs/46)
@@ -166,7 +180,36 @@ DATA_PATCHES = {0x018F7FF8: ('fx_screen_case5', 0x01A3BF26),          # ScreenId
                 0x01910FB8: ('plug_apply_synth_fx', 0x01A00DC4),      # synth patch vtable: apply_synth_fx
                 0x01910F80: ('plug_apply_drum_fx', 0x01A0010C)}       # drum patch vtable: apply_drum_fx           # tape screen draw: + markers (tape/markers.c)              # kTE_Idle vtable run: remember thread (sysmon)
 # 32-bit immediates loaded as Rx.L = lo; Rx.H = hi (two 4-byte instructions): address -> (symbol, original value)
-IMM_PATCHES = {0x0191AB52: ('sm_audio_cb', 0xFFA04804)}             # audio::init: DMA callback = audio render (sysmon)
+IMM_PATCHES = {0x0191AB52: ('sm_audio_cb', 0xFFA04804),            # audio::init: DMA callback = audio render (sysmon)
+               # R246's sine table (0x0101E5E8, 16 KB) read from op1r's L1 copy (l1pool.c, copied at boot): every Px .L / .H
+               # pair that names it (as coop-fw T4c, docs/84). Not its generator's I0 pair (0x01A49B28, a static constructor:
+               # it fills the SDRAM table before bt_db_open copies it)
+               0x01960432: ('l1_sine', 0x0101E5E8),
+               0x01971196: ('l1_sine', 0x0101E5E8),
+               0x0197AECA: ('l1_sine', 0x0101E5E8),
+               0x0197B240: ('l1_sine', 0x0101E5E8),
+               0x0197B64A: ('l1_sine', 0x0101E5E8),
+               0x0197BA34: ('l1_sine', 0x0101E5E8),
+               0x0197BE1E: ('l1_sine', 0x0101E5E8),
+               0x0197C2AE: ('l1_sine', 0x0101E5E8),
+               0x0197CE2A: ('l1_sine', 0x0101E5E8),
+               0x0197E576: ('l1_sine', 0x0101E5E8),
+               0x019A22D4: ('l1_sine', 0x0101E5E8),
+               0x019A24A6: ('l1_sine', 0x0101E5E8),
+               0x019A6498: ('l1_sine', 0x0101E5E8),
+               0x019A7FA8: ('l1_sine', 0x0101E5E8),
+               0x019AF42E: ('l1_sine', 0x0101E5E8),
+               0x019AF8AC: ('l1_sine', 0x0101E5E8),
+               0x019B9AA8: ('l1_sine', 0x0101E5E8),
+               0x019CBF6A: ('l1_sine', 0x0101E5E8),
+               0x019CFB0C: ('l1_sine', 0x0101E5E8),
+               0x019CFE44: ('l1_sine', 0x0101E5E8),
+               0x019CFF74: ('l1_sine', 0x0101E5E8),
+               0x019E636A: ('l1_sine', 0x0101E5E8),
+               0x019E7C50: ('l1_sine', 0x0101E5E8),
+               0x01A0BCD8: ('l1_sine', 0x0101E5E8),
+               0x01A49CAE: ('l1_sine', 0x0101E5E8),
+               0x01A52044: ('l1_sine', 0x0101E5E8)}
 # The same, in the encrypted L1 image. These patches are precomputed: public builds replay the byte differences in
 # l1_patches.json; a private maintainer tool (analysis/l1_private.py, not published) regenerates them. Their targets
 # are the fixed L1 vector entries (hook.S .l1vec at CODE_BASE), so plugins and other code can change freely.
@@ -338,7 +381,7 @@ def gen_table(engs, fxs):
 def build(engs, fxs):
     os.makedirs(os.path.join(HERE, 'build'), exist_ok=True)
     gen_table(engs, fxs)
-    srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'seq/tombola.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/pcpage.c', 'screens/usbtrack.c', 'screens/tr_rs.S', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'boottime.c', 'build/l1_runtime.c', 'dsp/outstage.c', 'dsp/outstage_l1.c', 'dsp/eq.c', 'dsp/fir.S', 'dsp/eq_l1.c', 'dsp/fir_l1.S', 'dsp/mix.c', 'dsp/mix_l1.S', 'dsp/dec.c', 'dsp/dec_l1.S', 'dsp/dc.c', 'dsp/cw.c', 'dsp/mon.c', 'plugload/op1p_load.c', 'screens/settings.c', 'screens/stxt.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/tm.c', 'tape/tm_loop.S', 'tape/tm_l1.S', 'screens/tfscreen.c', 'tape/mixdrop.c', 'crash.c', 'patchjob.c', 'l1pool.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxgroups.c', 'screens/guiskip.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c', 'input/in_host.c'] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
+    srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'seq/tombola.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/pcpage.c', 'screens/usbtrack.c', 'screens/tr_rs.S', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'boottime.c', 'build/l1_runtime.c', 'dsp/outstage.c', 'dsp/outstage_l1.c', 'dsp/eq.c', 'dsp/fir.S', 'dsp/eq_l1.c', 'dsp/fir_l1.S', 'dsp/mix.c', 'dsp/mix_l1.S', 'dsp/dec.c', 'dsp/dec_l1.S', 'dsp/dc.c', 'dsp/cw.c', 'dsp/mon.c', 'plugload/op1p_load.c', 'screens/settings.c', 'screens/stxt.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/tm.c', 'tape/tm_loop.S', 'tape/tm_l1.S', 'screens/tfscreen.c', 'tape/mixdrop.c', 'crash.c', 'patchjob.c', 'l1pool.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxgroups.c', 'screens/guiskip.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c', 'input/in_host.c', 'dsp/coop/coop_fast.c'] + ['dsp/coop/%s_fast.S' % n for n in ('dsynth', 'cwo', 'punch', 'phone', 'nitro', 'grid', 'spring', 'delay', 'phase', 'voltage')] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
     objs = []
     cmds = []
     if os.environ.get('OP1R_WDOG', '1') == '1': srcs += ['wdog.c', 'wdog_nmi.S']   # hang detector (wdog.c, docs/18), on by default (OP1R_WDOG=0: off)
@@ -365,6 +408,10 @@ def build(engs, fxs):
     if os.environ.get('OP1R_TAPEFREE') == '1': flags['tape/tm.c'] = ['-DTAPE_FREE'] + (['-DTM_DBGRING'] if os.environ.get('OP1R_TMDBG') == '1' else [])
     if os.environ.get('OP1R_TMXTEST') == '1': flags['tape/tm.c'] = flags.get('tape/tm.c', []) + ['-DTM_XHI=441000', '-DTM_XSPAN=220500']   # emulator: transport wrap at 10 s
     if os.environ.get('OP1R_TAPEMIX') in ('stock', 'check', 'checkx', 'exact'): flags['screens/usbtrack.c'] = flags.get('screens/usbtrack.c', []) + ['-DTAPEMIX_' + os.environ['OP1R_TAPEMIX'].upper()]   # docs/83: R246's tape mix / compared
+    if os.environ.get('OP1R_AUDRING') == '1': flags['screens/sysmon.c'] = flags.get('screens/sysmon.c', []) + ['-DSM_AUD_RING']   # A/B cycle measurements
+    if os.environ.get('OP1R_COOPFAST') == '0': flags['dsp/coop/coop_fast.c'] = ['-DCOOP_FAST=0']   # coop's DSP rewrites off (A/B, docs/84)
+    if os.environ.get('OP1R_COOPFAST') == 'hits':
+        for n in ('dsynth', 'cwo', 'punch', 'phone', 'nitro', 'grid', 'spring', 'delay', 'phase', 'voltage'): flags['dsp/coop/%s_fast.S' % n] = ['-DOP1R_COOP_HITS']
     if os.environ.get('OP1R_CRASHTEST') == '1': flags['dispatcher.c'] = flags.get('dispatcher.c', []) + ['-DCRASH_TEST']   # Shift + help crashes (docs/65)
     if os.environ.get('OP1R_WDOG', '1') == '1':
         for f in ('crash.c', 'dispatcher.c', 'boottime.c', 'tape/safewrite.c', 'screens/sysmon.c'): flags[f] = flags.get(f, []) + ['-DWDOG']
@@ -574,7 +621,9 @@ def patch_ldr(src, dst, code, hooks, syms, opz=False, release=True):
     ldr_poke(d, *KNOB_BYTE)
     for addr, (sym, orig) in DATA_PATCHES.items():
         ldr_poke(d, addr, struct.pack('<I', syms[sym]), struct.pack('<I', orig))
-    for addr, (sym, orig) in IMM_PATCHES.items():              # keep the opcodes, swap the 16-bit halves
+    _skip = {int(x, 16) for x in os.environ.get('OP1R_SINE_SKIP', '').split(',') if x}   # test: sine readers left in SDRAM (docs/84)
+    for addr, (sym, orig) in IMM_PATCHES.items():
+        if addr in _skip: continue              # keep the opcodes, swap the 16-bit halves
         v = syms[sym]
         ldr_poke(d, addr + 2, struct.pack('<H', v & 0xFFFF), struct.pack('<H', orig & 0xFFFF))
         ldr_poke(d, addr + 6, struct.pack('<H', v >> 16), struct.pack('<H', orig >> 16))

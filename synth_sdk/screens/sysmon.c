@@ -37,10 +37,39 @@ static inline uint32_t READ_CYCLES(void) { uint32_t c; __asm__ volatile ("%0 = C
 #endif
 
 /* ---------------- sources ---------------- */
-static volatile uint32_t aud_busy, aud_max, aud_last_t0, aud_max_period;   /* ISR side, reset by the GUI */
+static volatile uint32_t aud_busy, aud_max, aud_last_t0, aud_max_period;
+volatile uint32_t sm_aud_tot[2];
+#ifdef SM_AUD_RING
+volatile uint32_t sm_aud_ring[64];                          /* OP1R_AUDRING=1 test builds: cycles / 256 at every 1024th block */
+#endif   /* ISR side, reset by the GUI */
+/* Blackfin performance monitor (docs/84, after coop-fw's device sweep p6h): PFCTL 0xFFE08000 in kennel's layout
+ * (PFPWR bit 0, PFCEN0 3 << 3, PFMON0 << 5, PFCEN1 3 << 14, PFMON1 << 16, PFCNT0 / 1 at bits 24 / 25: 1 = occurrences,
+ * 0 = cycles). Counter 0 event 0x83 as cycles = instruction fetch stall cycles (coop: 26,359 on a cold 4 KB pass, 21
+ * warm); counter 1 event 0x99 as cycles = data stall cycles (52,571 cold, 0 warm). Not 0x82 / 0x9A (fetches / fills).
+ * op1emu has no monitor: sm_pf_live stays 0 there. */
+#define PFCTL   (*(volatile uint32_t *)0xFFE08000u)
+#define PFCNTR0 (*(volatile uint32_t *)0xFFE08100u)
+#define PFCNTR1 (*(volatile uint32_t *)0xFFE08104u)
+volatile uint32_t sm_pf_live;
+static volatile uint32_t pf_busy[2];                         /* stall cycles inside the callback, reset by the GUI */
+void sm_pf_boot(void)                                        /* main thread, boot (boottime.c bt_db_open) */
+{
+#ifndef OP1_HOST
+    PFCTL = 0;
+    PFCNTR0 = 0; PFCNTR1 = 0;
+    PFCTL = 1u | 3u << 3 | 0x83u << 5 | 3u << 14 | 0x99u << 16;   /* both counters: cycles */
+    uint32_t c0 = PFCNTR0;                                   /* live if counter 0 moves over some code (fetches) */
+    for (volatile int i = 0; i < 2000; i++) {}
+    sm_pf_live = (PFCTL & 1u) && PFCNTR0 != c0;
+#endif
+}
 void sm_audio_cb(void *a, void *b, void *c)                  /* replaces the callback pointer (audio::init) */
 {
     uint32_t t0 = READ_CYCLES();
+#ifndef OP1_HOST
+    const int pf = (int)sm_pf_live;
+    const uint32_t pc0 = pf ? PFCNTR0 : 0, pd0 = pf ? PFCNTR1 : 0;
+#endif
     extern void l1_begin(void), l1_end(void);
     extern void in_clock(uint32_t), in_end(void);
     in_clock(t0);                                            /* input engines: the block rate (input/in_host.c) */
@@ -52,9 +81,16 @@ void sm_audio_cb(void *a, void *b, void *c)                  /* replaces the cal
 #endif
     l1_end();
     in_end();
+#ifndef OP1_HOST
+    if (pf) { pf_busy[0] += PFCNTR0 - pc0; pf_busy[1] += PFCNTR1 - pd0; }
+#endif
     uint32_t d = READ_CYCLES() - t0, p = t0 - aud_last_t0;
     aud_last_t0 = t0;
     aud_busy += d;
+    sm_aud_tot[0]++; sm_aud_tot[1] += d >> 8;                /* cumulative (blocks, cycles / 256): A/B measurements */
+#ifdef SM_AUD_RING
+    if (!(sm_aud_tot[0] & 1023) && sm_aud_tot[0] >> 10 < 64) sm_aud_ring[sm_aud_tot[0] >> 10] = sm_aud_tot[1];   /* guest-timed snapshots */
+#endif
     if (d > aud_max) { aud_max = d; aud_max_period = p; }
 }
 
@@ -84,11 +120,13 @@ static int32_t prof_pct[7];
 volatile uint32_t sm_cy[SMC_N];
 static uint32_t cy_last[SMC_N];
 static int32_t cy_pct[SMC_N];
+static int32_t pf_pct[2];                                    /* code / data stall cycles in the callback, % of the time */
 /* the bottom line: helper metrics, BLUE turn steps through them (sm_turn) */
 enum { PG_AUDIO, PG_VOICES, PG_PLUGINS, PG_SYSTEM, PG_STAGES, PG_RAW, PG_BOOT, PG_BOOTR, PG_BOOTD, PG_BOOTS,
 #ifdef WDOG
        PG_H1, PG_H2, PG_H3, PG_H4, PG_H5,                    /* hang record (wdog.c): from the boot after a freeze */
 #endif
+       PG_PF,                                                 /* performance monitor: stall cycles (last: the page numbers above stay) */
        PG_N };
 /* stock audio stage timers (docs/32): 12 records x 0x2C at 0x01BA2618, run by Core_render_block; mapping checked
  * against the emulator profile: 0 whole block, 4 decimator + DC blocker, 7 tape, 9 master EQ, 11 output stage */
@@ -148,6 +186,7 @@ static void sample_fast(void)                                /* CPU, AUDIO, MIDI
     for (int i = 0; i < SMC_N; i++) { uint32_t c = sm_cy[i]; cy_pct[i] = pct(c - cy_last[i], wall); cy_last[i] = c; }
     for (int i = 0; i < ST_N; i++) { uint32_t c = STAGE_SUM(i); st_pct[i] = pct(c - st_last[i], wall); st_last[i] = c; }
     { extern volatile uint32_t tm_cyc; static uint32_t l; const uint32_t c = tm_cyc; fr_pct = pct(c - l, wall); l = c; }   /* free tape engine */
+    { uint32_t a0 = pf_busy[0], a1 = pf_busy[1]; pf_busy[0] = 0; pf_busy[1] = 0; pf_pct[0] = pct(a0, wall); pf_pct[1] = pct(a1, wall); }
     uint32_t busy = aud_busy, mx = aud_max, mp = aud_max_period;
     aud_busy = 0; aud_max = 0;
     v_pct[SM_DSP] = pct(busy, wall);
@@ -400,6 +439,12 @@ static void sm_update(void *scr, int dt)
             for (int i = o; i < o + 3 && i < n; i++) q = put_x(put_s(q, " "), c[i]);
         }
 #endif
+    } else if (sm_page == PG_PF) {                           /* "16/16 cb 45 code 12 data 6": the callback's stall cycles */
+        if (!sm_pf_live) q = put_s(q, "pf off");
+        else {
+            q = put_u(put_s(q, "cb "), (uint32_t)v_pct[SM_DSP]); q = put_u(put_s(q, " code "), (uint32_t)pf_pct[0]);
+            q = put_u(put_s(q, " data "), (uint32_t)pf_pct[1]);
+        }
     } else if (sm_page == PG_STAGES) {                       /* "5/6 blk 18 eq 6 out 7 dec 3 tp 0" (stock timers) */
 #ifdef L1SLOT
         q = put_s(q, !l1slot_ok ? "mx -- " : l1slot_on ? "mx l1 " : "mx sd ");   /* first (the line is long): red turn flips (docs/56) */

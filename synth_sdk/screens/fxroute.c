@@ -284,6 +284,8 @@ int op1_sc_source(int src, int16_t *out)
 typedef void (*fr_fx)(void *, int16_t *, int16_t *, const int16_t *);
 #define FR_ST(name, orig) \
     void fr_st_##name(void *self, int16_t *l, int16_t *r, const int16_t *p) { fr_route((fr_fx)(orig), self, l, r, p); }
-FR_ST(delay, 0x0197DC42) FR_ST(grid, 0x019AF83C) FR_ST(punch, 0x019E662C) FR_ST(phone, 0x01A1C25C)
+extern void coop_punch_render_st(void);                     /* dsp/coop/punch_fast.S: both channels in one pass (the stock
+                                                            * render when its switch is 0 or its checks fail) */
+FR_ST(delay, 0x0197DC42) FR_ST(grid, 0x019AF83C) FR_ST(punch, coop_punch_render_st) FR_ST(phone, 0x01A1C25C)
 FR_ST(spring, 0x01A32FFC) FR_ST(nitro, 0x019A684C) FR_ST(cwo, 0x019450FC)
 #endif

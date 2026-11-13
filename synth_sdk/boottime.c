@@ -17,6 +17,8 @@ static void l1slot_setup(void);
 #endif
 void bt_db_open(const char *root)                /* CALL @0x019F02E0 db2::open(root) */
 {
+    { extern void l1_sine_init(void); l1_sine_init(); }
+    { extern void sm_pf_boot(void); sm_pf_boot(); }        /* performance monitor: the callback's stall cycles (sysmon) */   /* R246's sine table into L1 first: the stock code reads it there */
 #ifdef WDOG
     { extern void wd_boot(void); wd_boot(); }    /* a hang record from before the watchdog reset (wdog.c) */
 #endif

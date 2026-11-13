@@ -2,7 +2,8 @@
  *   0xFF900820  R246's whole sine table (8192 x int16, 16 KB): op1_sin() (op1_plugin.h) reads it in one cycle
  *               (device, fmbell 6 voices: 12.8 % -> 5.6 % of the time). Its first 2,049 entries are the quarter
  *               kennel's op1_l1_sine_quarter() returns.
- *   0xFF904820  OP1_L1_SYNTH  8,192 B   a lease for the synth engine (kennel's API, op1_l1.h)
+ *   0xFF904820  32 B of zeros: the stock readers reach entries 8192 / 8193 (punch), which are 0 after the SDRAM table
+ *   0xFF904840  OP1_L1_SYNTH  8,192 B   a lease for the synth engine (kennel's API, op1_l1.h)
  *   0xFF907E00  OP1_L1_DRUM     512 B   L1 data B's top, which the LDR never loads
  *   OP1_L1_FX / OP1_L1_MASTER: no room left (their claims return 0: the plugin works on its SDRAM copy).
  * The lease logic is Hundekraft kennel 3.1.4's kn_l1.c (GPL-3.0-or-later with the OP-1 firmware permission, NOTICE),
@@ -23,26 +24,33 @@ const int16_t *op1_sine_q = FW_SINE;                   /* the firmware table unt
 static uint32_t host_synth[2048], host_drum[128];
 static uint32_t *const L1_AT[OP1_L1_PARTS] = { host_synth, 0, 0, host_drum };
 #else
-static uint32_t *const L1_AT[OP1_L1_PARTS] = { (uint32_t *)0xFF904820u, 0, 0, (uint32_t *)0xFF907E00u };
+static uint32_t *const L1_AT[OP1_L1_PARTS] = { (uint32_t *)0xFF904840u, 0, 0, (uint32_t *)0xFF907E00u };
 #endif
 static const uint32_t L1_CAP[OP1_L1_PARTS] = { 8192, 0, 0, 512 };
-_Static_assert(0xFF904820u + 8192 <= 0xFF906908u, "SYNTH partition inside the Lander range");
+_Static_assert(0xFF904840u + 8192 <= 0xFF906908u, "SYNTH partition inside the Lander range");
 
 static uint32_t l1_cb, l1_tick;
 static volatile uint32_t l1_busy;                      /* plugin calls running on another thread right now */
 static const void *l1_holder[OP1_L1_PARTS];
 static uint32_t l1_last[OP1_L1_PARTS], *l1_home[OP1_L1_PARTS], l1_words[OP1_L1_PARTS];
 
-void l1_begin(void)                                    /* audio callback start (sm_audio_cb) */
+void l1_sine_init(void)                                /* boot (boottime.c bt_db_open), before anything reads the
+                                                         * table: the stock code reads the L1 copy (make_firmware.py
+                                                         * IMM_PATCHES l1_sine, docs/84) */
 {
-    l1_cb = 1;
 #ifndef OP1_HOST
     if (op1_sine_q != FW_SINE) return;
     volatile uint32_t *d = (volatile uint32_t *)L1_SINE;
     const uint32_t *s = (const uint32_t *)FW_SINE;
     for (int i = 0; i < 4096; i++) d[i] = s[i];
+    for (int i = 4096; i < 4104; i++) d[i] = 0;          /* as after the SDRAM table (entries 8192..) */
     op1_sine_q = (const int16_t *)L1_SINE;
 #endif
+}
+void l1_begin(void)                                    /* audio callback start (sm_audio_cb) */
+{
+    l1_cb = 1;
+    l1_sine_init();                                    /* (done at boot already) */
 }
 void l1_end(void) { l1_cb = 0; l1_tick++; }            /* audio callback end */
 
