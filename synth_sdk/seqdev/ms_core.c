@@ -39,17 +39,16 @@ void ms_init(ms_t *s, const ms_env *env)
     for (int t = 0; t < MS_TRACKS; t++) { s->h.ch[t] = (uint8_t)t; for (int p = 0; p < MS_PAGES; p++) s->h.first[t][p] = MS_NONE; }
     for (int i = 0; i < MS_RAM; i++) s->ram_slot[i] = MS_NONE;
     for (int i = 0; i < MS_SLOTS; i++) s->where[i] = 0xFF;
-    s->prev = -1; s->clip_len = -1;
+    s->prev = -1; s->clip_len = -1; s->scan = -1;
     for (int c = 0; c < 128; c++) s->cc_last[c] = -MS_CC_THIN;
 }
 
-int ms_load(ms_t *s)
+static void scan_start(ms_t *s) { clr(s->seen, (int)sizeof s->seen); s->scan = 0; s->scan_sl = MS_NONE; s->scan_gen = s->gen; }
+static int head_check(ms_head *h)           /* 0 valid (then sanitized) */
 {
-    ms_head *h = &s->h;
-    if (s->env->read_head(h, (int)sizeof *h)) goto empty;
     uint32_t c = h->crc;
     h->crc = 0;
-    if (h->magic != MS_HMAGIC || h->ver != 1 || ms_crc(h, (int)sizeof *h) != c) goto empty;
+    if (h->magic != MS_HMAGIC || h->ver != 1 || ms_crc(h, (int)sizeof *h) != c) return 1;
     h->crc = c;
     for (int t = 0; t < MS_TRACKS; t++) {
         if (h->dest[t] > MS_DEST_MIDI) h->dest[t] = MS_DEST_INSTR;
@@ -58,22 +57,29 @@ int ms_load(ms_t *s)
         for (int p = 0; p < MS_PAGES; p++) if (h->first[t][p] != MS_NONE && h->first[t][p] >= MS_SLOTS) h->first[t][p] = MS_NONE;
     }
     return 0;
-empty:;
+}
+int ms_load(ms_t *s)
+{
+    int r = s->env->read_head(&s->h, (int)sizeof s->h);
+    if (!r && !head_check(&s->h)) { scan_start(s); return 0; }   /* (the scan frees slots leaked by damage) */
     const ms_env *e = s->env;
     ms_init(s, e);
+    if (r < 0) { s->ro = 1; return -1; }     /* a read error is not damage: write nothing until ms_service reads it */
     return 1;
 }
 
 /* ---- slots and RAM buffers ---- */
 static int slot_alloc(ms_t *s)
 {
+    if (s->ro) return -1;                   /* header unread: the used map is unknown */
+    s->gen++;
     for (int i = 0; i < MS_SLOTS; i++)
         if (!(s->h.used[i >> 3] & (1 << (i & 7)))) { s->h.used[i >> 3] |= (uint8_t)(1 << (i & 7)); s->head_dirty = 1; return i; }
     return -1;
 }
 static void slot_free(ms_t *s, int slot)
 {
-    s->h.used[slot >> 3] &= (uint8_t)~(1 << (slot & 7)); s->head_dirty = 1;
+    s->h.used[slot >> 3] &= (uint8_t)~(1 << (slot & 7)); s->head_dirty = 1; s->gen++;
     int b = s->where[slot];
     if (b != 0xFF) { s->ram_slot[b] = MS_NONE; s->ram_dirty[b] = 0; s->where[slot] = 0xFF; }
 }
@@ -271,12 +277,14 @@ static int load_slot(ms_t *s, int slot, int track, int page)   /* resident (read
     int b = buf_free(s);
     if (b < 0) return -1;
     ms_slot *x = &s->ram[b];
-    if (s->env->read_slot(slot, x) || x->magic != MS_MAGIC || x->slot != slot || x->n > MS_SLOT_EV ||
-        slot_crc(x) != x->crc) {
+    int r = s->env->read_slot(slot, x);
+    if (r < 0) return -1;                       /* a read error is not damage: nothing written, the next prefetch retries */
+    if (r || x->magic != MS_MAGIC || x->slot != slot || x->n > MS_SLOT_EV || slot_crc(x) != x->crc) {
         clr(x, (int)sizeof *x);                  /* damaged: an empty slot, the rest of the chain is lost */
         x->magic = MS_MAGIC; x->slot = (uint16_t)slot; x->track = (uint8_t)track; x->page = (uint16_t)page;
         x->next = MS_NONE; x->ver = 1;
         s->ram_dirty[b] = 1;
+        scan_start(s);                           /* (its slots: free again) */
     } else if (x->track != track || x->page != page) return 1;   /* another chain's slot */
     else s->ram_dirty[b] = 0;
     if (x->next != MS_NONE && x->next >= MS_SLOTS) x->next = MS_NONE;
@@ -326,8 +334,60 @@ int ms_load_range(ms_t *s, int track, int pa, int pb)   /* make pages [pa, pb] o
     }
     return ok;
 }
+/* rebuild the used map from the chains (after a load, after damage): slots no chain reaches are freed. A step per I/O
+ * of budget, tape stopped; any slot allocated or freed meanwhile restarts it, a read error retries the same slot */
+static void scan_step(ms_t *s, int budget)
+{
+    static ms_slot tmp;
+    while (s->scan >= 0 && budget > 0) {
+        if (s->scan_gen != s->gen) scan_start(s);
+        if (s->scan >= MS_TRACKS * MS_PAGES) {
+            for (int b = 0; b < MS_RAM; b++)                 /* (resident slots stay: a buffer holds them) */
+                if (s->ram_slot[b] != MS_NONE) s->seen[s->ram_slot[b] >> 3] |= (uint8_t)(1 << (s->ram_slot[b] & 7));
+            uint32_t m = s->env->irq_off();
+            if (s->scan_gen == s->gen) {                      /* (else: restarts) */
+                for (int i = 0; i < MS_SLOTS / 8; i++)
+                    if (s->h.used[i] & ~s->seen[i]) { s->h.used[i] &= s->seen[i]; s->head_dirty = 1; }
+                s->scan = -1;
+            }
+            s->env->irq_on(m);
+            continue;
+        }
+        int t = s->scan / MS_PAGES, p = s->scan % MS_PAGES;
+        int sl = s->scan_sl == MS_NONE ? s->h.first[t][p] : s->scan_sl;
+        const ms_slot *x = 0;
+        if (sl != MS_NONE && sl < MS_SLOTS && (s->h.used[sl >> 3] >> (sl & 7) & 1) && !(s->seen[sl >> 3] >> (sl & 7) & 1)) {
+            if (s->where[sl] != 0xFF) x = &s->ram[s->where[sl]];
+            else {
+                int r = s->env->read_slot(sl, &tmp);
+                budget--;
+                if (r < 0) return;
+                x = &tmp;
+                if (r || tmp.magic != MS_MAGIC || tmp.slot != sl || tmp.n > MS_SLOT_EV || slot_crc(&tmp) != tmp.crc) {
+                    s->seen[sl >> 3] |= (uint8_t)(1 << (sl & 7));   /* damaged: kept (loads as an empty slot), the chain ends */
+                    x = 0;
+                }
+            }
+            if (x && (x->track != t || x->page != p)) x = 0;  /* another chain's: counted there */
+        }   /* (a free or seen slot: stale link, cycle; the chain ends) */
+        if (x) { s->seen[sl >> 3] |= (uint8_t)(1 << (sl & 7)); s->scan_sl = x->next; }
+        if (!x || x->next == MS_NONE) { s->scan++; s->scan_sl = MS_NONE; }
+    }
+}
 void ms_service(ms_t *s, int budget)
 {
+    if (s->ro) {                                             /* header unread: retry, write nothing meanwhile */
+        static ms_head tmp;
+        int r = s->env->read_head(&tmp, (int)sizeof tmp);
+        if (r < 0) return;
+        if (!r && !head_check(&tmp)) {                       /* (else none or damaged: the empty song stays) */
+            uint32_t m = s->env->irq_off();
+            cpy(&s->h, &tmp, (int)sizeof tmp);
+            s->env->irq_on(m);
+            scan_start(s);
+        }
+        s->ro = 0;
+    }
     int32_t pos = s->env->tape_pos();
     int page = pos < 0 ? 0 : (int)(pos >> MS_PAGE_BITS);
     int32_t lin, lout;                                       /* loop on: its start pages stay resident (the wrap) */
@@ -360,6 +420,7 @@ void ms_service(ms_t *s, int budget)
         ms_load_range(s, t, page - 1, page + 3);
         if (lp >= 0) ms_load_range(s, t, lp, lp + 1);        /* + the loop start */
     }
+    if (s->prev < 0 && !dirty_left) scan_step(s, budget);
 }
 
 /* ---- editing (main loop) ---- */
