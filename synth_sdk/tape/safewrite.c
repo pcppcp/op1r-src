@@ -13,6 +13,8 @@ extern int host_yaffs_write(int fd, const void *buf, unsigned n);
 extern int host_yaffs_lseek(int fd, int off, int whence);
 extern int host_yaffs_read(int fd, void *buf, unsigned n);
 extern uint8_t *host_clip_head; extern int host_tape_fd, host_track_base[4], host_tape_mode; extern uint32_t host_now;
+int host_clipq_busy;                                               /* host test: a clipboard job queued */
+#define CLIPQ_BUSY() host_clipq_busy
 #define Y_WRITE host_yaffs_write
 #define Y_LSEEK host_yaffs_lseek
 #define Y_READ  host_yaffs_read
@@ -34,6 +36,7 @@ extern uint8_t *host_clip_data(const uint8_t *c), *host_clip_next(const uint8_t 
 #define TAPE_MODE   (*(volatile int32_t *)0xFF802960)             /* 1 = recording (docs/29) */
 #define CLIP_DATA(c) (*(uint8_t **)((c) + 0x10))
 #define CLIP_NEXT(c) (*(uint8_t **)((c) + 0x14))
+#define CLIPQ_BUSY() (*(volatile int32_t *)0x01AA7330 != *(volatile int32_t *)0x01AA7334)   /* clipboard queue: head != tail */
 static inline uint32_t NOW(void) { uint32_t c; __asm__ volatile ("%0 = CYCLES;" : "=d"(c)); return c; }
 #endif
 #ifdef OP1_HOST
@@ -88,7 +91,7 @@ int tape_safe_write(int fd, const void *src, unsigned n)
  * OP-1 restarted. (op1r-src PR #45 by tencur; here also for the incremental saves.) */
 volatile uint32_t tape_save_failures;
 
-static struct { const uint8_t *clip; uint32_t t; uint8_t fails; } ts_saved[TS_N];
+static struct { const uint8_t *clip; uint32_t t; uint8_t fails, job; } ts_saved[TS_N];   /* job: saved in this job flush */
 #ifdef TAPE_IO
 /* OP1R_TAPEIO=1 (docs/82): time of each 64 KB track read / write (lseek + call), us: reads n, sum, max, writes n,
  * sum, max (resource monitor page 9) */
@@ -110,7 +113,7 @@ static int ts_find(const uint8_t *c)
     }
     ts_saved[free_i].clip = c;                                     /* 24 cache entries: a free slot always exists */
     ts_saved[free_i].t = NOW() - TS_HOLD;
-    ts_saved[free_i].fails = 0;
+    ts_saved[free_i].fails = 0; ts_saved[free_i].job = 0;
     return free_i;
 }
 
@@ -150,14 +153,10 @@ static void load_clip(uint8_t *c, int idx)
     if (!c[1]) c[0] = *(volatile int16_t *)(c + 6) == idx;      /* invalidated meanwhile: stays unloaded */
 }
 
-int tape_service(int arg)
+static uint8_t *sv_c;                                              /* the incremental save in progress (ts_pass) */
+
+static int ts_pass(int arg)
 {
-#if defined(WDOG) && !defined(OP1_HOST)
-    if (arg) { extern void wd_off(void); wd_off(); }        /* power-off flush: the hang detector off (wdog.c) */
-#endif
-#ifndef OP1_HOST
-    if (!arg) { extern void tfs_poll(void); tfs_poll(); }     /* free tape machine screen: setting, scrubbing (every pass) */
-#endif
     /* incremental save (main loop): one 4 KB piece per pass instead of a whole 64 KB track (38 .. 136 ms on the device,
      * docs/82): keys / UI stay responsive while recording; clip loads go first (both caches). The dirty flag is cleared at the start
      * and eviction (0x01A53E40) drops a dirty flag unsaved, so the rest is written in one go when the clip is deep in
@@ -165,10 +164,13 @@ int tape_service(int arg)
      * until load_clip reads the new one, and only tape_service loads), and in the power-off flush (arg != 0). A buffer
      * reused already cannot be saved: counted as a failed save. A failed piece skips the rest of its track; at the end
      * the failed tracks are dirty again (save_done). */
-    static uint8_t *sv_c; static const uint8_t *sv_data; static int sv_idx, sv_k, sv_off, sv_s; static uint16_t sv_mask, sv_failed;
+    static const uint8_t *sv_data; static int sv_idx, sv_k, sv_off, sv_s; static uint16_t sv_mask, sv_failed;
     if (sv_c) {
         const int moved = *(volatile int16_t *)(sv_c + 6) != sv_idx;
         if (CLIP_DATA(sv_c) != sv_data || (moved && sv_c[0])) { tape_save_failures++; sv_c = 0; }
+        else if (!moved && !sv_c[0]) { tape_save_failures++; sv_c = 0; }   /* invalidated (0x01A54078 / 0x01A540C0): a
+                                                                     * clipboard job got past tape_service's check below and
+                                                                     * rewrote the file; the old buffer's rest would undo it */
         else {
             int p = 0, deep = 0;                                    /* deep: ours, or a backlog behind it */
             for (const uint8_t *c = CLIP_HEAD; c; c = CLIP_NEXT(c), p++) if (p >= TS_DEEP && (c == sv_c || c[2])) deep = 1;
@@ -201,6 +203,7 @@ int tape_service(int arg)
             if (!arg && NOW() - ts_saved[i].t < TS_HOLD &&
                 (ts_saved[i].fails || (TAPE_MODE == 1 && e[0] && pos < TS_DEEP))) continue;   /* held / backing off */
             if (arg && ts_saved[i].fails >= TS_FLUSH_TRIES) continue;   /* power-off: given up on this clip */
+            if (arg == 2 && ts_saved[i].job) continue;              /* job flush: once (recording re-dirties the head's clip) */
             if (!c || pos >= TS_DEEP) { c = e; cpos = pos; s = i; }   /* the first one, but the deepest first: a
                                                                   * backlog is saved before eviction takes it */
             continue;
@@ -212,7 +215,7 @@ int tape_service(int arg)
     }
     if (c) {
         const int idx = *(volatile int16_t *)(c + 6);
-        ts_saved[s].t = NOW();
+        ts_saved[s].t = NOW(); ts_saved[s].job = 1;
         volatile uint16_t *mask = (volatile uint16_t *)(c + 4);
         const uint32_t m = irq_off();                              /* snapshot: the audio interrupt sets bits while recording */
         const uint16_t bits = (uint16_t)(*mask & 0xF);
@@ -235,4 +238,27 @@ int tape_service(int arg)
     if (!arg) { extern int tm_service(void); return tm_service(); }   /* the free tape machine's chunks (tape/tm.c) */
 #endif
     return 0;
+}
+
+int tape_service(int arg)
+{
+#if defined(WDOG) && !defined(OP1_HOST)
+    if (arg) { extern void wd_off(void); wd_off(); }        /* power-off flush: the hang detector off (wdog.c) */
+#endif
+#ifndef OP1_HOST
+    if (!arg) { extern void tfs_poll(void); tfs_poll(); }     /* free tape machine screen: setting, scrubbing (every pass) */
+#endif
+    int r = ts_pass(arg);
+    /* R246's clipboard jobs (lift, drop, erase: audio_clipboard::service 0x0191B560, called right after this in the
+     * main loop) read and write tape_c.raw directly, then reload only the clean clips (0x01A54078 / 0x01A540C0, mask 0).
+     * A clip saved incrementally counts as clean (its bits were cleared at the save start) and a dirty one is kept:
+     * either is written over the job's result later, and a lift misses what wasn't saved yet. Stock saved a whole
+     * clip per pass, so the file was up to date by then. A job queued (key thread) before this check: the save in
+     * progress and every dirty clip are saved whole first (arg 2: as the power-off flush, each clip once). Checked
+     * last, so the gap to the job is a few instructions. */
+    if (!arg && CLIPQ_BUSY()) {
+        for (int i = 0; i < TS_N; i++) ts_saved[i].job = 0;
+        while (ts_pass(2)) r = 1;
+    }
+    return r;
 }
