@@ -12,8 +12,8 @@ static int find(const char *k)
     for (int i = 0; i < ntab; i++) { const char *a = tab[i].k, *b = k; while (*a && *a == *b) a++, b++; if (!*a && !*b) return i; }
     return -1;
 }
-int op1r_setting_get(const char *key, int dflt) { int i = find(key); return i < 0 ? dflt : tab[i].v; }
-void op1r_setting_put(const char *key, int val)
+static int db_get(const char *key, int dflt) { int i = find(key); return i < 0 ? dflt : tab[i].v; }
+static void db_put(const char *key, int val)
 {
     int i = find(key);
     if (i < 0) { if (ntab == 32) return; i = ntab++; tab[i].k = key; }
@@ -37,7 +37,7 @@ static char *put_i(char *e, int v)
     return e;
 }
 
-int op1r_setting_get(const char *key, int dflt)
+static int db_get(const char *key, int dflt)
 {
     static char q[96];
     *put_s(put_s(put_s(q, "SELECT val FROM op1rsettings WHERE key='"), key), "'") = 0;
@@ -53,7 +53,7 @@ int op1r_setting_get(const char *key, int dflt)
     return neg ? -v : v;
 }
 
-void op1r_setting_put(const char *key, int val)
+static void db_put(const char *key, int val)
 {
     static char q[112];
     char *e = put_s(q, "INSERT OR REPLACE INTO op1rsettings VALUES ('");
@@ -64,3 +64,6 @@ void op1r_setting_put(const char *key, int val)
     DB_EXEC(db, q);
 }
 #endif
+/* safe mode (safeboot.c): the defaults, and no table is created or written (a full flash asserts on it) */
+int op1r_setting_get(const char *key, int dflt) { return op1r_safe_boot ? dflt : db_get(key, dflt); }
+void op1r_setting_put(const char *key, int val) { if (!op1r_safe_boot) db_put(key, val); }

@@ -60,6 +60,31 @@ Some code runs from the firmware's encrypted part. Those few patches are precomp
 and target a fixed jump table at the start of the code (`hook.S`, `.l1vec`). So plugins and most other changes
 build without them changing. Changing the L1 patch lists themselves needs a maintainer.
 
+## Safe mode (when op1r stops at boot)
+
+If the OP-1 stops at every boot (an error screen, or it hangs before the UI) and the cause is something op1r keeps
+on the OP-1, start it in safe mode: switch it off, hold **help**, switch it on, and keep holding until the UI
+shows. Hold help only: with any other key held the OP-1 boots normally. Every page then shows `SAFE MODE` at the
+top right, until the OP-1 is switched off.
+
+In safe mode:
+- no plugin files are loaded (synths and effects from `plugins/`, euclid / dots / oracle / peal / chord / grids,
+  drum+, sampler+, tools). Sounds that use one play as they do when the plugin is missing;
+- op1r's own settings are not read (every op1r option is at its default) and nothing is saved to them;
+- tape markers and the MIDI sequencer's recordings are not loaded, and changes to them are not saved.
+
+Nothing is deleted. Fix the cause, then switch off and on as usual: everything is back. For example remove a plugin
+that crashes (web patcher or `op1push.py`, over USB as usual), or free some space when the flash is full (delete tape
+tracks or samples, or copy them off in disk mode).
+
+**Hold help + metronome** at power-on to also reset op1r's settings to their defaults, for good. The page note then
+reads `SAFE MODE RESET`. This clears the settings page, USB out, FX2 routing, scale, MIDI clock and CC
+options, the master LFO, input gain and the free tape machine's heads and loops. Stock R246 settings, sounds, tape,
+markers and the MIDI sequencer's recordings are kept.
+
+Safe mode doesn't help when the boot stops on a sound itself (R246 checks every sound at boot), or on an older
+release, which has no safe mode.
+
 ## License
 
 GPL-3.0-or-later with an additional permission to combine it with the OP-1 firmware: see [LICENSE](LICENSE) and

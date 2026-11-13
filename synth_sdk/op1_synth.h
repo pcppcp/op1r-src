@@ -25,6 +25,15 @@ static inline int op1_db_write(void *db2_handle, const char *sql)
 }
 #endif
 
+/* safe mode (safeboot.c): set at the start of the boot, never changed after. Nonzero: no plugin files, op1r's own data
+ * (settings, markers, MIDI sequencer file) neither read nor written this boot */
+enum { SB_ON = 1, SB_RESET = 2 };                                  /* SB_RESET: op1rsettings cleared at this boot */
+#ifdef OP1_HOST
+__attribute__((weak)) volatile uint8_t op1r_safe_boot;            /* host tests set it */
+#else
+extern volatile uint8_t op1r_safe_boot;
+#endif
+
 #ifndef OP1_HOST
 /* firmware text (stock font, docs/18): object of OP1_TEXT_SIZE bytes, built once (GUI thread, after boot);
  * x in Q10, y in px, size 12 = the battery page's text (template: BatteryScreen 0x0193D248 / draw 0x0193CFD8) */

@@ -33,9 +33,11 @@ void bt_db_open(const char *root)                /* CALL @0x019F02E0 db2::open(r
 #endif
     { extern void out_stage_selftest(void); out_stage_selftest(); }   /* docs/81: the L1 output stage vs the model */
     { extern void eq_stage_selftest(void); eq_stage_selftest(); }     /* docs/81: the L1 master EQ vs the model */
+    { extern void sb_boot(void); sb_boot(); }    /* safe mode (safeboot.c): keys held at power-on, before any op1r data */
     uint32_t c = op1_cycles();
     ((void (*)(const char *))0x0196F912)(root);
     bt_split[0] = MS(c);
+    { extern void sb_after_db(void); sb_after_db(); }
 }
 void bt_fat_init(const char *root)               /* CALL @0x019F02F4 fat_manager::init(root) */
 {
