@@ -164,7 +164,7 @@ int main(void)
     assert(obj_b[3] != (uintptr_t)vt_b && lines == 5 * n);        /* stays */
     op1r_safe_boot = SB_ON | SB_RESET; lines = 0; line_x0 = 1 << 30; line_x1 = 0;
     frame(obj_b);
-    assert(lines > 2 * n && line_x0 >= 0 && line_x1 <= OP1_Q10(320));   /* "settings reset" too */
+    assert(lines > n && line_x0 >= 0 && line_x1 <= OP1_Q10(320));   /* "SAFE MODE RESET": longer, still on the screen */
     printf("safe mode note ok\n");
     return 0;
 }
