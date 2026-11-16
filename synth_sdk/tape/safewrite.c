@@ -147,7 +147,9 @@ static void load_clip(uint8_t *c, int idx)
 #ifndef OP1_HOST
     { extern void tm_mask_cache(int, uint8_t *); tm_mask_cache(idx, CLIP_DATA(c)); }   /* only clips' audio (tm.c) */
 #endif
+    const uint32_t m = irq_off();                                /* eviction (audio ISR) reassigns the entry: check and set as one */
     if (!c[1]) c[0] = *(volatile int16_t *)(c + 6) == idx;      /* invalidated meanwhile: stays unloaded */
+    irq_on(m);
 }
 
 int tape_service(int arg)
