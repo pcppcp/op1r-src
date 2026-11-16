@@ -200,7 +200,7 @@ static const char *const ql_div_name[QL_DIVS] = { "4/1", "2/1", "1/1", "1/2", "1
 static const uint8_t ql_div_shift[QL_DIVS] = { 7, 6, 5, 4, 3, 3, 2, 2, 1, 1, 0 };
 
 /* phase increment per audio block (64 frames, 128 voice samples): 0.05 Hz * 400^(x/32768) */
-static uint32_t ql_inc(int32_t x)
+uint32_t ql_inc(int32_t x)                                       /* (also the slot machine's LFOs, screens/tfscreen.c) */
 {
     if (x < 0) x = 0;
     if (x > 32767) x = 32767;
@@ -655,14 +655,14 @@ static void ql_screen_init(void *scr) { (void)scr; }            /* no animated S
 #define QT_SYNC_X 172
 static char *ql_num(char *p, int v) { if (v >= 10) p = ql_num(p, v / 10); *p++ = (char)('0' + v % 10); *p = 0; return p; }
 /* Hz of a free frequency word as text: "0.05" .. "9.99", "10.0" .. "20.0" */
-static void ql_hz_text(char *t, uint32_t inc)
+void ql_hz_text(char *t, uint32_t inc)
 {
     uint32_t c = (uint32_t)(((uint64_t)inc * 4410000u) >> 38);   /* Hz * 100 = inc * 44100 * 100 / (64 * 2^32) */
     if (c >= 1000) { c /= 10; t = ql_num(t, c / 10); *t++ = '.'; ql_num(t, c % 10); }
     else { t = ql_num(t, c / 100); *t++ = '.'; *t++ = (char)('0' + c / 10 % 10); *t++ = (char)('0' + c % 10); *t = 0; }
 }
 /* waveform glyph: 24 x 12 px, (x, y) = left end of the centre line, Q10 */
-static void ql_wave_glyph(void *r, int wave, int32_t x, int32_t y, const uint8_t *c)
+void ql_wave_glyph(void *r, int wave, int32_t x, int32_t y, const uint8_t *c)   /* (also the slot LFOs) */
 {
     static const int8_t sh[4] = { 4, -3, 6, -5 };                  /* sample & hold: fixed steps */
     static const int8_t lor[2][25] = {                               /* a real Lorenz x / z stretch (docs/62), px */

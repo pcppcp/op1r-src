@@ -65,6 +65,8 @@ static const char *val(int row) { return ((txt_t *)txt_mem[2 * row + 1])->s; }
 void in_clock(uint32_t t) { (void)t; } void in_end(void) {}   /* input engines (input/in_host.c): none on the host */
 volatile uint32_t op1r_boot_ms[2] = { 1140, 420 };
 volatile uint32_t tm_cyc;                               /* tape/tm.c (free tape engine, page 5) */
+volatile uint8_t tm_sl_paths[3];                         /* tape/tm.c (ELSE-MARIE paths, perf page) */
+volatile uint32_t tm_sl_pcyc[3];
 const int32_t *volatile pc_in_b, *volatile pc_in_c;                 /* midi/pclk.c */
 volatile uint32_t l1rd[4], l1rt[4], os_selftest[4], eq_selftest[4];                 /* boottime.c: L1 diagnostic, runtime patches, output stage self-test (0: off) */
 const unsigned l1_pokes_n = 9;

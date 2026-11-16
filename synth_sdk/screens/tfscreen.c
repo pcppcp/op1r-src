@@ -79,7 +79,9 @@ static void fmt_speed(char *q, int32_t sp)                       /* "1/2x", "1.3
 }
 
 /* stock-font texts: built once, redrawn; set only when the string changes */
-enum { T_NUM, T_NUMD, T_TIME, T_SPEED, T_REV, T_DIAG, T_C1, T_C2, T_D0, T_N = T_D0 + 5 };   /* T_TIME: minutes; T_D0..: s s ms ms ms */
+enum { T_NUM, T_NUMD, T_TIME, T_SPEED, T_REV, T_DIAG, T_C1, T_C2, T_D0, S_TW = T_D0 + 5, S_TR = S_TW + 8, S_LEN = S_TR + 8,
+       S_CHL, S_CH0, S_NW = S_CH0 + 4, S_NG = S_NW + 12, S_EA = S_NG + 12, S_ED, S_ES, S_ER, S_QL, S_PL0, S_PL1, S_PL2,
+       S_PV0, S_PV1, S_PV2, S_PL3, S_PV3, S_SY, S_KP, S_KI, S_BW, S_BR, S_PNL, S_PNV, S_HL0, S_HL1, S_HL2, S_HL3, S_HPN, S_LH, S_LHS, S_LNW, S_LNG = S_LNW + 4, S_LC0 = S_LNG + 4, T_N = S_LC0 + 16 };   /* S_: the slot machine */   /* T_TIME: minutes; T_D0..: s s ms ms ms */
 static uint32_t tx[T_N][OP1_TEXT_SIZE / 4];
 static char shown[T_N][16];
 static uint8_t made;
@@ -106,10 +108,523 @@ static void make(void)
       for (int i = 0; i < 5; i++) TXT_CTOR(tx[T_D0 + i], OP1_Q10(dx[i]) + 512, 4, 20, c_white, 1); }
     TXT_CTOR(tx[T_SPEED], OP1_Q10(300), 4, 12, c_white, 2);   /* left of the meter */
     TXT_CTOR(tx[T_REV], OP1_Q10(315), 18, 12, c_red, 2);
+    {   /* the slot machine: mm:ss:cc in cells (digits 13 px, colons 7 px; 114 .. 206), white and red */
+        static const int16_t cx[8] = { 120, 133, 143, 153, 166, 176, 186, 199 };
+        for (int i = 0; i < 8; i++) { TXT_CTOR(tx[S_TW + i], OP1_Q10(cx[i]) + 512, 4, 20, c_white, 1);
+                                      TXT_CTOR(tx[S_TR + i], OP1_Q10(cx[i]) + 512, 4, 20, c_red, 1); }
+        TXT_CTOR(tx[S_LEN], OP1_Q10(160), 31, 12, c_grey, 1);
+        TXT_CTOR(tx[S_CHL], OP1_Q10(252), 4, 12, c_grey, 0);
+        static const uint8_t *const cc[4] = { c_blue, c_green, c_white, c_red };
+        for (int i = 0; i < 4; i++) TXT_CTOR(tx[S_CH0 + i], OP1_Q10(270), 4, 12, cc[i], 0);
+        for (int k = 0; k < 12; k++) {                           /* slot numbers, right-aligned left of their bars */
+            const int32_t x = OP1_Q10(10 + (k % 3) * 98 + 12); const int y = 54 + (k / 3) * 22 - 7;
+            TXT_CTOR(tx[S_NW + k], x, y, 12, c_white, 2); TXT_CTOR(tx[S_NG + k], x, y, 12, c_grey, 2);
+        }
+        static const int16_t ex[4] = { 45, 120, 195, 270 };
+        for (int i = 0; i < 4; i++) TXT_CTOR(tx[S_EA + i], OP1_Q10(ex[i]), 118, 12, cc[i], 1);
+        TXT_CTOR(tx[S_QL], OP1_Q10(294), 31, 12, c_white, 2);
+        static const int16_t px[4] = { 40, 112, 184, 256 };
+        for (int i = 0; i < 3; i++) { TXT_CTOR(tx[S_PL0 + i], OP1_Q10(px[i]), 62, 12, c_grey, 1);
+                                      TXT_CTOR(tx[S_PV0 + i], OP1_Q10(px[i]), 80, 14, cc[i], 1); }
+        TXT_CTOR(tx[S_PL3], OP1_Q10(px[3]), 62, 12, c_grey, 1); TXT_CTOR(tx[S_PV3], OP1_Q10(px[3]), 80, 14, c_red, 1);
+        TXT_CTOR(tx[S_SY], OP1_Q10(4), 31, 12, c_white, 0);
+        TXT_CTOR(tx[S_KP], OP1_Q10(286), 4, 12, c_red, 0);   /* right of the channel */
+        TXT_CTOR(tx[S_PNL], OP1_Q10(40), 100, 12, c_grey, 1); TXT_CTOR(tx[S_HPN], OP1_Q10(40), 100, 12, c_white, 1);
+        for (int i = 0; i < 4; i++) TXT_CTOR(tx[S_HL0 + i], OP1_Q10(px[i]), 62, 12, c_white, 1);
+        TXT_CTOR(tx[S_PNV], OP1_Q10(40), 116, 14, c_blue, 1);
+        TXT_CTOR(tx[S_LH], OP1_Q10(4), 40, 12, c_grey, 0); TXT_CTOR(tx[S_LHS], OP1_Q10(4), 40, 12, c_grey, 0);
+        for (int i = 0; i < 4; i++) {                            /* T4 rows: number, then blue / green / white / red columns */
+            const int y = 56 + i * 20 - 7;
+            TXT_CTOR(tx[S_LNW + i], OP1_Q10(14), y, 12, c_white, 1); TXT_CTOR(tx[S_LNG + i], OP1_Q10(14), y, 12, c_grey, 1);
+            static const int16_t lx[4] = { 70, 134, 196, 248 };
+            for (int c = 0; c < 4; c++) TXT_CTOR(tx[S_LC0 + i * 4 + c], OP1_Q10(lx[c]), y, 12, cc[c], 1);
+        }
+        TXT_CTOR(tx[S_BW], OP1_Q10(160), 4, 20, c_white, 1); TXT_CTOR(tx[S_BR], OP1_Q10(160), 4, 20, c_red, 1);
+    }
 #ifdef TF_DIAG
     TXT_CTOR(tx[T_DIAG], OP1_Q10(4), 92, 12, c_grey, 0);
 #endif
     made = 1;
+}
+
+/* the input meter + record level at the right edge, as stock (STEFAN and the slot machine; red encoder = level) */
+static void in_meter(void *r, int32_t y0, int32_t y1)
+{
+    const int32_t x = OP1_Q10(310), hgt = y1 - y0;
+    ln(r, x, y0, x, y1, 0x500, c_dim);                           /* the scale dark, the signal red, the level a red dot */
+    /* as stock: a dB scale (R246's getter: log, clamped to -24 dB); here -24 .. 0 dB over the height */
+    int32_t pk = IN_PEAK < 0 ? -IN_PEAK : IN_PEAK, db8 = -24 * 256;               /* dB, Q8 */
+    if (pk > 0) {                                                /* 20 log10(pk / 32768) = 6.0206 (log2 pk - 15) */
+        int e = 0; while ((pk >> e) > 1) e++;
+        const int32_t fr = ((pk << 8) >> e) - 256;                /* the mantissa above 1, Q8 */
+        const int32_t l2 = (e - 15) * 256 + (fr * (362 - (fr * 106 >> 8)) >> 8);   /* log2(1 + x) ~ x (1.414 - 0.414 x) */
+        db8 = l2 * 1541 >> 8;                                    /* x 6.0206 */
+        if (db8 < -24 * 256) db8 = -24 * 256;
+    }
+    const int32_t py = y1 - (int32_t)((int64_t)hgt * (db8 + 24 * 256) / (24 * 256));
+    if (py < y1) ln(r, x, py, x, y1, 0xA00, c_red);
+    const int32_t ly = y1 - (int32_t)((int64_t)hgt * (REC_LEVEL < 0 ? 0 : REC_LEVEL) >> 15);
+    static const int8_t hw[7] = { 2, 3, 4, 4, 4, 3, 2 };         /* the dot: stacked lines */
+    for (int k = 0; k < 7; k++) ln(r, x - hw[k] * OP1_Q10(1), ly + (k - 3) * OP1_Q10(1), x + hw[k] * OP1_Q10(1), ly + (k - 3) * OP1_Q10(1), 0x480, c_red);
+}
+
+/* ---- the slot machine (docs/85, tm_on == 2): keys, recording from the main loop, the page ---- */
+#include "../tape/slots.h"
+static uint8_t sl_sel;                                           /* the selected slot */
+static uint8_t sl_envp;                                          /* the page: 0 slots, 1 envelope (T2), 2 play params (T3) */
+static volatile uint8_t sl_arm, sl_tape;                         /* + the tape key held (+ PLAY / STOP: all slots) */
+static uint8_t sl_perf, sl_perf_saved = 0xFF;                    /* keyboard: 0 input (notes), 1 perform (slots); red push */                                  /* REC held: a keyboard key starts the recording */
+static volatile int8_t sl_want = -1;                             /* a record start asked for (the slot) */
+static volatile uint8_t sl_stop_req, sl_dirty;
+static uint32_t sl_t0, sl_dirty_t;
+static int32_t sl_clip_bpm, sl_clip_len;
+static uint8_t sl_lsel;
+static void sl_go(int s, int on, int synced);
+static volatile int8_t sl_play_after = -1;                       /* PLAY during a take: this slot plays when it ends */                                          /* T4: the selected LFO (encoder pushes) */
+static int32_t sl_lfo_saved[SL_N][4];
+#define SL_WC 36                                                 /* saved waveform: 36 columns over the length (9 words of 4 bytes) */
+static int32_t sl_wv_saved[SL_N][SL_WC / 4];
+static uint32_t sl_wv_t;
+static void sl_wv_pack(int s, int32_t *w)                        /* the slot's peaks -> 36 columns, 4 per word */
+{
+    const int32_t len = tm_sl[s].len, nb = len > 0 ? ((len - 1) >> SL_PKS) + 1 : 0;
+    for (int i = 0; i < SL_WC / 4; i++) w[i] = 0;
+    for (int j = 0; j < SL_WC && nb; j++) {
+        int a = 0; for (int32_t b = j * nb / SL_WC; b <= (j + 1) * nb / SL_WC && b < nb; b++) if (tm_sl_peak[s][b] > a) a = tm_sl_peak[s][b];
+        w[j >> 2] |= (int32_t)((uint32_t)a << ((j & 3) * 8));
+    }
+}
+static void sl_wv_unpack(int s, const int32_t *w)                /* boot: the columns back over the peaks */
+{
+    const int32_t len = tm_sl[s].len, nb = len > 0 ? ((len - 1) >> SL_PKS) + 1 : 0;
+    for (int32_t b = 0; b < nb && b < SL_PKN; b++) { const int j = (int)(b * SL_WC / nb); tm_sl_peak[s][b] = (uint8_t)((uint32_t)w[j >> 2] >> ((j & 3) * 8)); }
+}
+static const char *const sl_div_txt[SL_DIVS] = { "4/1", "2/1", "1/1", "1/2", "1/4", "1/4t", "1/8", "1/8t", "1/16", "1/16t", "1/32" };
+static const uint8_t sl_div_n[SL_DIVS] = { 4, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1 }, sl_div_d[SL_DIVS] = { 1, 1, 1, 2, 4, 6, 8, 12, 16, 24, 32 };   /* cycle = bar x n / d */
+static int32_t sl_lfo_pack(const volatile tm_sllfo *L)
+{
+    return L->rate | L->sync << 6 | L->wave << 7 | L->type << 10 | (L->tgt & 3) << 12 | (L->amt + 32) << 14;
+}
+static void sl_lfo_unpack(volatile tm_sllfo *L, int32_t v, int k)
+{
+    if (v < 0) { L->rate = 31; L->sync = 0; L->wave = 0; L->type = 0; L->tgt = (uint8_t)k; L->amt = 0; return; }   /* ~1 Hz, off */
+    L->sync = (uint8_t)(v >> 6 & 1); L->rate = (uint8_t)(v & 63); if (L->sync && L->rate >= SL_DIVS) L->rate = 4;
+    L->wave = (uint8_t)(v >> 7 & 7);
+    L->type = (uint8_t)(v >> 10 & 3); if (L->type > 2) L->type = 0;
+    L->tgt = (uint8_t)(v >> 12 & 3);
+    const int a = (int)(v >> 14 & 63) - 32; L->amt = (int8_t)(a < -31 ? -31 : a > 31 ? 31 : a);
+}                         /* the last lifted slot's tempo (for its drop) */
+static const uint8_t sl_kb[24] = { 39, 13, 40, 14, 41, 15, 42, 28, 32, 29, 22, 30, 31, 23, 48, 24, 49, 25, 50, 51, 26, 52, 27, 53 };   /* F .. E (seqdev/ms_fw.c kb_keys) */
+static const uint8_t sl_white[12] = { 0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19 };   /* Shift + the first 12 white keys (F .. C) select */
+static const uint8_t sl_qbars4[8] = { 0, 1, 2, 4, 8, 16, 32, 64 };   /* record length: free, then bars x 4 (1/4 .. 16) */
+static const char *const sl_qtxt[8] = { "free", "1/4 bar", "1/2 bar", "1 bar", "2 bars", "4 bars", "8 bars", "16 bars" };
+#define CLIP_IDX_T  (*(uint8_t **volatile *)0x01B4EF48)           /* chunk -> R246 clip entry (tm.c) */
+#define SET_MODE_T  (((void (*)(void))0x01A581F4)())             /* TapeController::set_mode */
+#define KEY_DISPATCH_T ((void (*)(int, int))0x019B6C74)
+enum { F_LEN, F_CH, F_LVL, F_A, F_D, F_S, F_R, F_P, F_RV, F_M, F_Q, F_PM, F_SY, F_BPM, F_PAN, F_N };   /* the saved fields per slot (op1rsettings "sl" slot field) */
+static const char sl_fc[F_N] = { 'l', 'c', 'v', 'a', 'd', 's', 'r', 'p', 'n', 'm', 'q', 't', 'y', 'b', 'k' };
+static int32_t sl_saved[SL_N][F_N];
+static int32_t sl_field(int s, int f)
+{
+    volatile tm_slm *q = &tm_sl[s];
+    switch (f) { case F_LEN: return q->len; case F_CH: return q->ch; case F_LVL: return q->lvl; case F_A: return q->a;
+                 case F_D: return q->d; case F_S: return q->s; case F_R: return q->r; case F_P: return q->semi + 24;
+                 case F_RV: return q->rev; case F_M: return q->mode; case F_Q: return q->qlen; case F_PM: return q->pmode; case F_SY: return q->sync; case F_BPM: return q->bpm; default: return q->pan + 50; }
+}
+static void sl_touch(void) { sl_dirty = 1; sl_dirty_t = now(); }
+static int sl_chunk_loaded(int32_t c)
+{
+    const uint8_t *e = CLIP_IDX_T ? CLIP_IDX_T[c] : 0;
+    return e && e[0] && *(const int16_t *)(e + 6) == c;
+}
+static void sl_service(void)                                     /* main loop (tfs_poll) */
+{
+    tm_sl_bpm = bpm_q8();                                        /* synced slots follow it (tm.c) */
+    for (int s = 0; s < SL_N; s++) {                             /* which LFOs run (the engine skips a slot without) */
+        uint8_t b = 0; for (int k = 0; k < 4; k++) if (tm_sl_lfo[s][k].amt) b |= (uint8_t)(1 << k);
+        tm_sl_lfoon[s] = b;
+    }
+    for (int s = 0; s < SL_N; s++) {                             /* their speed ratio, here (a 64-bit division) */
+        const int32_t b = tm_sl[s].bpm; int64_t v = b > 0 ? ((int64_t)tm_sl_bpm << 16) / b : 65536;
+        tm_sl_tr[s] = (uint32_t)(v < 16384 ? 16384 : v > 262144 ? 262144 : v);
+    }
+    {                                                            /* LFO phase per block: free rates once, divisions per tempo */
+        static int32_t bar_was;
+        extern uint32_t ql_inc(int32_t);
+        if (!tm_sl_rinc[0]) for (int r = 0; r < 64; r++) tm_sl_rinc[r] = ql_inc((r << 9) | 0x100);
+        const int32_t bar = (int32_t)((int64_t)4 * 60 * SR * 256 / tm_sl_bpm);
+        if (bar != bar_was) { bar_was = bar;
+            for (int d = 0; d < SL_DIVS; d++) tm_sl_dinc[d] = (uint32_t)(((uint64_t)64 << 32) * sl_div_d[d] / ((uint64_t)bar * sl_div_n[d])); }
+    }
+    tm_sl_bar = (int32_t)((int64_t)4 * 60 * SR * 256 / tm_sl_bpm);   /* the sync grid, from R246's tempo */
+    if (sl_arm && sl_want < 0 && tm_sl_rec < 0) tm_sl_queue = ((sl_sel % 3) * SL_MAX) >> 15;   /* armed: the first chunk ready */
+    if (sl_want >= 0) {                                          /* start: the transport plays, the slot's first chunk is in
+                                                                  * R246's cache, then REC as the stock REC held (10 -> 5) */
+        const int s = sl_want, od = tm_sl[s].play && tm_sl[s].len > 0;   /* playing: overdub along it */
+        const int32_t c = ((s % 3) * SL_MAX + (od ? tm_sl[s].pos : 0)) >> 15;
+        if (UI_STATE == 10 && sl_chunk_loaded(c) && od) {
+            tm_sl_od = 1; tm_sl_recwait = 0; tm_sl_full = 0; tm_sl_rec = (int8_t)s; sl_want = -1;
+            UI_STATE = 5; SET_MODE_T;
+        } else if (UI_STATE == 10 && sl_chunk_loaded(c)) {
+            const int qb = sl_qbars4[tm_sl[s].qlen & 7];         /* a fixed length: bars from R246's tempo */
+            const int64_t tg = qb ? (int64_t)qb * 60 * SR * 256 / bpm_q8() : SL_MAX;
+            tm_sl_rectgt = (int32_t)(tg > SL_MAX ? SL_MAX : tg < 64 ? 64 : tg);
+            for (int k = 0; k < SL_PKN; k++) tm_sl_peak[s][k] = 0;   /* a new take: a new waveform */
+            tm_sl_od = 0; tm_sl_recwait = tm_sl[s].sync; tm_sl_recpos = 0; tm_sl[s].bpm = tm_sl_bpm; tm_sl[s].len = 0; tm_sl[s].play = 0; tm_sl[s].gate = 0; tm_sl_full = 0;
+            tm_sl_rec = (int8_t)s; sl_want = -1;
+            UI_STATE = 5; SET_MODE_T;
+        } else if (now() - sl_t0 > 400000000u * 3) sl_want = -1;   /* not ready in 3 s: dropped */
+        else tm_sl_queue = c;
+    }
+    int32_t cut = -1;                                            /* a free synced take: its length to the nearest bar (min 1) */
+    if (sl_stop_req && !tm_sl_full && tm_sl_rec >= 0 && !tm_sl_od && !tm_sl_recwait) {
+        volatile tm_slm *q = &tm_sl[tm_sl_rec];
+        if (q->sync && !q->qlen && tm_sl_bar > 0) {
+            const int32_t rp = tm_sl_recpos, bar = tm_sl_bar; int32_t n = (rp + bar / 2) / bar; if (n < 1) n = 1;
+            const int64_t tg = (int64_t)n * bar;
+            if (tg > rp && tg <= SL_MAX) { tm_sl_rectgt = (int32_t)tg; sl_stop_req = 0; }   /* on to the bar: the engine stops it */
+            else cut = (int32_t)(tg > SL_MAX ? SL_MAX : tg);    /* past it: now, cut back */
+        }
+    }
+    if ((sl_stop_req || tm_sl_full) && tm_sl_rec >= 0) {         /* stop: as REC released (5 -> 10); R246 closes the take */
+        const int s = tm_sl_rec;
+        sl_stop_req = 0; tm_sl_full = 0;
+        if (UI_STATE == 5) { UI_STATE = 10; SET_MODE_T; }
+        tm_sl_rec = -1; tm_sl_od = 0; sl_touch();
+        if (cut > 0 && cut < tm_sl[s].len) tm_sl[s].len = cut;
+        if (sl_play_after == s) { sl_play_after = -1; sl_go(s, 1, 0); }   /* PLAY ended it: on, now */
+    }
+    sl_stop_req = 0;
+    if (tm_sl_rec < 0 && now() - sl_wv_t > 800000000u) {         /* the waveforms (every 2 s, what changed): visible after a reboot */
+        extern void op1r_setting_put(const char *, int);
+        sl_wv_t = now();
+        for (int s = 0; s < SL_N; s++) {
+            int32_t w[SL_WC / 4]; sl_wv_pack(s, w);
+            for (int i = 0; i < SL_WC / 4; i++) if (w[i] != sl_wv_saved[s][i]) {
+                const char key[5] = { 's', 'w', (char)('a' + s), (char)('0' + i), 0 };
+                op1r_setting_put(key, w[i]); sl_wv_saved[s][i] = w[i];
+            }
+        }
+    }
+    if (sl_dirty && now() - sl_dirty_t > 400000000u) {           /* into op1rsettings, 1 s after the last change, only what changed */
+        sl_dirty = 0;
+        extern void op1r_setting_put(const char *, int);
+        if (sl_perf != sl_perf_saved) { op1r_setting_put("slkbm", sl_perf); sl_perf_saved = sl_perf; }
+        for (int s = 0; s < SL_N; s++) for (int k = 0; k < 4; k++) {   /* the LFOs: one packed value each ("sl" slot digit) */
+            const int32_t v = sl_lfo_pack(&tm_sl_lfo[s][k]);
+            if (v == sl_lfo_saved[s][k]) continue;
+            const char key[5] = { 's', 'l', (char)('a' + s), (char)('0' + k), 0 };
+            op1r_setting_put(key, v); sl_lfo_saved[s][k] = v;
+        }
+        for (int s = 0; s < SL_N; s++) for (int f = 0; f < F_N; f++) {
+            const int32_t v = sl_field(s, f);
+            if (v == sl_saved[s][f]) continue;
+            const char k[5] = { 's', 'l', (char)('a' + s), sl_fc[f], 0 };
+            op1r_setting_put(k, v); sl_saved[s][f] = v;
+        }
+    }
+}
+void sl_erase_all(void)                                          /* main loop: the tape erased (tape/erase.c): every slot empty */
+{
+    if (tm_sl_rec >= 0) sl_stop_req = 1;
+    for (int s = 0; s < SL_N; s++) {
+        volatile tm_slm *q = &tm_sl[s];
+        q->pend = 0; q->pstop = 0; q->gate = 0; q->play = 0; q->len = 0; q->bpm = 0;
+        for (int k = 0; k < SL_PKN; k++) tm_sl_peak[s][k] = 0;
+    }
+    sl_touch();
+}
+void sl_state_load(void)                                         /* boot (tfs_state_load) */
+{
+    extern int op1r_setting_get(const char *, int);
+    static const int16_t def[F_N] = { 0, -1, 80, 0, 0, 100, 10, 24, 0, 0, 0, 0, 0, 0, 50 };   /* channel -1: the slot's track */
+    sl_perf = sl_perf_saved = (uint8_t)(op1r_setting_get("slkbm", 0) == 1);
+    static const int32_t hi[F_N] = { 0, 3, 100, 100, 100, 100, 100, 48, 1, 2, 7, 1, 1, 300 * 256, 100 };
+    for (int s = 0; s < SL_N; s++) for (int k = 0; k < 4; k++) {
+        const char key[5] = { 's', 'l', (char)('a' + s), (char)('0' + k), 0 };
+        sl_lfo_unpack(&tm_sl_lfo[s][k], op1r_setting_get(key, -1), k); sl_lfo_saved[s][k] = sl_lfo_pack(&tm_sl_lfo[s][k]);
+    }
+    for (int s = 0; s < SL_N; s++) {
+        volatile tm_slm *q = &tm_sl[s];
+        for (int f = 0; f < F_N; f++) {
+            const char k[5] = { 's', 'l', (char)('a' + s), sl_fc[f], 0 };
+            int32_t v = op1r_setting_get(k, def[f] < 0 ? s / 3 : def[f]);
+            if (f == F_LEN) v = v < 0 ? 0 : v > SL_MAX ? SL_MAX : v; else v = v < 0 ? 0 : v > hi[f] ? hi[f] : v;
+            switch (f) { case F_LEN: q->len = v; break; case F_CH: q->ch = (uint8_t)v; break; case F_LVL: q->lvl = (uint8_t)v; break;
+                         case F_A: q->a = (uint8_t)v; break; case F_D: q->d = (uint8_t)v; break; case F_S: q->s = (uint8_t)v; break;
+                         case F_R: q->r = (uint8_t)v; break; case F_P: q->semi = (int8_t)(v - 24); break;
+                         case F_RV: q->rev = (uint8_t)v; break; case F_M: q->mode = (uint8_t)v; break;
+                         case F_Q: q->qlen = (uint8_t)v; break; case F_PM: q->pmode = (uint8_t)v; break; case F_SY: q->sync = (uint8_t)v; break; case F_BPM: q->bpm = v; break; default: q->pan = (int8_t)(v - 50); }
+            sl_saved[s][f] = v;
+        }
+    }
+    for (int s = 0; s < SL_N; s++) {                             /* the saved waveforms (after the lengths) */
+        for (int i = 0; i < SL_WC / 4; i++) { const char key[5] = { 's', 'w', (char)('a' + s), (char)('0' + i), 0 }; sl_wv_saved[s][i] = op1r_setting_get(key, 0); }
+        sl_wv_unpack(s, sl_wv_saved[s]);
+    }
+}
+static void sl_go(int s, int on, int synced)                     /* key thread: start / stop, now or at the bar */
+{
+    volatile tm_slm *q = &tm_sl[s];
+    if (on) { if (q->len <= 0 || tm_sl_rec == (int8_t)s) return; q->pstop = 0; q->pend = (uint8_t)(synced ? 2 : 1); }
+    else { q->pend = 0; if (synced && q->play) q->pstop = 1; else { q->pstop = 0; q->gate = 0; } }
+}
+static int sl_key(int code, int pressed)                         /* key thread, slot page shown */
+{
+    for (int i = 0; i < 24; i++) if (code == sl_kb[i]) {         /* Shift + a white key: select; a key while REC is held: record */
+        if (sl_perf) {                                           /* perform: a white key starts / stops, Shift + white selects */
+            for (int k = 0; k < SL_N; k++) if (sl_white[k] == i && pressed) {
+                if (SHIFT) sl_sel = (uint8_t)k;
+                else sl_go(k, !(tm_sl[k].play || tm_sl[k].pend), tm_sl[k].sync);   /* the slot's sync */
+            }
+            return 1;                                            /* no notes */
+        }
+        if (SHIFT) { for (int k = 0; k < SL_N; k++) if (sl_white[k] == i && pressed) sl_sel = (uint8_t)k; return 1; }
+        if (pressed && sl_arm && sl_want < 0 && tm_sl_rec < 0) { sl_want = (int8_t)sl_sel; sl_t0 = now(); }
+        return 0;                                                /* the note plays */
+    }
+    if (code == 0x24 || code == 0x25) {                          /* < / >: the selected slot's playhead, 1/16 of its length */
+        volatile tm_slm *q = &tm_sl[sl_sel];
+        if (pressed && q->len > 16) { int32_t p = q->pos + (code == 0x25 ? 1 : -1) * (q->len / 16);
+                                      p %= q->len; if (p < 0) p += q->len; q->pos = p; }
+        return 1;
+    }
+    if (code == 0x04) { sl_tape = (uint8_t)pressed; if (pressed) sl_envp = 0; return 0; }
+    if (code == 0x3E && sl_envp == 0) { if (pressed) { sl_perf = (uint8_t)!sl_perf; sl_touch(); } return 1; }   /* red push: keyboard mode */
+    if (code == 0x3D && sl_envp == 0) { if (pressed) { tm_sl[sl_sel].sync = (uint8_t)!tm_sl[sl_sel].sync; sl_touch(); } return 1; }   /* white push: the slot's sync */    /* tape: back to the slots (R246's handler too) */
+    if (code >= 0x06 && code <= 0x09) { if (pressed) sl_envp = (uint8_t)(code - 0x06); return 1; }   /* T1 slots, T2 envelope, T3 play, T4 LFOs */
+    if (sl_envp == 3 && code >= 0x3B && code <= 0x3E) { if (pressed) sl_lsel = (uint8_t)(code - 0x3B); return 1; }   /* T4: push selects the LFO */
+    if (code == 0x22) {                                          /* PLAY: the selected slot now (Shift: at the bar; tape held: all
+                                                                  * now); REC held: record */
+        if (pressed && sl_arm) { if (sl_want < 0 && tm_sl_rec < 0) { sl_want = (int8_t)sl_sel; sl_t0 = now(); } return 1; }
+        if (pressed && tm_sl_rec >= 0) {                         /* during a take: it ends, the slot plays on (an overdub: it just ends) */
+            if (!tm_sl_od) sl_play_after = tm_sl_rec;
+            sl_stop_req = 1; return 1;
+        }
+        if (pressed) for (int s = 0; s < SL_N; s++) if (sl_tape || s == sl_sel) sl_go(s, 1, SHIFT && !sl_tape);
+        return 1;
+    }
+    if (code == 0x23) {                                          /* STOP: released (Shift: all); a recording stops */
+        if (pressed) {
+            if (tm_sl_rec >= 0 && (sl_tape || tm_sl_rec == (int8_t)sl_sel)) sl_stop_req = 1;
+            for (int s = 0; s < SL_N; s++) if (sl_tape || s == sl_sel) sl_go(s, 0, SHIFT && !sl_tape);   /* Shift: at the bar; tape: all */
+            sl_want = -1;
+        }
+        return 1;
+    }
+    if (code == 0x21) {                                          /* REC held: armed (a keyboard key starts); REC while recording: stop */
+        if (pressed) {
+            if (tm_sl_rec >= 0 || sl_want >= 0) { sl_stop_req = 1; sl_want = -1; }
+            else {
+                if (T_MODE == 0) { KEY_DISPATCH_T(0x22, 1); KEY_DISPATCH_T(0x22, 0); }   /* the transport plays (R246's PLAY) */
+                sl_arm = 1;
+            }
+        } else sl_arm = 0;
+        return 1;
+    }
+    if (code == 0x0A) {                                          /* LIFT: into R246's clipboard (when it fits), the slot empty */
+        volatile tm_slm *q = &tm_sl[sl_sel];
+        if (pressed && tm_sl_rec < 0 && q->len > 0) {
+            const int t = sl_sel / 3; const int32_t a = (sl_sel % 3) * SL_MAX, e = a + q->len;
+            if (q->len <= 0x3C8FE7) for (int i = 0; i < NCLIPS; i++)   /* audio_clipboard::copy needs the clip there */
+                if (CLIP_USED[i] && CLIPS[i * 3] == t && CLIPS[i * 3 + 1] <= a && a < CLIPS[i * 3 + 2]) {
+                    ((void (*)(int, int32_t, int32_t, int))0x0191BBD0)(t, a, e, i);
+                    sl_clip_bpm = q->bpm; sl_clip_len = q->len;
+                    break;
+                }
+            q->pend = 0; q->gate = 0; q->play = 0; q->len = 0; sl_touch();
+        }
+        return 1;
+    }
+    if (code == 0x0B) {                                          /* DROP: R246's clipboard (tape audio) onto the slot, from its start */
+        const int32_t n = *(volatile int32_t *)0x01AA7104;
+        if (pressed && tm_sl_rec < 0 && *(volatile int32_t *)0x01AA7108 == 1 && n > 0 && n <= SL_MAX) {
+            volatile tm_slm *q = &tm_sl[sl_sel];
+            extern volatile uint8_t tm_sel, tm_reload_after_clip;
+            q->pend = 0; q->gate = 0; q->play = 0;
+            tm_sel = (uint8_t)(sl_sel / 3);                      /* R246's drop worker reads the selected track (tm.c sets it) */
+            ((void (*)(int, int32_t, int))0x0191BEA8)(sl_sel / 3, (sl_sel % 3) * SL_MAX, 0);
+            q->len = n; q->bpm = n == sl_clip_len ? sl_clip_bpm : 0;   /* the tempo if it came from a slot */
+            tm_reload_after_clip = 1; sl_touch();
+        }
+        return 1;
+    }
+    if ((code >= 0x06 && code <= 0x0C) || (code >= 0x2D && code <= 0x2F) || code == 0x3E || code == 0x11) return 1;   /* FREE's keys: not here */
+    return 0;
+}
+static void sl_knob(int k, int st)                               /* key thread: one step per detent */
+{
+    volatile tm_slm *q = &tm_sl[sl_sel];
+    if (sl_envp == 3) {                                          /* T4, the selected LFO: blue rate, green amount, white wave, red
+                                                                  * target; Shift: blue sync / free, green type */
+        volatile tm_sllfo *L = &tm_sl_lfo[sl_sel][sl_lsel & 3];
+        if (SHIFT && k == 0) { const int on = st > 0; if (on != L->sync) { L->sync = (uint8_t)on; L->rate = on ? 4 : 31; } }
+        else if (SHIFT && k == 1) { const int v = L->type + st; L->type = (uint8_t)(v < 0 ? 0 : v > 2 ? 2 : v); }
+        else if (SHIFT) return;
+        else if (k == 0) { const int v = L->rate + st, hi = L->sync ? SL_DIVS - 1 : 63; L->rate = (uint8_t)(v < 0 ? 0 : v > hi ? hi : v); }
+        else if (k == 1) { const int v = L->amt + st; L->amt = (int8_t)(v < -31 ? -31 : v > 31 ? 31 : v); }
+        else if (k == 2) { const int v = L->wave + st; L->wave = (uint8_t)(v < 0 ? 0 : v > 7 ? 7 : v); }   /* white: wave */
+        else L->tgt = (uint8_t)((L->tgt + st) & 3);                                                   /* red: target */
+        sl_touch(); return;
+    }
+    if (sl_envp == 2) {                                          /* blue pitch, green reverse, white loop / once / ping-pong */
+        if (k == 0 && SHIFT) { const int v = q->pan + st * 2; q->pan = (int8_t)(v < -50 ? -50 : v > 50 ? 50 : v); }   /* Shift + blue: pan */
+        else if (k == 0) { const int v = q->semi + st; q->semi = (int8_t)(v < -24 ? -24 : v > 24 ? 24 : v); }
+        else if (k == 1) q->rev = (uint8_t)(st > 0);
+        else if (k == 2) { const int v = q->mode + st; q->mode = (uint8_t)(v < 0 ? 0 : v > 2 ? 2 : v); }
+        else q->pmode = (uint8_t)(st > 0);                       /* red: tape / stretch */
+        sl_touch(); return;
+    }
+    if (sl_envp) {                                               /* blue a, green d, white s, red r */
+        volatile uint8_t *p = k == 0 ? &q->a : k == 1 ? &q->d : k == 2 ? &q->s : &q->r;
+        const int v = *p + st * 2; *p = (uint8_t)(v < 0 ? 0 : v > 100 ? 100 : v); sl_touch(); return;
+    }
+    if (k == 0) { q->ch = (uint8_t)((q->ch + st) & 3); sl_touch(); }   /* blue: channel */
+    else if (k == 1) { const int v = q->lvl + st * 2; q->lvl = (uint8_t)(v < 0 ? 0 : v > 100 ? 100 : v); sl_touch(); }   /* green: level */
+    else if (k == 2) { const int v = q->qlen + st; q->qlen = (uint8_t)(v < 0 ? 0 : v > 7 ? 7 : v); sl_touch(); }   /* white: record length */
+    else if (k == 3) { const int32_t v = REC_LEVEL + st * 0x400; REC_LEVEL = (int16_t)(v < 0 ? 0 : v > 0x7FFF ? 0x7FFF : v); }   /* red: input */
+}
+static void fmt_ms(char *q, int v)                               /* an envelope time: "120ms", "1.2s" */
+{
+    const int32_t ms = sl_env_ms(v);
+    if (ms < 1000) { q = put_u(q, (uint32_t)ms, 1); put(q, "ms"); }
+    else { q = put_u(q, (uint32_t)ms / 1000, 1); *q++ = '.'; q = put_u(q, (uint32_t)ms / 100 % 10, 1); put(q, "s"); }
+}
+static void sl_draw(void *r)
+{
+    static const uint8_t *const chc[4] = { c_blue, c_green, c_white, c_red };
+    const int s = sl_sel, rec = tm_sl_rec == (int8_t)s;
+    volatile tm_slm *q = &tm_sl[s];
+    char b[16];
+    /* the boxed slot number and its state (as STEFAN's track square) */
+    ln(r, OP1_Q10(3), OP1_Q10(5), OP1_Q10(23), OP1_Q10(5), 0x500, c_white); ln(r, OP1_Q10(23), OP1_Q10(5), OP1_Q10(23), OP1_Q10(25), 0x500, c_white);
+    ln(r, OP1_Q10(23), OP1_Q10(25), OP1_Q10(3), OP1_Q10(25), 0x500, c_white); ln(r, OP1_Q10(3), OP1_Q10(25), OP1_Q10(3), OP1_Q10(5), 0x500, c_white);
+    put_u(b, (uint32_t)s + 1, 1); txt(r, T_NUM, b);
+    {
+        const int32_t x = OP1_Q10(28), y = OP1_Q10(15);
+        if (rec || sl_want == (int8_t)s || sl_arm) {             /* recording / armed: a red dot */
+            static const int8_t hw[7] = { 2, 3, 4, 4, 4, 3, 2 };
+            for (int k = 0; k < 7; k++) ln(r, x + OP1_Q10(4) - hw[k] * OP1_Q10(1), y + (k - 3) * OP1_Q10(1), x + OP1_Q10(4) + hw[k] * OP1_Q10(1), y + (k - 3) * OP1_Q10(1), 0x480, c_red);
+        } else if (q->play) {                                    /* playing: a green triangle */
+            ln(r, x, y - OP1_Q10(5), x, y + OP1_Q10(5), 0x700, c_green);
+            ln(r, x, y - OP1_Q10(5), x + OP1_Q10(8), y, 0x700, c_green);
+            ln(r, x, y + OP1_Q10(5), x + OP1_Q10(8), y, 0x700, c_green);
+        } else {                                                 /* stopped: a square */
+            ln(r, x, y - OP1_Q10(4), x + OP1_Q10(8), y - OP1_Q10(4), 0x700, c_white); ln(r, x + OP1_Q10(8), y - OP1_Q10(4), x + OP1_Q10(8), y + OP1_Q10(4), 0x700, c_white);
+            ln(r, x + OP1_Q10(8), y + OP1_Q10(4), x, y + OP1_Q10(4), 0x700, c_white); ln(r, x, y + OP1_Q10(4), x, y - OP1_Q10(4), 0x700, c_white);
+        }
+    }
+    if (q->sync) {                                               /* synced: bar.beat.16th (the slot's tempo), the length in bars */
+        const int32_t bpm = rec || q->bpm <= 0 ? tm_sl_bpm : q->bpm;
+        const int64_t six = (int64_t)15 * SR * 256 / (bpm > 0 ? bpm : 120 << 8);   /* frames per 16th */
+        const int32_t t = rec ? tm_sl_recpos : q->play ? q->pos : 0;
+        const uint32_t n = (uint32_t)(t / six);
+        char *e = put_u(b, n / 16 + 1, 1); e = put(e, "."); e = put_u(e, n / 4 % 4 + 1, 1); e = put(e, "."); put_u(e, n % 4 + 1, 1);
+        txt(r, rec ? S_BR : S_BW, b);
+    } else
+    /* mm:ss:cc in fixed cells (red while recording), the length below */
+    {
+        const int32_t t = rec ? tm_sl_recpos : q->play ? q->pos : q->len;
+        const uint32_t sec = (uint32_t)t / SR, cs = (uint32_t)t % SR * 100 / SR;
+        const uint32_t dg[6] = { sec / 600, sec / 60 % 10, sec % 60 / 10, sec % 10, cs / 10, cs % 10 };
+        const int base = rec ? S_TR : S_TW;
+        for (int i = 0; i < 8; i++) {
+            if (i == 2 || i == 5) b[0] = ':'; else b[0] = (char)('0' + dg[i - (i > 2) - (i > 5)]);
+            b[1] = 0; txt(r, base + i, b);
+        }
+    }
+    /* channel (blue) and level (green) */
+    txt(r, S_CHL, "ch"); b[0] = (char)('1' + (q->ch & 3)); b[1] = 0; txt(r, S_CH0 + (q->ch & 3), b);
+    ln(r, OP1_Q10(252), OP1_Q10(26), OP1_Q10(292), OP1_Q10(26), 0x400, c_dim);
+    if (q->lvl) ln(r, OP1_Q10(252), OP1_Q10(26), OP1_Q10(252) + OP1_Q10(40) * q->lvl / 100, OP1_Q10(26), 0x800, c_green);
+    txt(r, S_QL, sl_qtxt[q->qlen & 7]);
+    txt(r, S_KP, sl_perf ? "p" : "i");                           /* keyboard mode (red push): perform / input */
+    if (q->sync) txt(r, S_SY, "sync");                           /* white push */                          /* white: the record length */
+    in_meter(r, OP1_Q10(8), OP1_Q10(130));
+    if (sl_envp == 3) {                                          /* T4: four LFOs, a row each; the selected: white number, a bar */
+        static const char *const tg[4] = { "level", "pan", "pitch", "speed" };
+        static const char *const ty[3] = { "run", "restart", "one shot" };
+        extern void ql_hz_text(char *, uint32_t), ql_wave_glyph(void *, int, int32_t, int32_t, const uint8_t *);
+        static const uint8_t *const ec[4] = { c_blue, c_green, c_white, c_red };
+        const int sh = SHIFT;
+        txt(r, sh ? S_LHS : S_LH, "");                           /* (keeps the column header objects in use) */
+        for (int i = 0; i < 4; i++) {
+            volatile tm_sllfo *L = &tm_sl_lfo[s][i];
+            const int32_t y = OP1_Q10(56 + i * 20), on = i == (sl_lsel & 3);
+            ln(r, OP1_Q10(11), y, OP1_Q10(17), y, OP1_Q10(4), ec[i]);   /* the dot (as the quad page's): the colour of the push that selects it */
+            ln(r, OP1_Q10(14), y - OP1_Q10(3), OP1_Q10(14), y + OP1_Q10(3), OP1_Q10(4), ec[i]);
+            if (on) ln(r, OP1_Q10(8), y + OP1_Q10(9), OP1_Q10(20), y + OP1_Q10(9), 0x500, c_white);
+            if (sh) { txt(r, S_LC0 + i * 4, L->sync ? "sync" : "free"); txt(r, S_LC0 + i * 4 + 1, ty[L->type > 2 ? 0 : L->type]);
+                      txt(r, S_LC0 + i * 4 + 2, ""); txt(r, S_LC0 + i * 4 + 3, ""); continue; }
+            if (L->sync) txt(r, S_LC0 + i * 4, sl_div_txt[L->rate < SL_DIVS ? L->rate : SL_DIVS - 1]);
+            else { char h[12]; ql_hz_text(h, tm_sl_rinc[L->rate & 63]); txt(r, S_LC0 + i * 4, h); }
+            { char *e = b; int a = L->amt * 100 / 31; if (a < 0) { *e++ = '-'; a = -a; } put(put_u(e, (uint32_t)a, 1), "%"); txt(r, S_LC0 + i * 4 + 1, b); }
+            ql_wave_glyph(r, L->wave & 7, OP1_Q10(196 - 12), y, c_white);   /* white: the wave; red: the target */
+            txt(r, S_LC0 + i * 4 + 3, tg[L->tgt & 3]);
+            if (L->amt && q->play) {                             /* the output: a tick on a short lane right of the row */
+                const int32_t cx = OP1_Q10(292), x = cx + (L->val * OP1_Q10(8) >> 15);
+                ln(r, cx - OP1_Q10(8), y, cx + OP1_Q10(8), y, 0x300, c_dim);
+                ln(r, x, y - OP1_Q10(4), x, y + OP1_Q10(4), 0x500, c_white);
+            }
+        }
+        return;
+    }
+    if (sl_envp == 2) {                                          /* T3: pitch, direction, play mode */
+        static const char *const md[3] = { "loop", "once", "ping-pong" };
+        const int hl = !SHIFT, lb = hl ? S_HL0 : S_PL0;          /* the labels the encoders edit now: white */
+        txt(r, lb, "pitch"); txt(r, lb + 1, "direction"); txt(r, lb + 2, "mode"); txt(r, hl ? S_HL3 : S_PL3, "pitch");
+        txt(r, S_PV3, q->pmode ? "stretch" : "tape");
+        txt(r, hl ? S_PNL : S_HPN, "pan");                       /* Shift + blue */
+        if (!q->pan) put(b, "c"); else { char *e = put(b, q->pan < 0 ? "l" : "r"); put_u(e, (uint32_t)(q->pan < 0 ? -q->pan : q->pan) * 2, 1); }
+        txt(r, S_PNV, b);
+        char *e = b; if (q->semi > 0) *e++ = '+'; else if (q->semi < 0) *e++ = '-';
+        put_u(e, (uint32_t)(q->semi < 0 ? -q->semi : q->semi), 1); txt(r, S_PV0, b);
+        txt(r, S_PV1, q->rev ? "reverse" : "forward"); txt(r, S_PV2, md[q->mode > 2 ? 0 : q->mode]);
+        return;
+    }
+    if (sl_envp) {                                               /* T2: the envelope (blue a, green d, white s, red r) */
+        const int32_t x0 = OP1_Q10(20), y1 = OP1_Q10(108), h = OP1_Q10(60), y0 = y1 - h, ys = y1 - h * q->s / 100;
+        const int32_t wa = OP1_Q10(70) * q->a / 100, wd = OP1_Q10(70) * q->d / 100, wr = OP1_Q10(70) * q->r / 100;
+        const int32_t xa = x0 + wa, xd = xa + wd, xs = xd + OP1_Q10(60), xr = xs + wr;
+        ln(r, x0, y1, xa, y0, 0x600, c_blue); ln(r, xa, y0, xd, ys, 0x600, c_green);
+        ln(r, xd, ys, xs, ys, 0x600, c_white); ln(r, xs, ys, xr, y1, 0x600, c_red);
+        ln(r, x0, y1 + OP1_Q10(3), OP1_Q10(290), y1 + OP1_Q10(3), 0x300, c_dim);
+        fmt_ms(b, q->a); txt(r, S_EA, b); fmt_ms(b, q->d); txt(r, S_ED, b);
+        put(put_u(b, q->s, 1), "%"); txt(r, S_ES, b); fmt_ms(b, q->r); txt(r, S_ER, b);
+        return;
+    }
+    /* the 12 slots: 4 rows (a tape track each) x 3 */
+    for (int k = 0; k < SL_N; k++) {
+        volatile tm_slm *p = &tm_sl[k];
+        const int32_t x = OP1_Q10(10 + (k % 3) * 98), bx = x + OP1_Q10(22), w = OP1_Q10(68), y = OP1_Q10(54 + (k / 3) * 22);
+        const int on = k == s, rk = tm_sl_rec == (int8_t)k;
+        const int waits = p->pend == 2 || p->pstop || sl_want == (int8_t)k || (rk && tm_sl_recwait);   /* waiting for the bar */
+        const int lit = waits ? (now() >> 26) & 1 : p->play && !rk;   /* white: playing; blinking: waiting (~3 Hz) */
+        put_u(b, (uint32_t)k + 1, 1); txt(r, (lit ? S_NW : S_NG) + k, b);
+        ln(r, bx, y, bx + w, y, 0x400, c_dim);
+        const int32_t l = rk ? tm_sl_recpos : p->len;
+        if (l > 0) {                                             /* the waveform over the slot's length (every 2 px) */
+            const uint8_t *col = rk ? c_red : chc[p->ch & 3];
+            const int32_t nb = ((l - 1) >> SL_PKS) + 1, npx = 34;
+            for (int j = 0; j < npx; j++) {
+                const int32_t b0 = j * nb / npx, b1 = (j + 1) * nb / npx;
+                int a = 0; for (int32_t b = b0; b <= b1 && b < nb; b++) if (tm_sl_peak[k][b] > a) a = tm_sl_peak[k][b];
+                int32_t lg = 0;                                  /* log2 (a) Q8: ~6 dB per px, so quiet takes show too */
+                if (a) { int e = 0; while ((a >> e) > 1) e++; lg = e * 256 + ((a << 8 >> e) - 256); }
+                const int32_t x = bx + OP1_Q10(1) + j * OP1_Q10(2), hh = OP1_Q10(1) + lg * OP1_Q10(7) / (8 * 256);   /* +-8 px at full */
+                ln(r, x, y - hh, x, y + hh, 0x500, col);
+            }
+        }
+        if (p->play && !rk && p->len > 0) {
+            const int32_t px = bx + (int32_t)((int64_t)w * p->pos / p->len);   /* over its length, as the waveform */
+            ln(r, px, y - OP1_Q10(6), px, y + OP1_Q10(6), 0x600, c_white);
+        }
+        if (on) {                                                /* the selected slot: brackets */
+            const int32_t a = bx - OP1_Q10(3), z = bx + w + OP1_Q10(3);
+            ln(r, a, y - OP1_Q10(5), a, y + OP1_Q10(5), 0x480, c_white); ln(r, a, y - OP1_Q10(5), a + OP1_Q10(3), y - OP1_Q10(5), 0x480, c_white); ln(r, a, y + OP1_Q10(5), a + OP1_Q10(3), y + OP1_Q10(5), 0x480, c_white);
+            ln(r, z, y - OP1_Q10(5), z, y + OP1_Q10(5), 0x480, c_white); ln(r, z, y - OP1_Q10(5), z - OP1_Q10(3), y - OP1_Q10(5), 0x480, c_white); ln(r, z, y + OP1_Q10(5), z - OP1_Q10(3), y + OP1_Q10(5), 0x480, c_white);
+        }
+    }
 }
 
 /* a track around its own head: clips, its loop; window +-win s over [x0, x1] */
@@ -162,6 +677,7 @@ static void tfs_update(void *scr, int dt)
     op1_screen_draw(scr, dt);
     void *r = op1_raster();
     if (!made) { make(); extern void tm_ready(void); tm_ready(); }   /* op1r tape markers: loaded once (GUI thread, as stock) */
+    if (tm_on == 2) { sl_draw(r); return; }                      /* the slot machine (docs/85) */
     const int32_t head = tm_head_pos(sel) < 0 ? 0 : tm_head_pos(sel);
     const int rev = tm_tr[sel].speed < 0, mode = T_MODE, armed = UI_STATE == 6 || rec_held;
     rec_red = (uint8_t)(mode == 1 || armed);
@@ -191,24 +707,7 @@ static void tfs_update(void *scr, int dt)
     const uint32_t dg[5] = { sec % 60 / 10, sec % 10, ms / 100, ms / 10 % 10, ms % 10 };
     for (int i = 0; i < 5; i++) { b[0] = (char)('0' + dg[i]); b[1] = 0; txt(r, T_D0 + i, b); }
     fmt_speed(b, tm_tr[sel].speed); txt(r, T_SPEED, b);
-    {                                                            /* right edge, as stock: record level + input meter */
-        const int32_t x = OP1_Q10(310), y0 = OP1_Q10(8), y1 = OP1_Q10(100), hgt = y1 - y0;   /* above the tracks to the top */
-        ln(r, x, y0, x, y1, 0x500, c_dim);                       /* the scale dark, the signal red, the level a red dot */
-        /* as stock: a dB scale (R246's getter: log, clamped to -24 dB); here -24 .. 0 dB over the height */
-        int32_t pk = IN_PEAK < 0 ? -IN_PEAK : IN_PEAK, db8 = -24 * 256;           /* dB, Q8 */
-        if (pk > 0) {                                            /* 20 log10(pk / 32768) = 6.0206 (log2 pk - 15) */
-            int e = 0; while ((pk >> e) > 1) e++;
-            const int32_t fr = ((pk << 8) >> e) - 256;            /* the mantissa above 1, Q8 */
-            const int32_t l2 = (e - 15) * 256 + (fr * (362 - (fr * 106 >> 8)) >> 8);   /* log2(1 + x) ~ x (1.414 - 0.414 x) */
-            db8 = l2 * 1541 >> 8;                                /* x 6.0206 */
-            if (db8 < -24 * 256) db8 = -24 * 256;
-        }
-        const int32_t py = y1 - (int32_t)((int64_t)hgt * (db8 + 24 * 256) / (24 * 256));
-        if (py < y1) ln(r, x, py, x, y1, 0xA00, c_red);
-        const int32_t ly = y1 - (int32_t)((int64_t)hgt * (REC_LEVEL < 0 ? 0 : REC_LEVEL) >> 15);
-        static const int8_t hw[7] = { 2, 3, 4, 4, 4, 3, 2 };     /* the dot: stacked lines */
-        for (int k = 0; k < 7; k++) ln(r, x - hw[k] * OP1_Q10(1), ly + (k - 3) * OP1_Q10(1), x + hw[k] * OP1_Q10(1), ly + (k - 3) * OP1_Q10(1), 0x480, c_red);
-    }
+    in_meter(r, OP1_Q10(8), OP1_Q10(100));                       /* right edge, as stock: record level + input meter */
 #ifdef TF_DIAG
     {                                                            /* OP1R_TFDIAG=1: why REC may be refused (docs/82) */
         extern volatile uint8_t pu_mode;
@@ -283,6 +782,7 @@ static int8_t wind;                                              /* -1 / +1 whil
 static uint32_t wind_t;
 void tfs_poll(void)                                              /* main loop, every pass: setting, scrubbing */
 {
+    sl_service();
     if (tm_on && !tfs_in && CUR_MODE_ID == 2) tfs_set(1);
     else if (!tm_on && tfs_in) tfs_set(0);
     extern volatile int8_t tm_scrub; extern int tm_scrubbing(void);
@@ -297,6 +797,7 @@ int tfs_view_open(void) { return shown_now(); }               /* dispatcher.c ta
 int tfs_key(int code, int pressed)                               /* key thread: 1 = consumed */
 {
     if (!shown_now()) return 0;
+    if (tm_on == 2) return sl_key(code, pressed);                /* the slot machine (docs/85) */
     if (code == 0x21) rec_held = (uint8_t)pressed;               /* REC: shown as armed while held; stock handles it */
     if ((code == 0x22 || code == 0x23) && SHIFT) {               /* Shift + PLAY / STOP: start / stop the active track alone
                                                                   * (its head stands while the transport runs on) */
@@ -394,6 +895,10 @@ int tfs_knob(int knob, int delta)                                /* key thread: 
 {
     if (!shown_now() || knob < 0 || knob > 7) return 0;
     const int k = knob & 3, fine = knob > 3 || SHIFT;
+    if (tm_on == 2) {                                            /* slot machine: all four (sl_knob), one step per detent */
+        const int st = step_of(k, delta, 1024); if (st) sl_knob(k, st);
+        return 1;
+    }
     if (k != 2 && k != 3) return 0;                              /* blue / green: R246's */
     volatile tm_track *tr = &tm_tr[sel];
     if (k == 3) {                                                /* red: record level, as stock; Shift + red: marker jump */
@@ -436,6 +941,12 @@ static int32_t sv[4][5]; static int32_t sv_sel = -1; static uint8_t sv_have;
 static char *sv_key(char *k, int t, char c) { k[0] = 't'; k[1] = 'f'; k[2] = (char)('0' + t); k[3] = c; k[4] = 0; return k; }
 void tfs_state_load(void)
 {
+    {                                                            /* the tape machine setting at boot (settings.c reads it only when
+                                                                  * its page is built: lazily, at its first showing) */
+        extern int op1r_setting_get(const char *, int);
+        const int v = op1r_setting_get("tapemach", -1); if (v >= 0 && v <= 2) tm_on = (uint8_t)v;
+    }
+    sl_state_load();
     extern volatile uint8_t tm_sel, tm_hold_heads;
     char k[5];
     for (int t = 0; t < 4; t++) {

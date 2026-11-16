@@ -54,5 +54,6 @@ void fast_tape_erase(void)
 done:
     TAPE_PROGRESS = 0;
     tape_xfade_inv(0xF);
+    { extern void sl_erase_all(void); sl_erase_all(); }         /* ELSE-MARIE's slots: empty too (screens/tfscreen.c) */
 }
 #endif

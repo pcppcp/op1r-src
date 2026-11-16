@@ -18,7 +18,7 @@ static void st_load(void)
 {
     int v = op1r_setting_get("countin", -1); if (v >= 0 && v <= 2) ci_idx = (uint8_t)v;
     v = op1r_setting_get("kbvel", 127); if (v >= 1 && v <= 127) kb_vel = (uint8_t)v;
-    v = op1r_setting_get("tapemach", -1); if (v == 0 || v == 1) tm_on = (uint8_t)v;
+    v = op1r_setting_get("tapemach", -1); if (v >= 0 && v <= 2) tm_on = (uint8_t)v;
 }
 static void st_save(void) { op1r_setting_put("countin", ci_idx); op1r_setting_put("kbvel", kb_vel); op1r_setting_put("tapemach", tm_on); }   /* KeyHandler thread */
 
@@ -39,7 +39,7 @@ void settings_turn(int knob, int delta)                     /* blue: one value p
     if (knob == 2) {                                        /* white: tape machine stock / free (any detent flips) */
         if ((acc > 0 && delta < 0) || (acc < 0 && delta > 0)) acc = 0;
         acc += delta; if (acc / 1024 == 0) return;
-        acc = 0; tm_on = (uint8_t)!tm_on; st_dirty = 1; return;
+        acc = 0; tm_on = (uint8_t)((tm_on + (delta > 0 ? 1 : 2)) % 3); st_dirty = 1; return;   /* stock / STEFAN / ELSE-MARIE */
     }
     if (knob != 0) return;
     if ((acc > 0 && delta < 0) || (acc < 0 && delta > 0)) acc = 0;
@@ -76,6 +76,6 @@ static void st_update(void *scr, int dt)
     st_text(r, ST_SETTINGS + 3, ST_VX, (ST_Y0 + ST_DY) >> 10, c_green, v);
     static const uint8_t c_white[4] = { 0xFF, 0xFF, 0xFF, 0xFF };
     st_text(r, ST_SETTINGS + 4, ST_LX, (ST_Y0 + 2 * ST_DY) >> 10, c_white, "TAPE");
-    st_text(r, ST_SETTINGS + 5, ST_VX, (ST_Y0 + 2 * ST_DY) >> 10, c_white, tm_on ? "STEFAN" : "JESPER/OP1");
+    st_text(r, ST_SETTINGS + 5, ST_VX, (ST_Y0 + 2 * ST_DY) >> 10, c_white, tm_on == 2 ? "ELSE-MARIE" : tm_on ? "STEFAN" : "JESPER/OP1");
 }
 const op1_screen_t SCREEN_settings = { st_init, st_update };

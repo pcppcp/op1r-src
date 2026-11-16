@@ -287,6 +287,9 @@ int du_prompt_key(int code, int pressed)                          /* key hook (d
 static int f_key(void *c)                                         /* COMMIT asks: first time shows the prompt */
 {
     (void)c;
+#ifdef OP1R_DEV
+    return 1;                                                    /* developer builds (docs/86): no T1 confirmation */
+#endif
     if (!prompt) {
         uint32_t b = 0;
         dp_fw = 0;
@@ -369,13 +372,74 @@ static void send_sysex(const uint8_t *m, int n)
     TX_ENQ(0, pk, (unsigned)np);
 }
 
+#ifdef OP1R_DEV
+/* developer commands (local builds only, docs/86): read / write memory, inject keys and encoder ticks as the key-scan ISR
+ * does (midi/ccmap.c). Reply: cmd | 0x40, seq, status, payload. Addresses: SDRAM, L1 data, scratchpad (no MMRs). */
+enum { DV_PEEK = 12, DV_POKE = 13, DV_KEY = 14, DV_TURN = 15 };
+#define DV_MAX 192
+int du_dev_range_ok(uint32_t a, uint32_t n)
+{
+    const uint32_t e = a + n;
+    if (n == 0 || n > DV_MAX || e < a) return 0;
+    return e <= 0x04000000u || (a >= 0xFF800000u && e <= 0xFF908000u) || (a >= 0xFFB00000u && e <= 0xFFB01000u);
+}
+static uint32_t dv_irq_off(void) { uint32_t m; __asm__ volatile ("cli %0;" : "=d"(m)); return m; }
+static void dv_irq_on(uint32_t m) { __asm__ volatile ("sti %0;" : : "d"(m)); }
+static int dev_cmd(const uint8_t *msg, int n, uint8_t *rep)       /* reply length, or -1: not a developer command */
+{
+    static const uint8_t hdr[DU_SYSEX_HDR] = { 0xF0, 0x00, 0x20, 0x76, 0x7D };
+    if (n < DU_SYSEX_HDR + 4 || msg[n - 1] != 0xF7) return -1;
+    for (int i = 0; i < DU_SYSEX_HDR; i++) if (msg[i] != hdr[i]) return -1;
+    const int cmd = msg[5], seq = msg[6] | msg[7] << 7;
+    if (cmd < DV_PEEK || cmd > DV_TURN) return -1;
+    uint8_t pl[DU_MAX_MSG], b[1 + DV_MAX];
+    const int pn = du_unpack7(msg + 8, n - 9, pl);
+    int st = DU_OK, bn = 0;
+    const uint32_t a = pn >= 4 ? (uint32_t)pl[0] | (uint32_t)pl[1] << 8 | (uint32_t)pl[2] << 16 | (uint32_t)pl[3] << 24 : 0;
+    if (pn < 0) st = DU_E_FORMAT;
+    else if (cmd == DV_PEEK) {                                   /* u32 addr, u16 len -> bytes */
+        const uint32_t len = pn >= 6 ? (uint32_t)pl[4] | (uint32_t)pl[5] << 8 : 0;
+        if (pn < 6 || !du_dev_range_ok(a, len)) st = DU_E_OFFSET;
+        else for (uint32_t i = 0; i < len; i++) b[1 + bn++] = ((const volatile uint8_t *)a)[i];
+    } else if (cmd == DV_POKE) {                                 /* u32 addr, bytes */
+        if (pn < 5 || !du_dev_range_ok(a, (uint32_t)(pn - 4))) st = DU_E_OFFSET;
+        else for (int i = 4; i < pn; i++) ((volatile uint8_t *)a)[i - 4] = pl[i];
+    } else if (cmd == DV_KEY) {                                  /* u8 code, u8 down */
+        if (pn < 2) st = DU_E_FORMAT;
+        else {
+            volatile uint32_t *rd = (volatile uint32_t *)0x01DD5244, *wr = (volatile uint32_t *)0x01DD5248;
+            const uint32_t m = dv_irq_off(), w = *wr, nx = (w + 1) & 0xFF;
+            if (nx != *rd && !*(volatile uint8_t *)0x01DD524D) ((volatile uint16_t *)0x01DD5044)[w] = (uint16_t)(pl[0] | (pl[1] ? 1 : 0) << 8), *wr = nx;
+            else st = DU_E_FULL;
+            dv_irq_on(m);
+            ((void (*)(void))0x019C2F04)();                      /* KeyHandler::signal */
+        }
+    } else {                                                     /* DV_TURN: u8 knob 0..3, s8 ticks (2 per detent) */
+        if (pn < 2 || pl[0] > 3) st = DU_E_FORMAT;
+        else {
+            const uint32_t m = dv_irq_off();
+            ((volatile int32_t *)0x01DD5250)[pl[0]] += (int8_t)pl[1];
+            dv_irq_on(m);
+            ((void (*)(void))0x019C2F04)();
+        }
+    }
+    b[0] = (uint8_t)st;
+    return du_build(rep, cmd | DU_REPLY, seq, b, 1 + bn);
+}
+#endif
+
 void du_service(void)
 {
     static int inited;
     while (qr != qw) {
         if (!inited) { du_init(&sess, &fw_fs); inited = 1; }
         static uint8_t rep[DU_MAX_MSG];
+#ifdef OP1R_DEV
+        int n = dev_cmd(q[qr % QN], qlen[qr % QN], rep);
+        if (n < 0) n = du_handle(&sess, q[qr % QN], qlen[qr % QN], rep);
+#else
         int n = du_handle(&sess, q[qr % QN], qlen[qr % QN], rep);
+#endif
         qr++;
         if (n > 0) send_sysex(rep, n);
     }
