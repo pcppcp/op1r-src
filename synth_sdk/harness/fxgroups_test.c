@@ -30,7 +30,11 @@ int main(void)
     assert(r && lrows(r) == 2 && lid(r, 0) == 104 && lid(r, 1) == 105);
     void *d = fg_list(FG_FX, vec, 2);
     assert(d != r && lrows(d) == 2 && lid(d, 0) == 102 && lid(d, 1) == 107);
-    assert(lrows(r) == 2 && lid(r, 0) == 104);                         /* the previous list stays valid (two buffers) */
+    assert(lrows(r) == 2 && lid(r, 0) == 104);                         /* the previous list stays valid */
+    fg_drawn = r;                                                       /* two clicks while the screen draws r */
+    void *t = fg_list(FG_FX, vec, 8), *u = fg_list(FG_FX, vec, 1);
+    assert(t != r && u != r && u != t && lrows(r) == 2 && lid(r, 0) == 104 && lid(r, 1) == 105);
+    fg_drawn = 0;
     assert(!fg_list(FG_FX, vec, 4));                                      /* empty */
     assert(fg_next(FG_FX, vec, 3, 1) == 5 && fg_next(FG_FX, vec, 5, -1) == 3);   /* modulation skipped */
     assert(fg_next(FG_FX, vec, 8, 1) == 0 && fg_next(FG_FX, vec, 0, -1) == 8);

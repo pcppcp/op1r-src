@@ -669,6 +669,7 @@ void ql_wave_glyph(void *r, int wave, int32_t x, int32_t y, const uint8_t *c)   
         { 4, 4, 2, 1, 0, 0, 0, 0, -1, -1, -2, -4, -5, -4, -2, 0, 1, 1, 2, 2, 3, 4, 4, 3, 2 },
         { 3, 4, 3, 1, 0, -1, -2, -3, -4, -4, -3, -1, 4, 5, 3, 1, 0, -1, -2, -1, 0, 2, 3, 3, 1 } };
     int32_t px = 0, py = 0;
+    if (wave > 7) return;                                          /* pond words (waves 10..13): no quad glyph */
     for (int k = 0; k <= 24; k++) {
         uint32_t a = (uint32_t)k * (0xFFFFFFFFu / 24);
         int32_t v = wave >= 6 ? lor[wave - 6][k] * 5461 : wave == 5 ? sh[k < 24 ? k / 6 : 3] * 5000 : ql_shape(wave, a, 0, 0);

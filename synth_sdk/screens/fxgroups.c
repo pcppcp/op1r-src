@@ -53,9 +53,10 @@ int fg_group_of(int kind, const char *name, int n)
  * The FX list is the fx_types cache (load_types, built once). It stays untouched: a group shows our own vector whose
  * rows are bitwise copies of the cache's (same names / ids; the copies are never destroyed, a long name's heap buffer
  * stays owned by the cache). */
-static uint8_t fg_rows[2][FG_MAX_ROWS * FG_ROW];   /* two in turn: the screen may still draw the previous one */
-static uint8_t *fg_vec[2][4];                    /* std::vector: (pad), begin, end, cap */
-static int fg_buf;
+static uint8_t fg_rows[3][FG_MAX_ROWS * FG_ROW];   /* three: never the list just given nor the one being drawn */
+static uint8_t *fg_vec[3][4];                    /* std::vector: (pad), begin, end, cap */
+static int fg_buf;                               /* the list given last */
+void *volatile fg_drawn;                         /* the list the browser screen draws (GUI thread, fg_pb_draw) */
 int fg_cur, fg_kind;                             /* shown group (0 = all ..) and list kind */
 
 static uint8_t *vget(const void *vec, int k) { uint8_t *p; __builtin_memcpy(&p, (const uint8_t *)vec + sizeof p * (k + 1), sizeof p); return p; }
@@ -78,7 +79,9 @@ int fg_count(int kind, const void *src, int g)   /* rows of group g in the list 
 void *fg_list(int kind, const void *src, int g)
 {
     if (g == 0) return (void *)src;
-    uint8_t *b = vget(src, 0), *e = vget(src, 1), *d = fg_rows[fg_buf];
+    int k = 0;
+    while (k == fg_buf || (void *)fg_vec[k] == fg_drawn) k++;   /* (two clicks in one frame: the drawn one is older) */
+    uint8_t *b = vget(src, 0), *e = vget(src, 1), *d = fg_rows[k];
     int m = 0, len;
     for (uint8_t *r = b; r < e; r += FG_ROW) {
         const char *s = row_name(r, &len);
@@ -88,9 +91,9 @@ void *fg_list(int kind, const void *src, int g)
         m++;
     }
     if (!m) return 0;
-    uint8_t **v = fg_vec[fg_buf];
+    uint8_t **v = fg_vec[k];
     v[1] = d; v[2] = d + m * FG_ROW; v[3] = v[2];
-    fg_buf ^= 1;
+    fg_buf = k;
     return v;
 }
 int fg_next(int kind, const void *src, int g, int dir)   /* the next / previous non-empty group after g */
@@ -119,7 +122,7 @@ static int grouped_list_open(void)             /* a grouped list is shown (sets 
     if (CUR_MODE_ID != 8) return 0;
     void *l = BROWSER_LIST;
     for (int k = 0; k < FG_KINDS; k++) if (l == fg_src[k]) { fg_kind = k; fg_cur = 0; return 1; }
-    return l == fg_vec[0] || l == fg_vec[1];
+    return l == fg_vec[0] || l == fg_vec[1] || l == fg_vec[2];
 }
 static int fx_list_open(void) { return grouped_list_open() && fg_kind == FG_FX; }
 int fg_knob(int knob, int delta)               /* knob_event_hook: white in the FX list; 1 = consumed */
@@ -199,6 +202,7 @@ void fg_pb_draw(void *self, int dt)            /* PresetBrowser vtable update (0
     int fx = fx_list_open();
     for (int k = 0; k < 6; k++) set_tx(pb_obj[0x10 / 4 + k], fx ? DX_ROWS : 0);   /* the type column's rows */
     set_tx(pb_obj[0x50 / 4], fx ? DX_BAR : 0);                                   /* its scroll track */
+    fg_drawn = PB_LIST;
     PB_UPDATE(self, dt);
     if (!grouped_list_open()) return;
     static const uint8_t white[4] = { 0xFF, 0xFF, 0xFF, 0xFF };

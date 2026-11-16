@@ -96,7 +96,7 @@ static void txt(void *r, int i, const char *s)
 }
 static void dimc(uint8_t *o, const uint8_t *c) { for (int i = 0; i < 3; i++) o[i] = (uint8_t)(c[i] * 2 / 5); o[3] = 0xFF; }
 static char *put(char *p, const char *s) { while (*s) *p++ = *s++; *p = 0; return p; }
-static char *num(char *p, int v) { char t[8]; int n = 0; do t[n++] = (char)('0' + v % 10); while ((v /= 10)); while (n) *p++ = t[--n]; *p = 0; return p; }
+static char *num(char *p, int v) { char t[8]; int n = 0; if (v < 0) { *p++ = '-'; v = -v; } do t[n++] = (char)('0' + v % 10); while ((v /= 10)); while (n) *p++ = t[--n]; *p = 0; return p; }
 static void pct(char *p, int v255) { put(num(p, (v255 * 100 + 127) / 255), "%"); }
 static void note_name(char *p, int m, int n)
 {
