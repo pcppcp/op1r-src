@@ -73,9 +73,9 @@ void host_eu_note_off(int pos, int note);
 #define EU_NOTE_ON(pos, n, k, v)  (host_eu_note_on((pos), (n), (v)), (n))   /* -> note id for the note-off */
 #define EU_NOTE_OFF(pos, n)    host_eu_note_off((pos), (n))
 #else
-/* firmware: notes go through VoiceCtl like the stock sequencers (ok_player). A slot stores the absolute pitch taken
- * when its key was pressed (key + 0x35 + octave * 12), so later octave changes do not move it.
- *  synth: record {midi, vel, send midi = 1, 0} -> key_down 0x01A85750 -> note_on_synth (uses midi as is).
+/* firmware: notes go through VoiceCtl like the stock sequencers (ok_player). A synth slot stores its pitch at octave 0
+ * (op1_seq_key_note) and the note-on adds the current synth octave, so the octave arrows move it (seq/seq_core.c).
+ *  synth: record {midi + synth octave * 12, vel, send midi = 1, 0} -> key_down 0x01A85750 -> note_on_synth.
  *  drums: note_on_drum takes the SOUND from record midi - 0x35 (key 0..23) and the PITCH from the param, relative
  *         to the pad's own pitch; key_down adds the current drum octave * 12 -> param = note - (key + 0x35) - current
  *         drum octave * 12 (seq/seq_core.c). */
@@ -582,7 +582,7 @@ static int eu_key_down(void *self, int key)
         if (h) return 1;                                                 /* consumed: no note, no assignment */
     }
     if (*(volatile int *)0x018B65C8 == 0x2D)                        /* euclid screen shown: assign note */
-        eu_key_ex(EU_MODE(), op1_seq_key_note(EU_MODE(), key, EU_MODE() ? DRUM_OCT() : SYNTH_OCT(), caller), key);   /* pitch: absolute, as it sounds */
+        eu_key_ex(EU_MODE(), op1_seq_key_note(EU_MODE(), key, EU_MODE() ? DRUM_OCT() : SYNTH_OCT(), caller), key);   /* synth: at octave 0 (the note-on adds the live octave) */
     return 0;                                           /* not consumed: the key also plays its note */
 }
 static void eu_reset(void *self) { (void)self; eu_all_off(EU_MODE()); }

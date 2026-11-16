@@ -303,6 +303,12 @@ _ql_apply_none:
 /* SeqIds::name(type) entry -> eu_seq_name (returns "euclid" for type 3 while euclid is active) */
 	.section .hook_seqtoname,"ax"
 	jump.l _eu_seq_name;
+/* queued synth octave / slot steps (CALL 0x01A0CEFC in synth_octave_step and slot select) -> eu_fw_octave_queue
+ * (seq/seq_core.c: dropped while one of ours is the synth sequencer) */
+	.section .hook_seqoct0,"ax"
+	call _eu_fw_octave_queue;
+	.section .hook_seqoct1,"ax"
+	call _eu_fw_octave_queue;
 
 /* input key "sampler?" checks -> rec_type_ok (dispatcher.c). Each replaces "CC = Rx == R(6); IF !CC JUMP no"
  * (4 bytes) with a CALL; the stub keeps all registers, returns to the next instruction (yes) or to `no`. */

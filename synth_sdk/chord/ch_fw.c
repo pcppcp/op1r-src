@@ -74,7 +74,7 @@ static void ch_out(int note, int vel, int on, void *ctx)
     int m = (int)(intptr_t)ctx;
     if (!on) { CH_NOTE_OFF(m, note); return; }
     if (m) { int pad = note - 0x35; CH_NOTE_ON(1, note + ch_oct(1) * 12, pad, vel); }   /* pad at its own pitch */
-    else CH_NOTE_ON(0, note, 0, vel);
+    else CH_NOTE_ON(0, note - ch_oct(0) * 12, 0, vel);         /* eu_fw_note_on adds the synth octave back */
 }
 
 static void ch_cancel(ch_bank *b, int key) { b->npend[key] = b->ipend[key] = 0; }
@@ -98,7 +98,7 @@ int ch_key_down_from(int m, int key, uint32_t caller)        /* caller: OP1_SEQ_
     ch_bank *b = &chb[m & 1];
     ch_init_bank(b);
     if (key < 0 || key >= CH_KEYS) return 0;
-    int midi = op1_seq_key_note(m, key, ch_oct(m), caller);
+    int midi = op1_seq_key_note(m, key, ch_oct(m), caller) + (m ? 0 : ch_oct(0) * 12);   /* synth: as it sounds */
     if (midi < 0 || midi > 127) return 1;
     if (b->raw[key]) { CH_KEY_PLAYED(b->raw[key] - 1, 0, 0); b->raw[key] = 0; }
     CH_KEY_PLAYED(midi, CH_VEL, 1);

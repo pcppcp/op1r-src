@@ -93,6 +93,8 @@ HOOKS = {0x019B975C: ('hook_namecmp', bytes.fromhex('18300b32')),      # instr_t
          0x01A42BDC: ('hook_seqname2', bytes.fromhex('ffe3b4fb')),       # load (synth): SeqIds::from_name
          0x01A42CE0: ('hook_seqname3', bytes.fromhex('ffe332fb')),       # load (drum): SeqIds::from_name
          0x01A422EC: ('hook_seqtoname', bytes.fromhex('09e138a6')),      # SeqIds::name(type) entry -> eu_seq_name
+         0x01A86236: ('hook_seqoct0', bytes.fromhex('fce36336')),        # synth_octave_step: CALL queue octave steps
+         0x01A86578: ('hook_seqoct1', bytes.fromhex('fce3c234')),        # slot select: CALL queue octave steps
          0x019C9C3A: ('hook_lfoname1', bytes.fromhex('ffe391ff')),       # lfo_types::from_name compare
          0x019C9BE2: ('hook_lfoname2', bytes.fromhex('ffe3bdff')),       # lfo_types is_valid compare
          0x0193DE2A: ('hook_rlp0193de2a', bytes.fromhex('07e3c95a')),   # CALL read_lfo_param

@@ -15,7 +15,7 @@
 typedef struct {
     uint32_t tick;                            /* ticks since step 0 of the bar */
     uint8_t  held_n, held[GR_PARTS * 4], held_key[GR_PARTS * 4];   /* synth: held keys' midi notes + key 0..23, press order */
-    int16_t  on_note[GR_PARTS];               /* sounding note per part (-1 none) */
+    int16_t  on_note[GR_PARTS];               /* sounding note per part: eu_fw_note_on's id (-1 none) */
     uint8_t  off_at[GR_PARTS];                /* ticks left until its note off */
     uint8_t  swing_hits, swing_left;          /* a swung step's hits / accents, ticks until they fire */
     uint8_t  restart, init;

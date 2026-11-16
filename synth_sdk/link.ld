@@ -82,6 +82,8 @@ SECTIONS {
   .hook_seqname2 0x01A42BDC : { KEEP(*(.hook_seqname2)) }
   .hook_seqname3 0x01A42CE0 : { KEEP(*(.hook_seqname3)) }
   .hook_seqtoname 0x01A422EC : { KEEP(*(.hook_seqtoname)) }
+  .hook_seqoct0 0x01A86236 : { KEEP(*(.hook_seqoct0)) }
+  .hook_seqoct1 0x01A86578 : { KEEP(*(.hook_seqoct1)) }
   .hook_lfoname1 0x019C9C3A : { KEEP(*(.hook_lfoname1)) }
   .hook_lfoname2 0x019C9BE2 : { KEEP(*(.hook_lfoname2)) }
   .hook_rlp0193de2a 0x0193DE2A : { KEEP(*(.hook_rlp0193de2a)) }

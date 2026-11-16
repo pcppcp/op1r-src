@@ -324,7 +324,7 @@ void dt_turn(int pos, int knob, int delta, int shift)
     else if (st < 0 && r->running) dt_halt(pos & 1, r);
 }
 
-/* note key (record mode only): note = absolute pitch, key 0..23. Returns 1 if recorded. The key still sounds. */
+/* note key (record mode only): note = pitch (synth at octave 0: the note-on adds the live octave), key 0..23. Returns 1 if recorded. The key still sounds. */
 int dt_key(int pos, int note, int key)
 {
     dt_bank_t *b = &dt[pos & 1]; dt_bank_init(b);
@@ -814,7 +814,7 @@ static int dt_key_down(void *self, int key)
         if (h) return 1;
     }
     if (*(volatile int *)0x018B65C8 == 0x2D) {                          /* dots screen shown: record */
-        int note = op1_seq_key_note(DT_MODE(), key, DT_MODE() ? DT_DRUM_OCT() : DT_SYNTH_OCT(), caller);   /* as it sounds */
+        int note = op1_seq_key_note(DT_MODE(), key, DT_MODE() ? DT_DRUM_OCT() : DT_SYNTH_OCT(), caller);   /* synth: at octave 0 */
         if (dt_live_down(DT_MODE(), note, key)) return 1;               /* LIVE: consumed, sounded by us */
         dt_key(DT_MODE(), note, key);
     }
