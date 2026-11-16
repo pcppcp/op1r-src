@@ -344,7 +344,7 @@ static uint32_t sm_scr[32], sm_vt[10];
 static void *clock_screen;
 static int sm_ready, sm_on;                                     /* sm_on: 0 clock, 1 monitor (T1), 2 usb out (T2) */
 extern const op1_screen_t SCREEN_usbout;
-extern void usbout_turn(int delta), usbout_seq_turn(int delta);
+extern void usbout_turn(int delta), usbout_seq_turn(int delta), usbout_oplab_turn(int delta);
 static uint32_t us_scr[32], us_vt[10];
 static int us_ready;
 /* pulse sync page (screens/pcpage.c, docs/78): the tempo slot 0x22 on T2 in tempo mode (4) */
@@ -1436,6 +1436,7 @@ void knob_event_hook(int knob, int16_t *delta)
 #endif
     if (knob == 0 && sm_on == 2 && CUR_MODE_ID == 0x0C) { usbout_turn(*delta); return; }   /* usb out: blue */
     if (knob == 1 && sm_on == 2 && CUR_MODE_ID == 0x0C) { usbout_seq_turn(*delta); return; }   /* sequencer on / off: green */
+    if (knob == 2 && sm_on == 2 && CUR_MODE_ID == 0x0C) { usbout_oplab_turn(*delta); return; }  /* OP-LAB layout: white */
     if (knob >= 0 && knob < 4 && sm_on == 3 && CUR_MODE_ID == 0x0C) { settings_turn(knob, *delta); return; }
     if (knob >= 0 && knob < 8 && pcp_on && CUR_MODE_ID == 4 && SCREEN_TABLE[TEMPO_SCREEN_ID] == (void *)pcp_scr) {   /* pulse sync page */
         int k = knob & 3, sh = knob > 3 || *(volatile uint8_t *)0x01DD7F78;

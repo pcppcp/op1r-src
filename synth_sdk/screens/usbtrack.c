@@ -317,8 +317,42 @@ static void tp_mix(volatile int16_t *L, volatile int16_t *R)
 #define T_MUTE          ((volatile int16_t *)0xFF8018C4)              /* mute fade (Core::update_mutes) */
 static uint8_t usb6_pkt[USB_MAXPKT + 4] __attribute__((aligned(4)));
 
+/* R242 layout for USB hosts that only know the MIDI-only OP-1 (OP-lab): AudioControl (header only, collection =
+ * interface 1) + MidiStreaming, no audio streaming interfaces. smxUSBD structs (docs/21): interface entry
+ * {name, class, n alts, alts}, alt {name, number, n templates, templates (0x38 each), n eps, eps}, configuration
+ * {name, attributes / power, n interfaces, interfaces, 0, 0} x 3 at 0x018C1D80. */
+static uint32_t mo_ifs[8], mo_ac_alt[6];
+/* The stock event handler treats SET_INTERFACE (event 7) on interface 1 as the mic stream and stops it, which kills
+ * MIDI here; stock does nothing for its MIDI interface 3, so skip it. The setup pointer is the caller's first stack
+ * word ([SP+0x30] inside 0x01A69E80), byte +0x12 = interface. */
+extern int usb_mo_evt(void);
+__asm__(
+    ".text\n_usb_mo_evt:\n"
+    "  R3 = 7; CC = R1 == R3; IF !CC JUMP 1f;\n"
+    "  P0 = [SP]; R3 = B[P0 + 0x12] (Z); CC = R3 == 1; IF !CC JUMP 1f;\n"
+    "  R0 = 0; RTS;\n"
+    "1: P1.L = 0x9E80; P1.H = 0x01A6; JUMP (P1);\n");
+static uint8_t mo_ac_hdr[0x38] __attribute__((aligned(4)));
+static void usb_midionly(void)
+{
+    const uint32_t *ifs = (const uint32_t *)0x018FF2FC;             /* AC, mic, speaker, MIDI */
+    const uint32_t *alt = (const uint32_t *)ifs[3];                 /* AC alt 0 (0x018FF2E4) */
+    for (int i = 0; i < 0x38; i++) mo_ac_hdr[i] = ((const uint8_t *)alt[3])[i];   /* header, filled by desc_init */
+    mo_ac_hdr[2] = 0; mo_ac_hdr[6] = 1;                             /* bInCollection: the MIDI interface only (+2 = 0 as R242) */
+    for (int i = 0; i < 6; i++) mo_ac_alt[i] = alt[i];
+    mo_ac_alt[2] = 1; mo_ac_alt[3] = (uint32_t)mo_ac_hdr;           /* header only (no terminals) */
+    for (int i = 0; i < 4; i++) { mo_ifs[i] = ifs[i]; mo_ifs[4 + i] = ifs[12 + i]; }
+    mo_ifs[3] = (uint32_t)mo_ac_alt;
+    for (int c = 0; c < 3; c++) {
+        volatile uint32_t *cfg = (volatile uint32_t *)(0x018C1D80 + c * 0x18);
+        cfg[2] = 2; cfg[3] = (uint32_t)mo_ifs;
+    }
+    *(volatile uint32_t *)0x018FF33C = (uint32_t)usb_mo_evt;        /* class event handler (stock 0x01A69E80) */
+}
+
 /* CALL @0x01A6ED96: after the stock template fill, widen the to-host stream */
 extern int usbout_load(void);                                       /* screens/usbout.c: saved setting */
+extern uint8_t usb_oplab, usb_oplab_live;                           /* screens/usbout.c: OP-LAB (R242 layout) */
 int usb6_desc_init(void)
 {
     int r = USB_DESC_INIT();
@@ -328,6 +362,12 @@ int usb6_desc_init(void)
     ac[0xB1]  = USB_CH;                                              /* IT 11 bNrChannels (wChannelConfig stays L R) */
     fmt[0x3D] = USB_CH;                                              /* FORMAT_TYPE I bNrChannels */
     *(volatile uint16_t *)0x018FF1CA = USB_MAXPKT;                   /* EP 0x86 wMaxPacketSize */
+    usb_oplab_live = usb_oplab;                                      /* the table words are rewritten at every start */
+    if (usb_oplab) { usb_midionly(); usb_tracks_live = 0; }       /* no USB audio: skip the track work */
+    else {                                                           /* stock (after an OP-LAB start, e.g. disk mode) */
+        *(volatile uint32_t *)0x018FF33C = 0x01A69E80;
+        for (int c = 0; c < 3; c++) { volatile uint32_t *cfg = (volatile uint32_t *)(0x018C1D80 + c * 0x18); cfg[2] = 4; cfg[3] = 0x018FF2FC; }
+    }
     return r;
 }
 

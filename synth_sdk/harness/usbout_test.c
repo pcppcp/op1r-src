@@ -59,6 +59,15 @@ int main(int argc, char **argv)
     usbout_seq_turn(-1024); assert(!ms_enabled && op1r_setting_get("midiseq", -1) == 0);
     op1r_setting_put("midiseq", 1); usbout_load(); assert(ms_enabled);   /* loaded at boot */
     usbout_seq_turn(-1024);
+    assert(!usb_oplab);                                       /* OP-LAB: off by default */
+    usbout_oplab_turn(1024); assert(usb_oplab && op1r_setting_get("oplab", -1) == 1);
+    frame("white right: op-lab on (until restart)", render);
+    usb_oplab_live = usb_oplab;                               /* USB start applied it */
+    frame("op-lab on (after restart)", render);
+    usbout_oplab_turn(1024); assert(usb_oplab);               /* clamped */
+    usbout_oplab_turn(-1024); assert(!usb_oplab && op1r_setting_get("oplab", -1) == 0);
+    op1r_setting_put("oplab", 1); usbout_load(); assert(usb_oplab);   /* loaded at USB start */
+    op1r_setting_put("oplab", 5); usbout_load(); assert(!usb_oplab);  /* invalid: off */
     if (!render) printf("ok\n");
     return 0;
 }
