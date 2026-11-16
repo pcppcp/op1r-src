@@ -1,0 +1,15 @@
+{
+  "name": "reedie",
+  "author": "nvmsocool",
+  "kind": "synth",
+  "symbol": "ENGINE_reedie",
+  "sources": [
+    "reedie.c"
+  ],
+  "defaults": [
+    6553,
+    0,
+    16384,
+    22937
+  ]
+}

@@ -1,0 +1,240 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="320" height="160" viewBox="0 0 320 160">
+  <title>reedophone.svg</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <g id="dryer">
+      <path id="trigger_off" d="M13.85 42.994 L14.996 54.604 C15.314 56.446 17.57 57.136 19.333 56.515 C24.275 54.604 27.117 51.129 36.541 50.677" fill="none" stroke="#0071bc" stroke-width="2" stroke-miterlimit="10"/>
+      <path id="trigger_on" d="M13.581 42.351 L14.193 48.543 C14.511 50.385 16.767 51.075 18.53 50.454 C23.471 48.543 25.463 45.224 34.886 44.771" fill="none" stroke="#0071bc" stroke-width="2" stroke-miterlimit="10"/>
+      <path d="M68.165 84.019 C68.165 67.159 71.108 56.461 73.414 50.152 C76.106 42.785 78.672 29.238 75.404 22.411 C64.515 -0.334 41.13 13.642 41.13 13.642 C38.449 15.227 35.971 18.096 34.408 20.251 C31.779 23.875 32.616 23.701 25.458 23.875 C21.438 23.972 -15.993 21.933 -18.755 23.875 C-21.239 25.621 -21.675 39.147 -19.816 41.042 C-18.081 42.809 26 43.55 32.73 42.351 C34.408 42.017 34.408 43.813 34.886 44.771 C36.541 49.866 38.741 61.224 42.111 84.704 C42.14 84.907 42.385 84.995 42.545 84.86 C45.376 82.447 55.777 76.958 68.165 84.019 C68.215 84.047 68.221 84.117 68.175 84.152 C67.044 85.031 55.782 93.291 42.181 85.193" fill="none" stroke="#0071bc" stroke-width="2" stroke-miterlimit="10"/>
+      <line x1="73.73" y1="31.023" x2="65.015" y2="31.023" fill="none" stroke="#0071bc" stroke-width="2" stroke-miterlimit="10"/>
+      <line x1="43.614" y1="31.023" x2="41.551" y2="31.023" fill="none" stroke="#0071bc" stroke-width="2" stroke-miterlimit="10"/>
+      <line x1="54.804" y1="21.947" x2="54.804" y2="17.77" fill="none" stroke="#0071bc" stroke-width="2" stroke-miterlimit="10"/>
+      <line x1="62.179" y1="23.875" x2="66.82" y2="20.251" fill="none" stroke="#0071bc" stroke-width="2" stroke-miterlimit="10"/>
+      <line x1="47.585" y1="24.113" x2="45.535" y2="22.063" fill="none" stroke="#0071bc" stroke-width="2" stroke-miterlimit="10"/>
+      <g id="dial">
+        <circle cx="54.804" cy="32.47" r="7.897" fill="none" stroke="#0071bc" stroke-width="2" stroke-miterlimit="10"/>
+        <line x1="47.275" y1="32.47" x2="54.804" y2="32.47" fill="none" stroke="#0071bc" stroke-width="2" stroke-miterlimit="10"/>
+      </g>
+    </g>
+    <g id="mouth">
+      <path d="M68.075 150.233 C68.075 137.954 68.075 125.752 68.075 120.986 C68.075 115.684 65.208 108.92 62.294 103.416 C59.645 98.415 52.536 98.286 49.788 103.19 C46.804 108.517 43.897 115.181 43.853 120.986 C43.816 125.752 43.853 139.725 43.853 149.442" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+      <rect x="41.776" y="127.923" width="28.299" height="4.752" fill="#999999" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+      <rect x="41.776" y="136.248" width="28.299" height="4.4" fill="#999999" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+    </g>
+    <g id="body_vent">
+      <rect x="199.483" y="26.605" width="13.744" height="43.952" fill="none" stroke="#666666" stroke-miterlimit="10"/>
+      <rect id="vent" x="195.746" y="29.593" width="7.825" height="37.451" fill="#000000" stroke="#f15a24" stroke-width="2" stroke-miterlimit="10"/>
+      <line id="vent_bottom_line" x1="203.571" y1="67.044" x2="195.746" y2="67.044" fill="#000000" stroke="#f15a24" stroke-width="2" stroke-miterlimit="10"/>
+      <g>
+        <path d="M195.168 27.783 C195.94 27.782 205.628 27.783 205.628 27.783 L205.628 68.924 C205.628 68.924 198.246 68.924 195.746 68.924 L195.746 153.667 L224.541 153.667 C224.541 153.667 221.878 14.46 221.878 -8.926 L195.168 -7.831 Z" fill="#000000" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+        <g id="metal">
+          <polyline points="219.478,7.311 226.656,7.311 226.656,34.206 219.651,34.206" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <line x1="218.842" y1="20.046" x2="226.02" y2="20.046" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <polyline points="198.139,12.748 191.03,12.748 191.03,-3.861" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <line x1="198.139" y1="81.933" x2="190.895" y2="81.933" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <line x1="198.139" y1="95.7" x2="190.895" y2="95.7" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <polyline points="190.895,81.933 190.895,104.623 194.823,104.623" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <polyline points="220.674,111.133 228.722,111.133 228.722,155.016" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <line x1="220.674" y1="125.844" x2="228.722" y2="125.844" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <line x1="220.674" y1="139.17" x2="228.722" y2="139.17" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <polyline points="190.895,81.933 190.895,75.008 194.823,75.008" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <polyline points="218.819,48.665 228.722,48.732 228.722,61.121 215.698,61.121 215.698,85.707 228.722,85.707 230.853,85.707 230.853,93.861 224.395,93.861" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <line x1="208.229" y1="118.078" x2="228.722" y2="118.078" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <line x1="208.39" y1="132.316" x2="228.722" y2="132.316" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        </g>
+        <g id="opened" display="none">
+          <g id="_13o" data-name="13o">
+            <ellipse cx="214.698" cy="7.47" rx="4.143" ry="4.289" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+            <ellipse cx="219.154" cy="7.47" rx="2.777" ry="4.289" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          </g>
+          <g id="_14o" data-name="14o">
+            <ellipse cx="214.698" cy="20.046" rx="4.143" ry="4.185" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+            <ellipse cx="219.154" cy="20.046" rx="2.777" ry="4.185" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          </g>
+          <g id="_17o" data-name="17o">
+            <ellipse cx="202.907" cy="12.748" rx="4.267" ry="4.23" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+            <ellipse cx="198.64" cy="12.748" rx="2.798" ry="4.23" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          </g>
+          <g id="_20o" data-name="20o">
+            <ellipse cx="217.281" cy="111.133" rx="3.393" ry="3.385" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+            <ellipse cx="220.31" cy="111.133" rx="2.524" ry="3.385" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          </g>
+          <g id="_18o" data-name="18o">
+            <ellipse cx="202.907" cy="81.933" rx="4.267" ry="4.22" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+            <ellipse cx="198.139" cy="81.933" rx="2.798" ry="4.22" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          </g>
+          <g id="_19o" data-name="19o">
+            <ellipse cx="204.774" cy="95.253" rx="6.133" ry="6.115" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+            <ellipse cx="198.139" cy="95.253" rx="3.858" ry="6.115" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          </g>
+          <g id="_22o" data-name="22o">
+            <ellipse cx="216.46" cy="125.484" rx="4.215" ry="4.373" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+            <ellipse cx="219.699" cy="125.484" rx="3.136" ry="4.373" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          </g>
+          <g id="_24o" data-name="24o">
+            <ellipse cx="216.115" cy="139.983" rx="4.56" ry="4.237" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+            <ellipse cx="219.442" cy="139.983" rx="3.393" ry="4.237" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          </g>
+          <g id="_15o" data-name="15o">
+            <ellipse cx="214.652" cy="34.206" rx="4.19" ry="4.159" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+            <ellipse cx="219.124" cy="34.206" rx="2.807" ry="4.159" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          </g>
+          <g id="_21o" data-name="21o">
+            <ellipse cx="204.148" cy="118.433" rx="4.242" ry="4.435" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+            <ellipse cx="210.555" cy="118.433" rx="3.196" ry="4.435" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          </g>
+          <g id="_23o" data-name="23o">
+            <ellipse cx="204.236" cy="132.316" rx="4.153" ry="4.116" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+            <ellipse cx="210.621" cy="132.316" rx="3.129" ry="4.116" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          </g>
+          <g id="_16o" data-name="16o">
+            <ellipse cx="214.624" cy="49.942" rx="4.218" ry="4.164" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+            <ellipse cx="218.475" cy="50.101" rx="3.644" ry="4.164" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          </g>
+        </g>
+        <g id="closed">
+          <ellipse id="_13c" data-name="13c" cx="214.698" cy="7.47" rx="4.143" ry="4.289" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse id="_14c" data-name="14c" cx="214.698" cy="20.046" rx="4.143" ry="4.185" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse id="_17c" data-name="17c" cx="202.907" cy="12.748" rx="4.267" ry="4.23" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse id="_20c" data-name="20c" cx="217.281" cy="111.133" rx="3.393" ry="3.385" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse id="_18c" data-name="18c" cx="202.907" cy="81.933" rx="4.267" ry="4.22" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse id="_19c" data-name="19c" cx="204.774" cy="95.253" rx="6.133" ry="6.115" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse id="_22c" data-name="22c" cx="216.46" cy="125.484" rx="4.215" ry="4.373" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse id="_24c" data-name="24c" cx="216.115" cy="139.983" rx="4.56" ry="4.237" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse id="_15c" data-name="15c" cx="214.652" cy="34.206" rx="4.19" ry="4.159" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse id="_21c" data-name="21c" cx="204.148" cy="118.433" rx="4.242" ry="4.435" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse id="_23c" data-name="23c" cx="204.236" cy="132.316" rx="4.153" ry="4.116" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse id="_16c" data-name="16c" cx="214.624" cy="49.942" rx="4.218" ry="4.164" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        </g>
+      </g>
+    </g>
+    <g id="body_none">
+      <g id="wood">
+        <line x1="140.218" y1="-5.297" x2="140.218" y2="157.996" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+        <line x1="105.607" y1="-5.297" x2="105.607" y2="157.397" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+      </g>
+      <g id="metal-2" data-name="metal">
+        <line x1="109.996" y1="24.924" x2="101.392" y2="24.924" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <line x1="110.028" y1="42.305" x2="101.392" y2="42.305" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <polyline points="110.028,59.58 101.392,59.58 101.392,-7.749" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <line x1="134.863" y1="78.191" x2="146.344" y2="78.191" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <polyline points="136.182,98.478 146.344,98.478 146.344,67.315 141.117,67.315" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <polyline points="108.884,121.473 101.392,121.473 101.392,156.026" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <line x1="108.884" y1="139.917" x2="101.392" y2="139.917" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <line x1="137.622" y1="8.567" x2="144.612" y2="8.567" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <line x1="137.622" y1="22.717" x2="150.39" y2="22.717" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <line x1="137.622" y1="36.216" x2="145.509" y2="36.216" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <polyline points="137.622,50.923 149.636,50.923 149.636,-1.407" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <line x1="144.474" y1="36.216" x2="144.474" y2="-5.297" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <line x1="124.211" y1="130.396" x2="101.392" y2="130.396" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+      </g>
+      <g id="opened-2" data-name="opened">
+        <g id="_11o" data-name="11o">
+          <ellipse cx="130.439" cy="129.8" rx="6.749" ry="6.589" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse cx="124.576" cy="129.8" rx="5.862" ry="6.589" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        </g>
+        <g id="_5o" data-name="5o">
+          <ellipse cx="115.886" cy="24.924" rx="5.89" ry="5.816" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse cx="109.698" cy="24.924" rx="4.559" ry="5.816" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        </g>
+        <g id="_6o" data-name="6o">
+          <ellipse cx="115.886" cy="41.691" rx="5.89" ry="5.859" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse cx="109.698" cy="41.691" rx="4.559" ry="5.859" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        </g>
+        <g id="_7o" data-name="7o">
+          <ellipse cx="115.886" cy="59.58" rx="5.89" ry="5.786" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse cx="109.698" cy="59.58" rx="4.559" ry="5.786" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        </g>
+        <g id="_9o" data-name="9o">
+          <ellipse cx="129.666" cy="97.694" rx="6.556" ry="7.042" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse cx="135.166" cy="97.694" rx="5.052" ry="7.042" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        </g>
+        <g id="_8o" data-name="8o">
+          <ellipse cx="128.999" cy="78.79" rx="5.89" ry="6.249" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse cx="134.652" cy="78.79" rx="4.538" ry="6.249" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        </g>
+        <g id="_10o" data-name="10o">
+          <ellipse cx="114" cy="121.473" rx="5.114" ry="5.197" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse cx="107.924" cy="121.473" rx="3.501" ry="5.197" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        </g>
+        <g id="_12o" data-name="12o">
+          <ellipse cx="114" cy="139.917" rx="5.114" ry="4.986" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse cx="107.924" cy="139.917" rx="3.501" ry="4.986" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        </g>
+        <g id="_4o" data-name="4o">
+          <ellipse cx="132.534" cy="50.923" rx="5.087" ry="5.191" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse cx="136.626" cy="50.923" rx="3.592" ry="5.191" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        </g>
+        <g id="_3o" data-name="3o">
+          <ellipse cx="133.644" cy="36.216" rx="3.978" ry="3.98" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse cx="137.954" cy="36.162" rx="3.092" ry="3.98" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        </g>
+        <g id="_2o" data-name="2o">
+          <ellipse cx="132.534" cy="22.717" rx="5.087" ry="4.95" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse cx="136.626" cy="22.717" rx="3.592" ry="4.95" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        </g>
+        <g id="_1o" data-name="1o">
+          <ellipse cx="133.644" cy="8.567" rx="3.978" ry="4.155" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+          <ellipse cx="137.954" cy="8.514" rx="3.092" ry="4.155" fill="#000000" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        </g>
+      </g>
+      <g id="closed-2" data-name="closed">
+        <ellipse id="_5c" data-name="5c" cx="115.886" cy="24.924" rx="5.89" ry="5.816" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <ellipse id="_6c" data-name="6c" cx="115.886" cy="41.691" rx="5.89" ry="5.859" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <ellipse id="_7c" data-name="7c" cx="115.886" cy="59.58" rx="5.89" ry="5.786" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <ellipse id="_9c" data-name="9c" cx="129.666" cy="97.694" rx="6.556" ry="7.042" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <ellipse id="_8c" data-name="8c" cx="128.999" cy="78.79" rx="5.89" ry="6.249" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <ellipse id="_10c" data-name="10c" cx="114" cy="121.473" rx="5.114" ry="5.197" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <ellipse id="_12c" data-name="12c" cx="114" cy="139.917" rx="5.114" ry="4.986" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <ellipse id="_4c" data-name="4c" cx="132.534" cy="50.923" rx="5.087" ry="5.191" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <ellipse id="_3c" data-name="3c" cx="133.644" cy="36.216" rx="3.978" ry="3.98" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <ellipse id="_2c" data-name="2c" cx="132.534" cy="22.717" rx="5.087" ry="4.95" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <ellipse id="_1c" data-name="1c" cx="133.644" cy="8.567" rx="3.978" ry="4.155" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+        <ellipse id="_11c" data-name="11c" cx="130.439" cy="129.8" rx="6.749" ry="6.589" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+      </g>
+    </g>
+    <g id="saw">
+      <polygon id="blade" points="175.978,108.93 173.9,113.069 167.196,106.718 166.89,111.341 159.109,107.998 160.832,112.3 152.925,111.515 155.989,114.993 147.263,118.585 151.491,120.488 145.453,127.326 149.67,127.326 146.391,135.702 150.703,134.01 149.654,141.456 153.521,138.874 156.733,147.253 158.811,143.114 166.458,149.58 166.458,144.95 175.044,147.792 173.321,143.49 181.247,143.49 178.184,140.184 186.339,136.177 182.127,134.255 187.896,127.307 183.246,127.326 183.246,127.326 186.311,120.04 181.999,121.732 182.609,114.046 179.048,117.008" fill="none" stroke="#39b54a" stroke-width="2" stroke-miterlimit="10"/>
+      <polyline points="163.423,128.401 162.909,157.03 170.24,157.397 170.624,128.401" fill="#000000" stroke="#39b54a" stroke-width="2" stroke-miterlimit="10"/>
+      <ellipse cx="167.023" cy="128.401" rx="3.601" ry="3.408" fill="none" stroke="#39b54a" stroke-width="2" stroke-miterlimit="10"/>
+    </g>
+    <g id="bell">
+      <path d="M260.92 -3.483 C260.92 62.325 244.167 74.427 244.167 74.427 L303.718 74.427 C303.718 74.427 287.077 64.084 287.077 -3.483" fill="none" stroke="#666666" stroke-width="2" stroke-miterlimit="10"/>
+      <path d="M259.296 28.85 C259.743 29.549 287.604 28.721 288.628 28.942" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+      <path d="M258.632 34.175 C273.962 34.175 279.594 33.821 289.206 33.821" fill="none" stroke="#999999" stroke-width="2" stroke-miterlimit="10"/>
+    </g>
+    <g id="wind">
+      <g id="dryer-winds">
+        <path id="dw1" d="M43.614 93.672 C42.181 95.074 40.395 95.856 39.997 95.947 C37.515 96.512 34.115 97.125 31.92 97.872 C25.047 100.212 10.092 93.618 10.251 85.659 C10.375 79.45 9.483 79.568 13.395 75.656 C16.591 72.461 24.766 69.952 27.797 74.704 C33.069 82.967 22.989 90.144 19.333 80.461" fill="none" stroke="#3a1a49" stroke-width="2" stroke-miterlimit="10"/>
+        <path id="dw3" d="M41.551 104.152 C31.023 114.459 30.075 113.435 13.734 113.672 C9.552 113.733 11.162 108.304 13.051 106.43 C13.918 105.57 17.726 105.338 18.025 105.702 C18.418 106.18 18.889 106.43 18.703 107.954" fill="none" stroke="#3a1a49" stroke-width="2" stroke-miterlimit="10"/>
+        <path id="dw7" d="M36.541 123.74 C33.115 123.74 24.529 128.617 26.253 132.885 C27.215 135.268 30.444 135.644 30.444 139.553 C30.444 146.978 30.511 152.732 22.736 152.732 C20.974 152.732 16.928 152.879 15.964 151.937 C15.331 151.317 13.793 149.965 13.793 148.597 C13.793 147.178 17.945 144.517 20.32 146.63" fill="none" stroke="#3a1a49" stroke-width="2" stroke-miterlimit="10"/>
+        <path id="dw5" d="M23.045 121.185 C17.907 125.505 14.499 124.564 11.411 127.77 C10.934 128.265 9.991 132.616 10.307 133.705 C10.809 135.435 12.796 136.151 14.16 136.529 C15.419 136.878 18.132 134.571 18.737 133.67" fill="none" stroke="#3a1a49" stroke-width="2" stroke-miterlimit="10"/>
+        <path id="dw2" d="M62.702 95.947 C63.188 95.862 70.074 97.914 71.148 98.205 C79.743 100.539 92.541 94.055 94.105 85.468 C95.679 76.827 92.923 71.179 83.793 71.179 C77.963 71.179 76.506 80.247 80.363 82.61 C83.15 84.318 86.841 80.99 86.841 78.444" fill="none" stroke="#3a1a49" stroke-width="2" stroke-miterlimit="10"/>
+        <path id="dw4" d="M69.386 104.254 C69.065 107.464 74.516 113.028 79.42 111.466 C80.475 111.13 81.053 111.113 82.097 110.705 C84.44 109.791 91.111 103.986 93.778 106.323 C101.484 113.078 88.438 117.176 88.438 122.639 C88.438 126.771 97.153 127.314 98.369 123.116 C98.876 121.368 99.556 119.692 97.329 119.101 C94.494 118.347 95.186 119.636 94.596 120.329" fill="none" stroke="#3a1a49" stroke-width="2" stroke-miterlimit="10"/>
+        <path id="dw6" d="M80.177 123.181 C80.346 124.018 82.132 125.881 82.649 126.916 C85.226 132.069 80.023 140.235 80.023 143.174 C80.023 144.984 82.89 150.219 84.739 151.377 C89.51 154.367 94.252 148.891 94.503 145.174 C94.805 140.711 91.52 141.585 88.406 140.935" fill="none" stroke="#3a1a49" stroke-width="2" stroke-miterlimit="10"/>
+      </g>
+      <g id="bell-winds">
+        <path d="M273.395 84.932 C273.365 89.886 273.395 100.784 273.333 106.933" fill="none" stroke="#3a1a49" stroke-width="2" stroke-miterlimit="10"/>
+        <path d="M287.571 84.185 C288.628 90.651 290.901 98.478 292.745 104.907" fill="none" stroke="#3a1a49" stroke-width="2" stroke-miterlimit="10"/>
+        <path d="M299.731 80.977 C303.124 88.72 305.528 92.429 308.114 96.463" fill="none" stroke="#3a1a49" stroke-width="2" stroke-miterlimit="10"/>
+        <path d="M260.051 83.318 C257.945 88.577 253.693 97.149 251.54 101.539" fill="none" stroke="#3a1a49" stroke-width="2" stroke-miterlimit="10"/>
+        <path d="M249.771 80.817 C245.386 86.152 242.498 89.649 237.959 94.546" fill="none" stroke="#3a1a49" stroke-width="2" stroke-miterlimit="10"/>
+      </g>
+      <g id="vent-winds">
+        <path id="vw1" d="M189.69 33.821 C184.721 34.375 180.299 33.928 176.396 31.386 C160.344 20.93 180.622 1.063 185.06 17.147 C185.817 19.888 184.514 22.341 181.744 22.994 C177.853 23.91 177.426 19.426 179.62 17.909" fill="none" stroke="#3a1a49" stroke-width="2" stroke-miterlimit="10"/>
+        <path id="vw2" d="M186.102 40.367 C184.736 40.994 179.987 41.354 174.8 39.646 C169.129 37.779 164.38 32.196 160.232 38.981 C157.149 44.027 162.235 47.862 167.348 45.931 C169.291 45.198 168.758 40.986 164.575 41.695" fill="none" stroke="#3a1a49" stroke-width="2" stroke-miterlimit="10"/>
+        <path id="vw3" d="M191.03 47.549 C188.46 48.727 182.502 47.264 180.09 51.067 C178.623 53.379 176.357 60.593 172.232 60.593 C170.404 60.593 167.482 59.49 168.246 57.348 C168.741 55.959 170.738 53.83 166.828 52.408 C164.468 51.551 161.85 53.234 161.006 54.682 C159.678 56.956 160.959 58.482 158.193 59.304 C155.514 60.099 152.016 60.051 153.198 56.688 C153.412 56.08 154.905 55.504 156.526 56.067" fill="none" stroke="#3a1a49" stroke-width="2" stroke-miterlimit="10"/>
+        <path id="vw4" d="M186.102 57.504 C182.479 59.64 182.548 63.155 181.903 63.966 C179.326 67.204 176.649 67.513 172.616 67.513 C170.549 67.513 165.061 65.727 163.187 66.561 C157.957 68.888 160.428 74.712 166.076 74.712 C169.034 74.712 171.23 70.772 166.158 70.772" fill="none" stroke="#3a1a49" stroke-width="2" stroke-miterlimit="10"/>
+        <path id="vw5" d="M189.69 65.366 C186.836 66.581 179.349 72.997 178.611 74.396 C177.125 77.216 178.767 82.331 177.669 85.492 C175.914 90.548 174.219 90.937 170.898 93.428 C165.724 97.308 159.282 90.076 162.644 87.177 C163.53 86.412 164.778 85.492 166.365 85.492 C171.455 85.492 169.026 88.892 168.128 89.815" fill="none" stroke="#3a1a49" stroke-width="2" stroke-miterlimit="10"/>
+      </g>
+    </g>
+    <g id="mic">
+      <path d="M286.991 155.016 C294.411 150.283 295.789 135.648 293.958 130.052 C290.574 119.711 281.066 116.464 273.95 116.464 C271.067 116.464 260.555 116.464 254.579 125.311 C250.668 131.099 251.204 145.402 257.327 155.016" fill="#000000" stroke="#ffffff" stroke-width="2" stroke-miterlimit="10"/>
+      <path d="M257.327 155.016 C257.327 163.291 260.224 218.241 260.224 218.241 L282.505 219.694 C286.329 166.485 285.98 169.877 286.991 155.016 Z" fill="none" stroke="#ffffff" stroke-width="2" stroke-miterlimit="10"/>
+      <line x1="263.76" y1="163.304" x2="280.639" y2="163.304" fill="none" stroke="#ffffff" stroke-width="2" stroke-miterlimit="10"/>
+      <line x1="264.615" y1="170.941" x2="279.57" y2="170.941" fill="none" stroke="#ffffff" stroke-width="2" stroke-miterlimit="10"/>
+      <line x1="266.004" y1="178.872" x2="278.075" y2="178.872" fill="none" stroke="#ffffff" stroke-width="2" stroke-miterlimit="10"/>
+      <polygon points="250.359,135.661 296.456,135.99 296.431,140.118 250.333,139.79" fill="#000000" stroke="#ffffff" stroke-width="2" stroke-miterlimit="10"/>
+    </g>
+  </g>
+</svg>

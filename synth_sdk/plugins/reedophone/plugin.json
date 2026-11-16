@@ -1,0 +1,20 @@
+{
+  "name": "windwood",
+  "author": "nvmsocool",
+  "kind": "synth",
+  "symbol": "ENGINE_reedophone",
+  "sources": [
+    "reedophone.c",
+    "reedscr.c"
+  ],
+  "screen": {
+    "svg": "reedscr.svg",
+    "symbol": "SCREEN_reedscr"
+  },
+  "defaults": [
+    26214,
+    16384,
+    16384,
+    8192
+  ]
+}

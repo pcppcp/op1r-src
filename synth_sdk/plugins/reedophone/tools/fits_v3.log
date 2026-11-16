@@ -1,0 +1,334 @@
+gen   0      3s  gen-best 12.106  best 12.106  harm 6.71  band 5.73  att 2.61  hnr 9.41  lvl 1.88  |cents| 14.49
+gen   1      5s  gen-best 11.661  best 11.661  harm 6.70  band 5.16  att 3.91  hnr 4.10  lvl 2.47  |cents| 10.03
+gen   2      7s  gen-best 13.960  best 11.661  harm 6.70  band 5.16  att 3.91  hnr 4.10  lvl 2.47  |cents| 10.03
+gen   3      8s  gen-best 14.583  best 11.661  harm 6.70  band 5.16  att 3.91  hnr 4.10  lvl 2.47  |cents| 10.03
+gen   4     10s  gen-best 12.834  best 11.661  harm 6.70  band 5.16  att 3.91  hnr 4.10  lvl 2.47  |cents| 10.03
+gen   5     11s  gen-best 12.254  best 11.661  harm 6.70  band 5.16  att 3.91  hnr 4.10  lvl 2.47  |cents| 10.03
+gen   6     13s  gen-best 12.257  best 11.661  harm 6.70  band 5.16  att 3.91  hnr 4.10  lvl 2.47  |cents| 10.03
+gen   7     14s  gen-best 11.927  best 11.661  harm 6.70  band 5.16  att 3.91  hnr 4.10  lvl 2.47  |cents| 10.03
+gen   8     16s  gen-best 14.328  best 11.661  harm 6.70  band 5.16  att 3.91  hnr 4.10  lvl 2.47  |cents| 10.03
+gen   9     17s  gen-best 13.555  best 11.661  harm 6.70  band 5.16  att 3.91  hnr 4.10  lvl 2.47  |cents| 10.03
+gen  10     19s  gen-best 12.398  best 11.661  harm 6.70  band 5.16  att 3.91  hnr 4.10  lvl 2.47  |cents| 10.03
+gen  11     20s  gen-best 12.567  best 11.661  harm 6.70  band 5.16  att 3.91  hnr 4.10  lvl 2.47  |cents| 10.03
+gen  12     22s  gen-best 12.217  best 11.661  harm 6.70  band 5.16  att 3.91  hnr 4.10  lvl 2.47  |cents| 10.03
+gen  13     23s  gen-best 11.824  best 11.661  harm 6.70  band 5.16  att 3.91  hnr 4.10  lvl 2.47  |cents| 10.03
+gen  14     25s  gen-best 12.020  best 11.661  harm 6.70  band 5.16  att 3.91  hnr 4.10  lvl 2.47  |cents| 10.03
+gen  15     27s  gen-best 12.212  best 11.661  harm 6.70  band 5.16  att 3.91  hnr 4.10  lvl 2.47  |cents| 10.03
+gen  16     28s  gen-best 11.995  best 11.661  harm 6.70  band 5.16  att 3.91  hnr 4.10  lvl 2.47  |cents| 10.03
+gen  17     30s  gen-best 12.696  best 11.661  harm 6.70  band 5.16  att 3.91  hnr 4.10  lvl 2.47  |cents| 10.03
+gen  18     31s  gen-best 11.640  best 11.640  harm 6.74  band 5.11  att 2.80  hnr 6.46  lvl 2.21  |cents| 13.99
+gen  19     33s  gen-best 12.066  best 11.640  harm 6.74  band 5.11  att 2.80  hnr 6.46  lvl 2.21  |cents| 13.99
+gen  20     34s  gen-best 12.017  best 11.640  harm 6.74  band 5.11  att 2.80  hnr 6.46  lvl 2.21  |cents| 13.99
+gen  21     36s  gen-best 11.981  best 11.640  harm 6.74  band 5.11  att 2.80  hnr 6.46  lvl 2.21  |cents| 13.99
+gen  22     37s  gen-best 11.500  best 11.500  harm 6.70  band 5.24  att 2.80  hnr 6.64  lvl 2.43  |cents| 6.17
+gen  23     39s  gen-best 11.920  best 11.500  harm 6.70  band 5.24  att 2.80  hnr 6.64  lvl 2.43  |cents| 6.17
+gen  24     40s  gen-best 12.432  best 11.500  harm 6.70  band 5.24  att 2.80  hnr 6.64  lvl 2.43  |cents| 6.17
+gen  25     41s  gen-best 12.045  best 11.500  harm 6.70  band 5.24  att 2.80  hnr 6.64  lvl 2.43  |cents| 6.17
+gen  26     43s  gen-best 11.300  best 11.300  harm 6.56  band 5.53  att 2.77  hnr 4.80  lvl 2.20  |cents| 7.42
+gen  27     44s  gen-best 11.304  best 11.300  harm 6.56  band 5.53  att 2.77  hnr 4.80  lvl 2.20  |cents| 7.42
+gen  28     46s  gen-best 11.513  best 11.300  harm 6.56  band 5.53  att 2.77  hnr 4.80  lvl 2.20  |cents| 7.42
+gen  29     48s  gen-best 10.549  best 10.549  harm 5.96  band 5.31  att 2.63  hnr 4.27  lvl 1.82  |cents| 11.84
+gen  30     49s  gen-best 11.350  best 10.549  harm 5.96  band 5.31  att 2.63  hnr 4.27  lvl 1.82  |cents| 11.84
+gen  31     51s  gen-best 11.020  best 10.549  harm 5.96  band 5.31  att 2.63  hnr 4.27  lvl 1.82  |cents| 11.84
+gen  32     53s  gen-best 10.779  best 10.549  harm 5.96  band 5.31  att 2.63  hnr 4.27  lvl 1.82  |cents| 11.84
+gen  33     54s  gen-best 11.303  best 10.549  harm 5.96  band 5.31  att 2.63  hnr 4.27  lvl 1.82  |cents| 11.84
+gen  34     56s  gen-best 11.155  best 10.549  harm 5.96  band 5.31  att 2.63  hnr 4.27  lvl 1.82  |cents| 11.84
+gen  35     57s  gen-best 10.909  best 10.549  harm 5.96  band 5.31  att 2.63  hnr 4.27  lvl 1.82  |cents| 11.84
+gen  36     59s  gen-best 10.972  best 10.549  harm 5.96  band 5.31  att 2.63  hnr 4.27  lvl 1.82  |cents| 11.84
+gen  37     60s  gen-best 10.605  best 10.549  harm 5.96  band 5.31  att 2.63  hnr 4.27  lvl 1.82  |cents| 11.84
+gen  38     62s  gen-best 10.423  best 10.423  harm 5.89  band 5.00  att 2.54  hnr 5.06  lvl 1.82  |cents| 13.10
+gen  39     63s  gen-best 10.772  best 10.423  harm 5.89  band 5.00  att 2.54  hnr 5.06  lvl 1.82  |cents| 13.10
+gen  40     65s  gen-best 10.750  best 10.423  harm 5.89  band 5.00  att 2.54  hnr 5.06  lvl 1.82  |cents| 13.10
+gen  41     66s  gen-best 10.397  best 10.397  harm 5.88  band 5.04  att 2.56  hnr 4.38  lvl 1.89  |cents| 13.65
+gen  42     68s  gen-best 10.405  best 10.397  harm 5.88  band 5.04  att 2.56  hnr 4.38  lvl 1.89  |cents| 13.65
+gen  43     69s  gen-best 10.392  best 10.392  harm 5.65  band 5.23  att 2.55  hnr 4.10  lvl 1.98  |cents| 18.29
+gen  44     71s  gen-best 10.573  best 10.392  harm 5.65  band 5.23  att 2.55  hnr 4.10  lvl 1.98  |cents| 18.29
+gen  45     72s  gen-best 10.539  best 10.392  harm 5.65  band 5.23  att 2.55  hnr 4.10  lvl 1.98  |cents| 18.29
+gen  46     74s  gen-best 10.493  best 10.392  harm 5.65  band 5.23  att 2.55  hnr 4.10  lvl 1.98  |cents| 18.29
+gen  47     75s  gen-best 10.811  best 10.392  harm 5.65  band 5.23  att 2.55  hnr 4.10  lvl 1.98  |cents| 18.29
+gen  48     77s  gen-best 10.534  best 10.392  harm 5.65  band 5.23  att 2.55  hnr 4.10  lvl 1.98  |cents| 18.29
+gen  49     78s  gen-best 10.727  best 10.392  harm 5.65  band 5.23  att 2.55  hnr 4.10  lvl 1.98  |cents| 18.29
+gen  50     80s  gen-best 10.641  best 10.392  harm 5.65  band 5.23  att 2.55  hnr 4.10  lvl 1.98  |cents| 18.29
+gen  51     82s  gen-best 10.785  best 10.392  harm 5.65  band 5.23  att 2.55  hnr 4.10  lvl 1.98  |cents| 18.29
+gen  52     83s  gen-best 10.597  best 10.392  harm 5.65  band 5.23  att 2.55  hnr 4.10  lvl 1.98  |cents| 18.29
+gen  53     85s  gen-best 10.718  best 10.392  harm 5.65  band 5.23  att 2.55  hnr 4.10  lvl 1.98  |cents| 18.29
+gen  54     86s  gen-best 10.613  best 10.392  harm 5.65  band 5.23  att 2.55  hnr 4.10  lvl 1.98  |cents| 18.29
+gen  55     88s  gen-best 10.509  best 10.392  harm 5.65  band 5.23  att 2.55  hnr 4.10  lvl 1.98  |cents| 18.29
+gen  56     89s  gen-best 10.298  best 10.298  harm 5.89  band 4.97  att 2.59  hnr 3.87  lvl 2.04  |cents| 11.61
+gen  57     91s  gen-best 10.727  best 10.298  harm 5.89  band 4.97  att 2.59  hnr 3.87  lvl 2.04  |cents| 11.61
+gen  58     92s  gen-best 10.398  best 10.298  harm 5.89  band 4.97  att 2.59  hnr 3.87  lvl 2.04  |cents| 11.61
+gen  59     94s  gen-best 10.466  best 10.298  harm 5.89  band 4.97  att 2.59  hnr 3.87  lvl 2.04  |cents| 11.61
+gen  60     96s  gen-best 10.291  best 10.291  harm 5.75  band 4.87  att 2.57  hnr 4.86  lvl 2.04  |cents| 14.69
+gen  61     97s  gen-best 10.541  best 10.291  harm 5.75  band 4.87  att 2.57  hnr 4.86  lvl 2.04  |cents| 14.69
+gen  62     99s  gen-best 10.697  best 10.291  harm 5.75  band 4.87  att 2.57  hnr 4.86  lvl 2.04  |cents| 14.69
+gen  63    100s  gen-best 10.415  best 10.291  harm 5.75  band 4.87  att 2.57  hnr 4.86  lvl 2.04  |cents| 14.69
+gen  64    102s  gen-best 10.808  best 10.291  harm 5.75  band 4.87  att 2.57  hnr 4.86  lvl 2.04  |cents| 14.69
+gen  65    103s  gen-best 10.463  best 10.291  harm 5.75  band 4.87  att 2.57  hnr 4.86  lvl 2.04  |cents| 14.69
+gen  66    105s  gen-best 10.338  best 10.291  harm 5.75  band 4.87  att 2.57  hnr 4.86  lvl 2.04  |cents| 14.69
+gen  67    106s  gen-best 10.405  best 10.291  harm 5.75  band 4.87  att 2.57  hnr 4.86  lvl 2.04  |cents| 14.69
+gen  68    108s  gen-best 10.199  best 10.199  harm 5.71  band 4.92  att 2.62  hnr 3.91  lvl 2.20  |cents| 13.82
+gen  69    109s  gen-best 10.377  best 10.199  harm 5.71  band 4.92  att 2.62  hnr 3.91  lvl 2.20  |cents| 13.82
+gen  70    111s  gen-best 10.377  best 10.199  harm 5.71  band 4.92  att 2.62  hnr 3.91  lvl 2.20  |cents| 13.82
+gen  71    112s  gen-best 10.321  best 10.199  harm 5.71  band 4.92  att 2.62  hnr 3.91  lvl 2.20  |cents| 13.82
+gen  72    114s  gen-best 10.294  best 10.199  harm 5.71  band 4.92  att 2.62  hnr 3.91  lvl 2.20  |cents| 13.82
+gen  73    116s  gen-best 10.057  best 10.057  harm 5.71  band 4.87  att 2.56  hnr 3.53  lvl 1.87  |cents| 13.93
+gen  74    117s  gen-best 10.072  best 10.057  harm 5.71  band 4.87  att 2.56  hnr 3.53  lvl 1.87  |cents| 13.93
+gen  75    119s  gen-best 10.124  best 10.057  harm 5.71  band 4.87  att 2.56  hnr 3.53  lvl 1.87  |cents| 13.93
+gen  76    120s  gen-best 10.244  best 10.057  harm 5.71  band 4.87  att 2.56  hnr 3.53  lvl 1.87  |cents| 13.93
+gen  77    122s  gen-best 10.063  best 10.057  harm 5.71  band 4.87  att 2.56  hnr 3.53  lvl 1.87  |cents| 13.93
+gen  78    123s  gen-best 10.017  best 10.017  harm 5.60  band 4.96  att 2.48  hnr 3.60  lvl 1.92  |cents| 15.07
+gen  79    125s  gen-best 10.042  best 10.017  harm 5.60  band 4.96  att 2.48  hnr 3.60  lvl 1.92  |cents| 15.07
+gen  80    126s  gen-best 10.080  best 10.017  harm 5.60  band 4.96  att 2.48  hnr 3.60  lvl 1.92  |cents| 15.07
+gen  81    128s  gen-best 10.095  best 10.017  harm 5.60  band 4.96  att 2.48  hnr 3.60  lvl 1.92  |cents| 15.07
+gen  82    129s  gen-best 9.941  best 9.941  harm 5.52  band 4.81  att 2.52  hnr 3.89  lvl 1.93  |cents| 16.23
+gen  83    131s  gen-best 9.886  best 9.886  harm 5.52  band 4.83  att 2.56  hnr 3.54  lvl 1.94  |cents| 14.74
+gen  84    133s  gen-best 9.989  best 9.886  harm 5.52  band 4.83  att 2.56  hnr 3.54  lvl 1.94  |cents| 14.74
+gen  85    134s  gen-best 9.938  best 9.886  harm 5.52  band 4.83  att 2.56  hnr 3.54  lvl 1.94  |cents| 14.74
+gen  86    135s  gen-best 9.828  best 9.828  harm 5.36  band 4.93  att 2.51  hnr 3.98  lvl 1.99  |cents| 15.21
+gen  87    137s  gen-best 9.811  best 9.811  harm 5.34  band 4.78  att 2.58  hnr 3.87  lvl 1.95  |cents| 17.82
+gen  88    138s  gen-best 9.910  best 9.811  harm 5.34  band 4.78  att 2.58  hnr 3.87  lvl 1.95  |cents| 17.82
+gen  89    140s  gen-best 9.897  best 9.811  harm 5.34  band 4.78  att 2.58  hnr 3.87  lvl 1.95  |cents| 17.82
+gen  90    141s  gen-best 9.953  best 9.811  harm 5.34  band 4.78  att 2.58  hnr 3.87  lvl 1.95  |cents| 17.82
+gen  91    143s  gen-best 9.902  best 9.811  harm 5.34  band 4.78  att 2.58  hnr 3.87  lvl 1.95  |cents| 17.82
+gen  92    145s  gen-best 9.756  best 9.756  harm 5.25  band 4.86  att 2.55  hnr 4.17  lvl 1.98  |cents| 16.59
+gen  93    146s  gen-best 9.871  best 9.756  harm 5.25  band 4.86  att 2.55  hnr 4.17  lvl 1.98  |cents| 16.59
+gen  94    148s  gen-best 9.795  best 9.756  harm 5.25  band 4.86  att 2.55  hnr 4.17  lvl 1.98  |cents| 16.59
+gen  95    150s  gen-best 9.884  best 9.756  harm 5.25  band 4.86  att 2.55  hnr 4.17  lvl 1.98  |cents| 16.59
+gen  96    151s  gen-best 9.856  best 9.756  harm 5.25  band 4.86  att 2.55  hnr 4.17  lvl 1.98  |cents| 16.59
+gen  97    153s  gen-best 9.697  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen  98    154s  gen-best 9.799  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen  99    156s  gen-best 9.884  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 100    157s  gen-best 9.878  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 101    159s  gen-best 9.805  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 102    160s  gen-best 9.904  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 103    162s  gen-best 9.821  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 104    163s  gen-best 9.802  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 105    165s  gen-best 9.761  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 106    167s  gen-best 9.761  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 107    168s  gen-best 9.743  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 108    169s  gen-best 9.798  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 109    171s  gen-best 9.845  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 110    172s  gen-best 9.807  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 111    174s  gen-best 9.797  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 112    176s  gen-best 9.738  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 113    177s  gen-best 9.708  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 114    179s  gen-best 9.706  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 115    180s  gen-best 9.706  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 116    182s  gen-best 9.743  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 117    183s  gen-best 9.716  best 9.697  harm 5.27  band 4.85  att 2.51  hnr 3.56  lvl 1.85  |cents| 17.32
+gen 118    185s  gen-best 9.689  best 9.689  harm 5.30  band 4.82  att 2.47  hnr 3.64  lvl 1.90  |cents| 16.50
+gen 119    186s  gen-best 9.695  best 9.689  harm 5.30  band 4.82  att 2.47  hnr 3.64  lvl 1.90  |cents| 16.50
+gen 120    188s  gen-best 9.694  best 9.689  harm 5.30  band 4.82  att 2.47  hnr 3.64  lvl 1.90  |cents| 16.50
+gen 121    189s  gen-best 9.682  best 9.682  harm 5.22  band 4.89  att 2.52  hnr 3.65  lvl 1.92  |cents| 17.06
+gen 122    191s  gen-best 9.694  best 9.682  harm 5.22  band 4.89  att 2.52  hnr 3.65  lvl 1.92  |cents| 17.06
+gen 123    193s  gen-best 9.716  best 9.682  harm 5.22  band 4.89  att 2.52  hnr 3.65  lvl 1.92  |cents| 17.06
+gen 124    194s  gen-best 9.682  best 9.682  harm 5.22  band 4.89  att 2.52  hnr 3.65  lvl 1.92  |cents| 17.06
+gen 125    196s  gen-best 9.676  best 9.676  harm 5.29  band 4.75  att 2.49  hnr 3.82  lvl 1.87  |cents| 17.06
+gen 126    197s  gen-best 9.695  best 9.676  harm 5.29  band 4.75  att 2.49  hnr 3.82  lvl 1.87  |cents| 17.06
+gen 127    199s  gen-best 9.680  best 9.676  harm 5.29  band 4.75  att 2.49  hnr 3.82  lvl 1.87  |cents| 17.06
+gen 128    200s  gen-best 9.687  best 9.676  harm 5.29  band 4.75  att 2.49  hnr 3.82  lvl 1.87  |cents| 17.06
+gen 129    202s  gen-best 9.686  best 9.676  harm 5.29  band 4.75  att 2.49  hnr 3.82  lvl 1.87  |cents| 17.06
+gen 130    203s  gen-best 9.684  best 9.676  harm 5.29  band 4.75  att 2.49  hnr 3.82  lvl 1.87  |cents| 17.06
+gen 131    204s  gen-best 9.669  best 9.669  harm 5.31  band 4.79  att 2.48  hnr 3.75  lvl 1.87  |cents| 15.64
+gen 132    206s  gen-best 9.683  best 9.669  harm 5.31  band 4.79  att 2.48  hnr 3.75  lvl 1.87  |cents| 15.64
+gen 133    208s  gen-best 9.671  best 9.669  harm 5.31  band 4.79  att 2.48  hnr 3.75  lvl 1.87  |cents| 15.64
+gen 134    209s  gen-best 9.658  best 9.658  harm 5.24  band 4.82  att 2.50  hnr 3.50  lvl 1.87  |cents| 17.73
+gen 135    211s  gen-best 9.649  best 9.649  harm 5.25  band 4.79  att 2.49  hnr 3.70  lvl 1.89  |cents| 16.95
+gen 136    212s  gen-best 9.651  best 9.649  harm 5.25  band 4.79  att 2.49  hnr 3.70  lvl 1.89  |cents| 16.95
+gen 137    214s  gen-best 9.655  best 9.649  harm 5.25  band 4.79  att 2.49  hnr 3.70  lvl 1.89  |cents| 16.95
+gen 138    216s  gen-best 9.651  best 9.649  harm 5.25  band 4.79  att 2.49  hnr 3.70  lvl 1.89  |cents| 16.95
+gen 139    217s  gen-best 9.621  best 9.621  harm 5.26  band 4.80  att 2.45  hnr 3.49  lvl 1.89  |cents| 16.50
+gen 140    219s  gen-best 9.647  best 9.621  harm 5.26  band 4.80  att 2.45  hnr 3.49  lvl 1.89  |cents| 16.50
+gen 141    220s  gen-best 9.646  best 9.621  harm 5.26  band 4.80  att 2.45  hnr 3.49  lvl 1.89  |cents| 16.50
+gen 142    222s  gen-best 9.633  best 9.621  harm 5.26  band 4.80  att 2.45  hnr 3.49  lvl 1.89  |cents| 16.50
+gen 143    223s  gen-best 9.636  best 9.621  harm 5.26  band 4.80  att 2.45  hnr 3.49  lvl 1.89  |cents| 16.50
+gen 144    225s  gen-best 9.637  best 9.621  harm 5.26  band 4.80  att 2.45  hnr 3.49  lvl 1.89  |cents| 16.50
+gen 145    226s  gen-best 9.638  best 9.621  harm 5.26  band 4.80  att 2.45  hnr 3.49  lvl 1.89  |cents| 16.50
+gen 146    228s  gen-best 9.634  best 9.621  harm 5.26  band 4.80  att 2.45  hnr 3.49  lvl 1.89  |cents| 16.50
+gen 147    230s  gen-best 9.627  best 9.621  harm 5.26  band 4.80  att 2.45  hnr 3.49  lvl 1.89  |cents| 16.50
+gen 148    231s  gen-best 9.638  best 9.621  harm 5.26  band 4.80  att 2.45  hnr 3.49  lvl 1.89  |cents| 16.50
+gen 149    232s  gen-best 9.635  best 9.621  harm 5.26  band 4.80  att 2.45  hnr 3.49  lvl 1.89  |cents| 16.50
+gen 150    234s  gen-best 9.639  best 9.621  harm 5.26  band 4.80  att 2.45  hnr 3.49  lvl 1.89  |cents| 16.50
+gen 151    235s  gen-best 9.628  best 9.621  harm 5.26  band 4.80  att 2.45  hnr 3.49  lvl 1.89  |cents| 16.50
+gen 152    237s  gen-best 9.630  best 9.621  harm 5.26  band 4.80  att 2.45  hnr 3.49  lvl 1.89  |cents| 16.50
+gen 153    238s  gen-best 9.628  best 9.621  harm 5.26  band 4.80  att 2.45  hnr 3.49  lvl 1.89  |cents| 16.50
+gen 154    240s  gen-best 9.631  best 9.621  harm 5.26  band 4.80  att 2.45  hnr 3.49  lvl 1.89  |cents| 16.50
+gen 155    242s  gen-best 9.632  best 9.621  harm 5.26  band 4.80  att 2.45  hnr 3.49  lvl 1.89  |cents| 16.50
+gen 156    243s  gen-best 9.620  best 9.620  harm 5.25  band 4.77  att 2.46  hnr 3.60  lvl 1.88  |cents| 16.98
+gen 157    245s  gen-best 9.621  best 9.620  harm 5.25  band 4.77  att 2.46  hnr 3.60  lvl 1.88  |cents| 16.98
+gen 158    246s  gen-best 9.626  best 9.620  harm 5.25  band 4.77  att 2.46  hnr 3.60  lvl 1.88  |cents| 16.98
+gen 159    248s  gen-best 9.625  best 9.620  harm 5.25  band 4.77  att 2.46  hnr 3.60  lvl 1.88  |cents| 16.98
+gen 160    249s  gen-best 9.615  best 9.615  harm 5.26  band 4.75  att 2.46  hnr 3.61  lvl 1.89  |cents| 16.72
+gen 161    251s  gen-best 9.620  best 9.615  harm 5.26  band 4.75  att 2.46  hnr 3.61  lvl 1.89  |cents| 16.72
+gen 162    253s  gen-best 9.620  best 9.615  harm 5.26  band 4.75  att 2.46  hnr 3.61  lvl 1.89  |cents| 16.72
+gen 163    254s  gen-best 9.618  best 9.615  harm 5.26  band 4.75  att 2.46  hnr 3.61  lvl 1.89  |cents| 16.72
+gen 164    256s  gen-best 9.615  best 9.615  harm 5.26  band 4.75  att 2.46  hnr 3.61  lvl 1.89  |cents| 16.72
+gen 165    257s  gen-best 9.613  best 9.613  harm 5.26  band 4.77  att 2.46  hnr 3.56  lvl 1.88  |cents| 16.75
+gen 166    259s  gen-best 9.615  best 9.613  harm 5.26  band 4.77  att 2.46  hnr 3.56  lvl 1.88  |cents| 16.75
+gen 167    260s  gen-best 9.613  best 9.613  harm 5.26  band 4.77  att 2.46  hnr 3.56  lvl 1.88  |cents| 16.75
+gen 168    262s  gen-best 9.612  best 9.612  harm 5.24  band 4.78  att 2.46  hnr 3.56  lvl 1.89  |cents| 16.99
+gen 169    263s  gen-best 9.603  best 9.603  harm 5.24  band 4.76  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.92
+gen 170    265s  gen-best 9.608  best 9.603  harm 5.24  band 4.76  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.92
+gen 171    266s  gen-best 9.604  best 9.603  harm 5.24  band 4.76  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.92
+gen 172    267s  gen-best 9.608  best 9.603  harm 5.24  band 4.76  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.92
+gen 173    269s  gen-best 9.605  best 9.603  harm 5.24  band 4.76  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.92
+gen 174    270s  gen-best 9.607  best 9.603  harm 5.24  band 4.76  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.92
+gen 175    272s  gen-best 9.601  best 9.601  harm 5.24  band 4.74  att 2.47  hnr 3.63  lvl 1.90  |cents| 16.86
+gen 176    274s  gen-best 9.610  best 9.601  harm 5.24  band 4.74  att 2.47  hnr 3.63  lvl 1.90  |cents| 16.86
+gen 177    275s  gen-best 9.603  best 9.601  harm 5.24  band 4.74  att 2.47  hnr 3.63  lvl 1.90  |cents| 16.86
+gen 178    277s  gen-best 9.596  best 9.596  harm 5.23  band 4.76  att 2.47  hnr 3.58  lvl 1.89  |cents| 16.91
+gen 179    279s  gen-best 9.605  best 9.596  harm 5.23  band 4.76  att 2.47  hnr 3.58  lvl 1.89  |cents| 16.91
+gen 180    280s  gen-best 9.605  best 9.596  harm 5.23  band 4.76  att 2.47  hnr 3.58  lvl 1.89  |cents| 16.91
+gen 181    282s  gen-best 9.602  best 9.596  harm 5.23  band 4.76  att 2.47  hnr 3.58  lvl 1.89  |cents| 16.91
+gen 182    283s  gen-best 9.604  best 9.596  harm 5.23  band 4.76  att 2.47  hnr 3.58  lvl 1.89  |cents| 16.91
+gen 183    285s  gen-best 9.606  best 9.596  harm 5.23  band 4.76  att 2.47  hnr 3.58  lvl 1.89  |cents| 16.91
+gen 184    286s  gen-best 9.602  best 9.596  harm 5.23  band 4.76  att 2.47  hnr 3.58  lvl 1.89  |cents| 16.91
+gen 185    288s  gen-best 9.600  best 9.596  harm 5.23  band 4.76  att 2.47  hnr 3.58  lvl 1.89  |cents| 16.91
+gen 186    290s  gen-best 9.596  best 9.596  harm 5.23  band 4.76  att 2.47  hnr 3.58  lvl 1.89  |cents| 16.91
+gen 187    291s  gen-best 9.606  best 9.596  harm 5.23  band 4.76  att 2.47  hnr 3.58  lvl 1.89  |cents| 16.91
+gen 188    293s  gen-best 9.600  best 9.596  harm 5.23  band 4.76  att 2.47  hnr 3.58  lvl 1.89  |cents| 16.91
+gen 189    294s  gen-best 9.599  best 9.596  harm 5.23  band 4.76  att 2.47  hnr 3.58  lvl 1.89  |cents| 16.91
+gen 190    296s  gen-best 9.605  best 9.596  harm 5.23  band 4.76  att 2.47  hnr 3.58  lvl 1.89  |cents| 16.91
+gen 191    297s  gen-best 9.598  best 9.596  harm 5.23  band 4.76  att 2.47  hnr 3.58  lvl 1.89  |cents| 16.91
+gen 192    299s  gen-best 9.597  best 9.596  harm 5.23  band 4.76  att 2.47  hnr 3.58  lvl 1.89  |cents| 16.91
+gen 193    300s  gen-best 9.600  best 9.596  harm 5.23  band 4.76  att 2.47  hnr 3.58  lvl 1.89  |cents| 16.91
+gen 194    302s  gen-best 9.591  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 195    304s  gen-best 9.598  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 196    306s  gen-best 9.596  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 197    307s  gen-best 9.595  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 198    309s  gen-best 9.595  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 199    310s  gen-best 9.598  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 200    312s  gen-best 9.600  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 201    314s  gen-best 9.593  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 202    315s  gen-best 9.597  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 203    317s  gen-best 9.603  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 204    318s  gen-best 9.602  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 205    320s  gen-best 9.603  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 206    321s  gen-best 9.600  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 207    323s  gen-best 9.596  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 208    324s  gen-best 9.593  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 209    326s  gen-best 9.593  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 210    327s  gen-best 9.599  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 211    329s  gen-best 9.595  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 212    330s  gen-best 9.593  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 213    332s  gen-best 9.594  best 9.591  harm 5.24  band 4.75  att 2.47  hnr 3.54  lvl 1.90  |cents| 16.85
+gen 214    333s  gen-best 9.588  best 9.588  harm 5.24  band 4.74  att 2.48  hnr 3.51  lvl 1.90  |cents| 16.87
+gen 215    335s  gen-best 9.592  best 9.588  harm 5.24  band 4.74  att 2.48  hnr 3.51  lvl 1.90  |cents| 16.87
+gen 216    337s  gen-best 9.589  best 9.588  harm 5.24  band 4.74  att 2.48  hnr 3.51  lvl 1.90  |cents| 16.87
+gen 217    338s  gen-best 9.590  best 9.588  harm 5.24  band 4.74  att 2.48  hnr 3.51  lvl 1.90  |cents| 16.87
+gen 218    340s  gen-best 9.592  best 9.588  harm 5.24  band 4.74  att 2.48  hnr 3.51  lvl 1.90  |cents| 16.87
+gen 219    342s  gen-best 9.593  best 9.588  harm 5.24  band 4.74  att 2.48  hnr 3.51  lvl 1.90  |cents| 16.87
+gen 220    343s  gen-best 9.591  best 9.588  harm 5.24  band 4.74  att 2.48  hnr 3.51  lvl 1.90  |cents| 16.87
+gen 221    345s  gen-best 9.591  best 9.588  harm 5.24  band 4.74  att 2.48  hnr 3.51  lvl 1.90  |cents| 16.87
+gen 222    346s  gen-best 9.590  best 9.588  harm 5.24  band 4.74  att 2.48  hnr 3.51  lvl 1.90  |cents| 16.87
+gen 223    348s  gen-best 9.592  best 9.588  harm 5.24  band 4.74  att 2.48  hnr 3.51  lvl 1.90  |cents| 16.87
+gen 224    349s  gen-best 9.591  best 9.588  harm 5.24  band 4.74  att 2.48  hnr 3.51  lvl 1.90  |cents| 16.87
+gen 225    351s  gen-best 9.591  best 9.588  harm 5.24  band 4.74  att 2.48  hnr 3.51  lvl 1.90  |cents| 16.87
+gen 226    352s  gen-best 9.590  best 9.588  harm 5.24  band 4.74  att 2.48  hnr 3.51  lvl 1.90  |cents| 16.87
+gen 227    354s  gen-best 9.589  best 9.588  harm 5.24  band 4.74  att 2.48  hnr 3.51  lvl 1.90  |cents| 16.87
+gen 228    356s  gen-best 9.591  best 9.588  harm 5.24  band 4.74  att 2.48  hnr 3.51  lvl 1.90  |cents| 16.87
+gen 229    357s  gen-best 9.589  best 9.588  harm 5.24  band 4.74  att 2.48  hnr 3.51  lvl 1.90  |cents| 16.87
+gen 230    359s  gen-best 9.589  best 9.588  harm 5.24  band 4.74  att 2.48  hnr 3.51  lvl 1.90  |cents| 16.87
+gen 231    360s  gen-best 9.586  best 9.586  harm 5.23  band 4.75  att 2.48  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 232    362s  gen-best 9.588  best 9.586  harm 5.23  band 4.75  att 2.48  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 233    363s  gen-best 9.588  best 9.586  harm 5.23  band 4.75  att 2.48  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 234    364s  gen-best 9.591  best 9.586  harm 5.23  band 4.75  att 2.48  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 235    366s  gen-best 9.590  best 9.586  harm 5.23  band 4.75  att 2.48  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 236    368s  gen-best 9.588  best 9.586  harm 5.23  band 4.75  att 2.48  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 237    370s  gen-best 9.587  best 9.586  harm 5.23  band 4.75  att 2.48  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 238    371s  gen-best 9.589  best 9.586  harm 5.23  band 4.75  att 2.48  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 239    373s  gen-best 9.591  best 9.586  harm 5.23  band 4.75  att 2.48  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 240    374s  gen-best 9.589  best 9.586  harm 5.23  band 4.75  att 2.48  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 241    376s  gen-best 9.587  best 9.586  harm 5.23  band 4.75  att 2.48  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 242    377s  gen-best 9.590  best 9.586  harm 5.23  band 4.75  att 2.48  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 243    379s  gen-best 9.589  best 9.586  harm 5.23  band 4.75  att 2.48  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 244    381s  gen-best 9.587  best 9.586  harm 5.23  band 4.75  att 2.48  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 245    382s  gen-best 9.590  best 9.586  harm 5.23  band 4.75  att 2.48  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 246    384s  gen-best 9.589  best 9.586  harm 5.23  band 4.75  att 2.48  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 247    385s  gen-best 9.584  best 9.584  harm 5.23  band 4.74  att 2.47  hnr 3.55  lvl 1.90  |cents| 16.82
+gen 248    387s  gen-best 9.588  best 9.584  harm 5.23  band 4.74  att 2.47  hnr 3.55  lvl 1.90  |cents| 16.82
+gen 249    388s  gen-best 9.586  best 9.584  harm 5.23  band 4.74  att 2.47  hnr 3.55  lvl 1.90  |cents| 16.82
+gen 250    390s  gen-best 9.585  best 9.584  harm 5.23  band 4.74  att 2.47  hnr 3.55  lvl 1.90  |cents| 16.82
+gen 251    391s  gen-best 9.586  best 9.584  harm 5.23  band 4.74  att 2.47  hnr 3.55  lvl 1.90  |cents| 16.82
+gen 252    393s  gen-best 9.586  best 9.584  harm 5.23  band 4.74  att 2.47  hnr 3.55  lvl 1.90  |cents| 16.82
+gen 253    394s  gen-best 9.586  best 9.584  harm 5.23  band 4.74  att 2.47  hnr 3.55  lvl 1.90  |cents| 16.82
+gen 254    396s  gen-best 9.583  best 9.583  harm 5.23  band 4.74  att 2.47  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 255    397s  gen-best 9.585  best 9.583  harm 5.23  band 4.74  att 2.47  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 256    399s  gen-best 9.586  best 9.583  harm 5.23  band 4.74  att 2.47  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 257    401s  gen-best 9.585  best 9.583  harm 5.23  band 4.74  att 2.47  hnr 3.56  lvl 1.90  |cents| 16.89
+gen 258    403s  gen-best 9.581  best 9.581  harm 5.22  band 4.75  att 2.47  hnr 3.57  lvl 1.90  |cents| 16.91
+gen 259    405s  gen-best 9.585  best 9.581  harm 5.22  band 4.75  att 2.47  hnr 3.57  lvl 1.90  |cents| 16.91
+gen 260    406s  gen-best 9.584  best 9.581  harm 5.22  band 4.75  att 2.47  hnr 3.57  lvl 1.90  |cents| 16.91
+gen 261    408s  gen-best 9.583  best 9.581  harm 5.22  band 4.75  att 2.47  hnr 3.57  lvl 1.90  |cents| 16.91
+gen 262    410s  gen-best 9.585  best 9.581  harm 5.22  band 4.75  att 2.47  hnr 3.57  lvl 1.90  |cents| 16.91
+gen 263    411s  gen-best 9.585  best 9.581  harm 5.22  band 4.75  att 2.47  hnr 3.57  lvl 1.90  |cents| 16.91
+gen 264    413s  gen-best 9.584  best 9.581  harm 5.22  band 4.75  att 2.47  hnr 3.57  lvl 1.90  |cents| 16.91
+gen 265    415s  gen-best 9.582  best 9.581  harm 5.22  band 4.75  att 2.47  hnr 3.57  lvl 1.90  |cents| 16.91
+gen 266    417s  gen-best 9.582  best 9.581  harm 5.22  band 4.75  att 2.47  hnr 3.57  lvl 1.90  |cents| 16.91
+gen 267    418s  gen-best 9.582  best 9.581  harm 5.22  band 4.75  att 2.47  hnr 3.57  lvl 1.90  |cents| 16.91
+gen 268    420s  gen-best 9.582  best 9.581  harm 5.22  band 4.75  att 2.47  hnr 3.57  lvl 1.90  |cents| 16.91
+gen 269    422s  gen-best 9.583  best 9.581  harm 5.22  band 4.75  att 2.47  hnr 3.57  lvl 1.90  |cents| 16.91
+gen 270    423s  gen-best 9.580  best 9.580  harm 5.22  band 4.75  att 2.47  hnr 3.55  lvl 1.90  |cents| 16.89
+gen 271    425s  gen-best 9.581  best 9.580  harm 5.22  band 4.75  att 2.47  hnr 3.55  lvl 1.90  |cents| 16.89
+gen 272    426s  gen-best 9.582  best 9.580  harm 5.22  band 4.75  att 2.47  hnr 3.55  lvl 1.90  |cents| 16.89
+gen 273    428s  gen-best 9.580  best 9.580  harm 5.22  band 4.75  att 2.47  hnr 3.55  lvl 1.90  |cents| 16.89
+gen 274    430s  gen-best 9.583  best 9.580  harm 5.22  band 4.75  att 2.47  hnr 3.55  lvl 1.90  |cents| 16.89
+gen 275    431s  gen-best 9.583  best 9.580  harm 5.22  band 4.75  att 2.47  hnr 3.55  lvl 1.90  |cents| 16.89
+gen 276    433s  gen-best 9.584  best 9.580  harm 5.22  band 4.75  att 2.47  hnr 3.55  lvl 1.90  |cents| 16.89
+gen 277    435s  gen-best 9.582  best 9.580  harm 5.22  band 4.75  att 2.47  hnr 3.55  lvl 1.90  |cents| 16.89
+gen 278    437s  gen-best 9.583  best 9.580  harm 5.22  band 4.75  att 2.47  hnr 3.55  lvl 1.90  |cents| 16.89
+gen 279    438s  gen-best 9.581  best 9.580  harm 5.22  band 4.75  att 2.47  hnr 3.55  lvl 1.90  |cents| 16.89
+gen 280    440s  gen-best 9.580  best 9.580  harm 5.23  band 4.75  att 2.46  hnr 3.57  lvl 1.91  |cents| 16.86
+gen 281    441s  gen-best 9.580  best 9.580  harm 5.23  band 4.74  att 2.46  hnr 3.55  lvl 1.90  |cents| 16.86
+gen 282    443s  gen-best 9.581  best 9.580  harm 5.23  band 4.74  att 2.46  hnr 3.55  lvl 1.90  |cents| 16.86
+gen 283    445s  gen-best 9.581  best 9.580  harm 5.23  band 4.74  att 2.46  hnr 3.55  lvl 1.90  |cents| 16.86
+gen 284    446s  gen-best 9.581  best 9.580  harm 5.23  band 4.74  att 2.46  hnr 3.55  lvl 1.90  |cents| 16.86
+gen 285    448s  gen-best 9.581  best 9.580  harm 5.23  band 4.74  att 2.46  hnr 3.55  lvl 1.90  |cents| 16.86
+gen 286    449s  gen-best 9.581  best 9.580  harm 5.23  band 4.74  att 2.46  hnr 3.55  lvl 1.90  |cents| 16.86
+gen 287    451s  gen-best 9.579  best 9.579  harm 5.22  band 4.74  att 2.47  hnr 3.60  lvl 1.91  |cents| 16.88
+gen 288    452s  gen-best 9.577  best 9.577  harm 5.22  band 4.75  att 2.46  hnr 3.54  lvl 1.90  |cents| 16.87
+gen 289    454s  gen-best 9.579  best 9.577  harm 5.22  band 4.75  att 2.46  hnr 3.54  lvl 1.90  |cents| 16.87
+gen 290    455s  gen-best 9.580  best 9.577  harm 5.22  band 4.75  att 2.46  hnr 3.54  lvl 1.90  |cents| 16.87
+gen 291    457s  gen-best 9.581  best 9.577  harm 5.22  band 4.75  att 2.46  hnr 3.54  lvl 1.90  |cents| 16.87
+gen 292    458s  gen-best 9.578  best 9.577  harm 5.22  band 4.75  att 2.46  hnr 3.54  lvl 1.90  |cents| 16.87
+gen 293    460s  gen-best 9.580  best 9.577  harm 5.22  band 4.75  att 2.46  hnr 3.54  lvl 1.90  |cents| 16.87
+gen 294    461s  gen-best 9.578  best 9.577  harm 5.22  band 4.75  att 2.46  hnr 3.54  lvl 1.90  |cents| 16.87
+gen 295    462s  gen-best 9.580  best 9.577  harm 5.22  band 4.75  att 2.46  hnr 3.54  lvl 1.90  |cents| 16.87
+gen 296    466s  gen-best 9.580  best 9.577  harm 5.22  band 4.75  att 2.46  hnr 3.54  lvl 1.90  |cents| 16.87
+gen 297    469s  gen-best 9.578  best 9.577  harm 5.22  band 4.75  att 2.46  hnr 3.54  lvl 1.90  |cents| 16.87
+gen 298    472s  gen-best 9.581  best 9.577  harm 5.22  band 4.75  att 2.46  hnr 3.54  lvl 1.90  |cents| 16.87
+gen 299    474s  gen-best 9.577  best 9.577  harm 5.22  band 4.74  att 2.47  hnr 3.60  lvl 1.91  |cents| 16.88
+{
+ "brk": 69.5,
+ "vent_a": 0.25,
+ "interp": 1,
+ "rel": 0.05,
+ "grel": 1,
+ "gamma_f": 0.6,
+ "gamma_p": 0.5,
+ "d_f": 0.7050595951976766,
+ "d_p": 0.009413774709372633,
+ "vcurve": 3.326092851451438,
+ "thr_hi": -0.02503568729635669,
+ "zeta": 0.3435647960350396,
+ "zeta_hi": 0.5323349665036605,
+ "zslope": -0.015226103680408776,
+ "fr": 3061.1781606199047,
+ "qr": 0.580984591520209,
+ "fc": 1130.925965117987,
+ "loss": 0.0006634267987659423,
+ "loss_k": 0.31297052421370725,
+ "vent_y": 0.2240737334072836,
+ "vent_lp": 825.1637780210783,
+ "rad_hp": 33.12505055041918,
+ "att": 0.14999920666192165,
+ "att_p": 0.0068984418729405896,
+ "noise": 0.022050635256046263,
+ "eq_f": 6869.395150259827,
+ "eq_g": -14.318878388746873,
+ "eq_q": 3.4964209803913278,
+ "olp": 11064.209721424622,
+ "olp_q": 0.5975822520221609,
+ "fck": 1.7819700907975435,
+ "att2": 0.05559354106913679
+}
