@@ -15,7 +15,17 @@ void host_dt_note_on(int pos, int n, int v) { (void)pos; n_on++; last_on = n; la
 void host_dt_note_off(int pos, int n) { (void)pos; (void)n; n_off++; active--; }
 static int fx_val[2][DT_NLK] = { { -1, -1, -1, -1, -1, -1, -1, -1 }, { -1, -1, -1, -1, -1, -1, -1, -1 } }, n_lock; static long lock_at, restore_at;   /* -1 = base */
 void host_dt_fx_lock(int pos, int k, int pc) { fx_val[pos][k] = pc; n_lock++; lock_at = now; }
-void host_dt_fx_restore(int pos, int k) { fx_val[pos][k] = -1; restore_at = now; }
+int host_dt_masked;                                     /* dots.c: interrupts off */
+static int tick_held;                                   /* a tick (slot trigger) due during the key thread's revert */
+static void tick_to_lock(void)                          /* the tick: up to the next lock trigger (2 steps at most) */
+{
+    for (long t = 0, n0 = n_lock; t < 44100 / 4 && n_lock == n0; t += 64) { dt_tick(0, 64, 12000); now += 64; }
+}
+void host_dt_fx_restore(int pos, int k)
+{
+    fx_val[pos][k] = -1; restore_at = now;
+    if (tick_held && !host_dt_masked) { tick_held = 0; tick_to_lock(); }   /* interrupts on: the tick runs in here */
+}
 
 #define MAXL 4096
 static struct { int32_t x0, y0, x1, y1, w; uint8_t c[4]; } lines[MAXL]; static int nlines;
@@ -343,6 +353,19 @@ int main(int argc, char **argv)
             dt_halt(1, &d->rt[0]); d->rec = 0; d->page = 0; d->par = 0;
         }
         b->rec = 0; b->page = 0; b->par = 0;
+        /* cut on a running slot whose TIE lock holds, its next trigger due while dt_silence reverts the lock: the
+         * trigger's lock must not stay in the knob after the cut (ISSUES Y11) */
+        for (int k = 0; k < DT_SLOTS; k++) dt_halt(0, &b->rt[k]);
+        dt_cfg_clear(dt_q(b, 4), 16); s0 = &dt_q(b, 4)->st[0];
+        dt_step_default(s0); s0->vel = 100; s0->note = DT_NONOTE; s0->fx[1] = 31; s0->gate = DT_TIE;
+        fx_val[0][1] = -1; dt_start(b, &b->rt[4], dt_next_step(b));
+        run(step * 15); CHECK(fx_val[0][1] == 30, "TIE lock holds (%d)", fx_val[0][1]);
+        n_lock = 0; tick_held = 1; b->sel = 4; dt_clip(0, DT_CUT, 0);
+        if (tick_held) { tick_held = 0; tick_to_lock(); }   /* held off: runs once interrupts are back on */
+        run(step * 20);
+        CHECK(fx_val[0][1] == -1 && !dt_lk_owner[0][1] && !b->rt[4].locks, "cut during a lock trigger: knob reverted (%d, %d triggers inside)",
+              fx_val[0][1], n_lock);
+        dt_halt(0, &b->rt[4]);
     }
 
     if (render) {                                       /* README screenshot: melody, lock triggers, a locked note, running */

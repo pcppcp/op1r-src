@@ -111,8 +111,9 @@ void host_dt_fx_lock(int pos, int knob, int pc);       /* knob: lock index 0..7 
 void host_dt_fx_restore(int pos, int knob);
 #define DT_FX_LOCK(pos, k, pc)   host_dt_fx_lock((pos), (k), (pc))
 #define DT_FX_RESTORE(pos, k)    host_dt_fx_restore((pos), (k))
-static uint32_t dt_irq_off(void) { return 0; }
-static void dt_irq_on(uint32_t m) { (void)m; }
+extern int host_dt_masked;                              /* interrupts off (dots_test holds a tick back meanwhile) */
+static uint32_t dt_irq_off(void) { uint32_t m = (uint32_t)host_dt_masked; host_dt_masked = 1; return m; }
+static void dt_irq_on(uint32_t m) { host_dt_masked = (int)m; }
 #else
 static void dt_changed(void);
 #define DT_CHANGED() dt_changed()
@@ -173,7 +174,9 @@ static void dt_lock(int pos, int slot, dt_run_t *r, const uint8_t *fx)
 static int dt_slot_of(int pos, const dt_run_t *r) { return (int)(r - dt[pos & 1].rt); }
 
 /* the key thread and the tick both release a slot's note: the id is taken with interrupts off, the note-off goes
- * out after (as scale/sc_fw.c), so a tick inside the key thread's note-off can't lose the note it starts */
+ * out after (as scale/sc_fw.c), so a tick inside the key thread's note-off can't lose the note it starts. The locks
+ * revert with interrupts off too: a trigger the tick starts inside dt_unlock would get its owner and bits cleared
+ * (locks = 0) with its value still in the knob, never reverted */
 static void dt_silence(int pos, dt_run_t *r)
 {
     uint32_t m = dt_irq_off();
@@ -181,7 +184,9 @@ static void dt_silence(int pos, dt_run_t *r)
     r->sounding = 0; r->off_at = 0;
     dt_irq_on(m);
     if (id) DT_NOTE_OFF(pos, id - 1);
+    m = dt_irq_off();
     if (r->locks) dt_unlock(pos, dt_slot_of(pos, r), r);
+    dt_irq_on(m);
 }
 
 /* ---- keys / encoders (UI thread) ---- */
