@@ -11,10 +11,15 @@
 #define VOICE_VEL  ((const volatile int16_t *)0xFF801064)     /* velocity << 8 of voice v */
 #define SLOT_TYPE  ((const volatile int32_t *)0xFF8016E4)     /* synth slot types (6 = sampler) */
 #define FIR        ((const int16_t *)0xFF8021D2)
+#ifndef OP1_HOST                                              /* host: harness/sp_pp_test.c includes this file
+                                                                 * with the C model as the stock render */
 #define BUF_INC    ((int32_t *)0xFF801950)                    /* refilled for every voice before its render */
+#endif
 #define BEAT_LEN   (*(const volatile int32_t *)0x01AADAD8)    /* metronome beat length, 0x4000 per sample */
 #define SYNTH_PATCHES 0x01DDD7E8                              /* 8 synth patch objects x 0x38 (JSON at +4) */
+#ifndef OP1_HOST
 #define STOCK_RENDER   ((void (*)(void *, int16_t *, const int16_t *))0x01A51A7C)
+#endif
 #define STOCK_NOTE_ON  ((void (*)(void *, const int16_t *))0x01A518F4)
 #define STOCK_NOTE_OFF ((void (*)(void *))0x01A51964)
 #define STOCK_TYPE_JOB ((void (*)(void *))0x0193FFAC)
@@ -76,41 +81,58 @@ static void pp_mix(int16_t *out, const int16_t *fwd, int count, sp_xvoice *xs)  
     }
     xs->pp_done += count; xs->pp_left -= count;
 }
+/* turn at the loop point ahead: mirror the position there; past the other end too (the overshoot is longer than the
+ * loop), the turn starts at the loop point itself. e + (e - p): 2 * e overflows near the buffer end */
+static int32_t pp_turn(int32_t p, int32_t ls, int32_t le, sp_xvoice *xs)
+{
+    int32_t e = xs->dir > 0 ? le : ls;
+    p = e + (e - p);
+    xs->dir = (int8_t)-xs->dir;
+    return p >= ls && p < le ? p : xs->dir < 0 ? le - 1 : ls;
+}
+#define SP_PP_TURNS 4                                             /* turns per block (each one more stock render) */
 static void pingpong(void *self, int16_t *out, const int16_t *k, const sp_extra *x, sp_xvoice *xs, int32_t rate)
 {
     sp_voice *v = model(self);
     if (v->first) { if (xs->dir > 0 && v->pos < sp_bound(k[0], 0)) v->pos = sp_bound(k[0], 0); v->first = 0; }
     int32_t ls = sp_bound(k[1], k[5]), le = sp_bound(k[2], k[6]);
     int loop = k[0] < k[2] && le > ls && (!v->released || x->loop_rel);
-    int32_t p0 = v->pos, p1 = stock_at(self, out, k, p0, xs->dir < 0, 0);
+    int32_t p0 = v->pos;
+    if (loop && (xs->dir > 0 ? p0 >= le : p0 < ls))               /* already past the loop point ahead (loop end moved
+                                                                   * below the head, a late start): turn now, as the model */
+        p0 = pp_turn(p0, ls, le, xs);
+    int32_t p1 = stock_at(self, out, k, p0, xs->dir < 0, 0);
     int16_t fwd[SP_BLOCK];
     if (xs->pp_left > 0) {                                        /* a turn fade still running */
         xs->pp_fpos = stock_at(self, fwd, k, xs->pp_fpos, xs->pp_fdir < 0, 0);
         pp_mix(out, fwd, xs->pp_left < SP_BLOCK ? xs->pp_left : SP_BLOCK, xs);
     }
-    int32_t edge = xs->dir > 0 ? le : ls;
-    if (loop && (xs->dir > 0 ? p1 >= le && p0 < le : p1 < ls && p0 >= ls)) {
+    /* o: the block sample at p0 (BUF_INC[i] is sample o + i's step); a loop shorter than the block's travel turns
+     * again in the reversed part */
+    for (int o = 0, t = 0; loop && t < SP_PP_TURNS && (xs->dir > 0 ? p1 >= le && p0 < le : p1 < ls && p0 >= ls); t++) {
+        int32_t edge = xs->dir > 0 ? le : ls, r = SP_BLOCK - o;
         int32_t acc = p0, n = 0;                                  /* turn sample: the steps summed (turn blocks only) */
-        for (; n < SP_BLOCK; n++) {
+        for (; n < r; n++) {
             if (xs->dir > 0 ? acc >= edge : acc < edge) break;
             int32_t st = sp_step32((uint32_t)BUF_INC[n], (uint32_t)rate);
             acc += xs->dir > 0 ? st : -st;
         }
-        if (n >= SP_BLOCK) n = SP_BLOCK - 1;
-        int m = SP_BLOCK - n;
+        if (n >= r) n = r - 1;
+        int m = r - n;
         for (int i = 0; i < SP_BLOCK; i++) BUF_INC[i] = i < m ? BUF_INC[i + n] : 0;   /* exact end position */
-        for (int i = 0; i < m; i++) fwd[i] = out[n + i];          /* the audio past the loop point */
+        o += n;
+        for (int i = 0; i < m; i++) fwd[i] = out[o + i];          /* the audio past the loop point */
         int16_t tmp[SP_BLOCK];
-        int32_t q1 = stock_at(self, tmp, k, 2 * edge - acc, xs->dir > 0, 0);
-        for (int i = 0; i < m; i++) out[n + i] = tmp[i];
+        int32_t pf = p1;
+        p0 = pp_turn(acc, ls, le, xs);
+        p1 = stock_at(self, tmp, k, p0, xs->dir < 0, 0);
+        for (int i = 0; i < m; i++) out[o + i] = tmp[i];
         int32_t len = (int32_t)x->xfade * 32;
         if (len >= 16) {
             xs->pp_len = len; xs->pp_done = 0; xs->pp_left = len;
-            xs->pp_fdir = xs->dir; xs->pp_fpos = p1;              /* p1: where the forward-going render stopped */
-            pp_mix(out + n, fwd, len < m ? len : m, xs);
+            xs->pp_fdir = (int8_t)-xs->dir; xs->pp_fpos = pf;     /* pf: where the forward-going render stopped */
+            pp_mix(out + o, fwd, len < m ? len : m, xs);
         }
-        xs->dir = (int8_t)-xs->dir;
-        p1 = q1;
     }
     v->pos = p1;
 }
