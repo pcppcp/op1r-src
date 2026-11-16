@@ -907,7 +907,12 @@ MM_LINE static void mm_render(void *self, int16_t *out, const int16_t *params)
 
         int32_t target = base + (((env >> 12) * depth) >> 10) + ((mod[c] * mfd) >> 15);
         target = target < 0 ? 0 : (target > MAX_POS ? MAX_POS : target);
-        pos = v->fresh ? target : pos + ((target - pos) >> 3) + ((target - pos) >> 7);   /* 2.5 ms smoothing: no zipper */
+        if (v->fresh) pos = target;                                 /* 2.5 ms smoothing: no zipper */
+        else {                                                       /* (two floored steps can pass a lower target by one: at 0 that
+                                                                      * read MM_G[-1]; the fuzz test's sanitizer found it) */
+            const int32_t d = target - pos, np = pos + (d >> 3) + (d >> 7);
+            pos = d < 0 && np < target ? target : np;
+        }
         v->fresh = 0;
         int32_t gg = lerp_tab(MM_G, pos);
         lad_coef_t lc; lad_coef(&lc, gg, k);
