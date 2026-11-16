@@ -9,10 +9,14 @@
  * Page 2 / press:
  *   blue   word 5   REPEATS: how many parts a stuttering slice is cut into: 2, 3, 4, 6, 8, 16
  *   red    latch    FREEZE: keep repeating the part playing now, across slices, until pressed again
- * With no clock (tape stopped while it follows the tape, or no tempo yet) the grid runs on at 120 BPM.
+ * With no clock (tape stopped while it follows the tape, or no tempo yet) the grid runs on at the clock's tempo
+ * (120 BPM without one). A tape start is a beat: the slice under way ends and one starts on it (grid()).
  * Ring buffer: 65536 samples (1.49 s) of the position's FX scratch; a slice longer than that (1/4 under 40 BPM)
- * is cut short. While frozen the ring keeps the frozen part (nothing new is recorded). State per FX position 0..2. On the master the dispatcher feeds a mono sum and adds the
- * difference to both sides, so a stutter there repeats the mid signal over the live sides.
+ * is cut short. While frozen the ring keeps the frozen part (nothing new is recorded). The ring is not cleared at
+ * init (that clear cost two audio blocks on a select): every read is of a sample written earlier in the slice, except
+ * FREEZE + REVERSE's first part, which reads ahead and gets 0 until the ring has gone all round, as from a clear.
+ * State per FX position 0..2. On the master the dispatcher feeds a mono sum and adds the difference to both sides, so
+ * a stutter there repeats the mid signal over the live sides.
  * Copyright (C) 2026 Hundekraft. GPL-3.0-or-later with the OP-1 firmware permission (see LICENSE and NOTICE).
  */
 #include "op1_plugin.h"
@@ -36,6 +40,8 @@ typedef struct {
     int32_t rd, rate;               /* BRAKE: read position in the part (Q16) and rate (Q16) */
     int32_t gin;                    /* fade-in after a stutter, samples left */
     uint8_t latch, frozen;
+    uint8_t mov;                    /* the clock moved in the last block */
+    uint8_t fresh;                  /* the ring has not been written all round since init (s->w < NBUF) */
     int32_t rec;                    /* frozen: samples of the part still to record (then the ring is kept) */
     uint32_t rng;
     /* screen */
@@ -53,47 +59,50 @@ static unsigned sx_select(int32_t q, unsigned count) { return ((unsigned)(q < 0 
 static inline int32_t q15(const int16_t *p, int i) { return op1_fx_param_q15(p, i); }
 static inline uint32_t lcg(uint32_t *s) { return *s = *s * 1664525u + 1013904223u; }
 
-#ifdef FX_SPREAD_INIT
-#include "fx_spread.h"
-static fx_spread_t sx_spread[3];
-#endif
 static void sx_init(int pos)
 {
     pos %= 3;
     st_t *s = &st[pos];
-    s->w = 0; s->bp = -1; s->pos = 0; s->len = 0; s->sub = 1; s->start = 0; s->stut = 0; s->faded = 0;
+    s->w = 0; s->bp = -1; s->mov = 0; s->pos = 0; s->len = 0; s->sub = 1; s->start = 0; s->stut = 0; s->faded = 0;
     s->gin = 0; s->latch = op1_fx_page[pos][3]; s->frozen = 0;
     s->rng = 0x2545F491u + (uint32_t)pos * 0x9E3779B9u;
     s->slice = 0; s->hist = 0;
-    int16_t *buf = (int16_t *)op1_fx_scratch(pos);
-#ifdef FX_SPREAD_INIT                                         /* cleared per block, dry meanwhile (fx_spread.h) */
-    fx_spread_start(&sx_spread[pos], buf, NBUF / 2);
-#else
-    if (buf) for (int i = 0; i < NBUF / 2; i++) ((uint32_t *)(void *)buf)[i] = 0;   /* audio callback: 32-bit clear */
-#endif
+    s->fresh = 1;                   /* no ring clear: a read ahead of the writes (FREEZE + REVERSE) reads 0 instead */
 }
 
-/* the next grid point in this block: its sample 0..63 or -1; *len = slice length (samples, real time) */
-static int grid(st_t *s, int div, int32_t *slen)
+/* the next grid point in this block: its sample 0..63 or -1; *len = slice length (samples, real time).
+ * Transport: R246's metronome render (output stage, before the master FX, after the synth / drum FX) resets the beat
+ * phase to 0 when the tape starts, so the start is a beat at sample 0 of that callback's block. The master reads the
+ * clock after that render (next is for the following block): its phase is next + step. The synth / drum FX read it
+ * before, so they see the reset one block later, as a jump to "a beat one block ago": a slice starts at once, on the
+ * downbeat, instead of the slice under way running on until the next grid point. */
+static int grid(st_t *s, int pos, int div, int32_t *slen)
 {
     op1_beat_t c;
     op1_beat_clock(&c);
     int32_t len = c.len, p, step;
     const int moving = len >= (256 << 14) && c.step > 0 && c.step <= 0x400000 && c.next >= 0 && c.next <= len;
     if (len < (256 << 14)) len = 22050 << 14;                                /* no clock: 120 BPM */
-    if (moving) { p = c.next; step = c.step; }
-    else { p = s->bp < 0 || s->bp > len ? len : s->bp; step = 0x100000; }
+    int restart = 0;
+    if (moving) {
+        p = c.next; step = c.step;
+        if (pos == OP1_FX_MASTER) { p += step; if (p >= len) p -= len; }     /* read after the metronome render */
+        const int32_t ago = len - p;                                         /* a beat this long before the block */
+        restart = (!s->mov || p != s->bp) && ago > 0 && ago <= step;          /* the phase jumped onto a beat */
+    } else { p = s->bp < 0 || s->bp > len ? len : s->bp; step = 0x100000; }
+    s->mov = (uint8_t)moving;
     const int32_t np = p - step;
     s->bp = np < 0 ? np + len : np;
     const int32_t sq = step >> 14;
     const int32_t bl = sq > 0 && sq != 64 ? (len / sq) >> 8 : len >> 14;    /* the beat in real time, samples */
     *slen = bl / div;
+    if (restart) { s->slice = 0; return 0; }
     const int32_t q = len / div;
     for (int j = div - 1; j >= 0; j--) {                                     /* the earliest point in [0, step) */
         const int32_t t = p - j * q;
         if (t < 0 || t >= step) continue;
         s->slice = j == 0 ? 0 : div - j;                                     /* slice that starts here (0 = on the beat) */
-        return step == 0x100000 ? t >> 14 : (int)(((int64_t)t * 64) / step);
+        return step == 0x100000 ? t >> 14 : (int)((t * 64) / step);            /* t < step <= 0x400000: no 64-bit */
     }
     return -1;
 }
@@ -162,7 +171,9 @@ static void run(st_t *s, int16_t *buf, int16_t *ring, int a, int b)
                     if (s->mode == M_BRAKE) { r = s->rd >> 16; s->rd += s->rate; }
                     else if (s->mode == M_REVERSE) r = sub - 1 - ps;
                     else r = ps;
-                    y = ring[(s->start + (uint32_t)r) & MASK];
+                    const uint32_t a = s->start + (uint32_t)r;
+                    y = ring[a & MASK];
+                    if (s->mode == M_REVERSE && s->fresh && a > s->w) y = 0;    /* the one read ahead: never written */
                     if (ps < f) e = ps * fi;
                 }
                 if (ps >= sub - f) { const int32_t d = (sub - ps) * fi; if (d < e) e = d; }
@@ -185,13 +196,10 @@ static void sx_render(int pos, int16_t *buf, const int16_t *p)
     st_t *s = &st[pos];
     int16_t *ring = (int16_t *)op1_fx_scratch(pos);
     if (!ring) return;
-#ifdef FX_SPREAD_INIT
-    if (fx_spread_step(&sx_spread[pos])) return;
-#endif
     const int div = DIVS[sx_range(q15(p, 0), 6)];
     s->ndiv = (uint8_t)div;
     int32_t slen;
-    const int off = grid(s, div, &slen);
+    const int off = grid(s, pos, div, &slen);
     if (s->len == 0) slice_start(s, slen, p, pos);                           /* first block */
     if (off < 0) {
         run(s, buf, ring, 0, OP1_FX_BLOCK);
@@ -206,6 +214,7 @@ static void sx_render(int pos, int16_t *buf, const int16_t *p)
     volatile int16_t *m = op1_fx_meter(pos);
     const int32_t mv = (*m * 0xfe00) >> 16;
     *m = (int16_t)(pk > mv ? pk : mv);
+    if (s->w >= NBUF) s->fresh = 0;
     sx_blocks[pos]++;
 }
 
@@ -215,7 +224,9 @@ const op1_fx_t FX_stutter = { sx_init, sx_render, { OP1_PRESS_PAGE, OP1_PRESS_NO
  * stutter.svg and stutter_geom.h (OP1-Emulator docs/design/engine-screens/night/build_night2.py): a film projector
  * traced from the night concept, its reel a node (reel), and four knob readouts in the corners (label, dim ring
  * track; no slider bars, owner). Drawn here:
- *   the knob rings: value arc, pointer and knob face in the knob's colour, for RATE (blue, 6 steps), SHAPE (white),
+ *   the knob faces once, captured with the art (op1_screen_cached_extra; the SVG has the reel last, so the ring
+ *     tracks and labels are cached too)
+ *   the knob rings: value arc and pointer in the knob's colour, for RATE (blue, 6 steps), SHAPE (white),
  *     MODE (green, 4 steps) and CHANCE (red), as the effect hears them (op1_fx_knobs_live: LFO included); with the
  *     blue press (page 2) the RATE ring shows PARTS (2 .. 16, 6 steps); while a part is frozen the CHANCE ring gets a
  *     lit inner ring (FREEZE)
@@ -255,14 +266,29 @@ static void ring(void *r, int32_t cx, int32_t cy, int32_t v, const uint8_t *c)
         sl(r, px, py, x, y, 0x800, c);
         px = x; py = y;
     }
-    on_circle(cx, cy, (SX_RING_R * 3) >> 2, 0, &px, &py);     /* the knob face */
+    on_circle(cx, cy, (SX_RING_R * 5) >> 3, a1, &x, &y);      /* the pointer */
+    sl(r, cx, cy, x, y, 0x800, c);
+}
+
+/* the knob faces: static, drawn once with the art and then restored from the cache (op1_screen_cached_extra) */
+static void face(void *r, int32_t cx, int32_t cy, const uint8_t *c)
+{
+    int32_t px, py, x, y;
+    on_circle(cx, cy, (SX_RING_R * 3) >> 2, 0, &px, &py);
     for (int32_t a = 512; a <= 8192; a += 512) {
         on_circle(cx, cy, (SX_RING_R * 3) >> 2, a, &x, &y);
         sl(r, px, py, x, y, 0x700, c);
         px = x; py = y;
     }
-    on_circle(cx, cy, (SX_RING_R * 5) >> 3, a1, &x, &y);      /* the pointer */
-    sl(r, cx, cy, x, y, 0x800, c);
+}
+static void sx_faces(void *scr)
+{
+    (void)scr;
+    void *r = op1_raster();
+    face(r, SX_RING0_X, SX_RING0_Y, S_BLUE);
+    face(r, SX_RING1_X, SX_RING1_Y, S_WHITE);
+    face(r, SX_RING2_X, SX_RING2_Y, S_GREEN);
+    face(r, SX_RING3_X, SX_RING3_Y, S_RED);
 }
 
 static void sx_screen_init(void *scr) { sx_reel = op1_find_node(scr, "reel"); }
@@ -283,6 +309,7 @@ static void sx_screen_update(void *scr, int dt)
     const int32_t target = (s->slice % div) * (8192 / div);
     sx_angle += ((((target - sx_angle) + 4096) & 8191) - 4096) >> 2;
     op1_node_rotate(sx_reel, SX_REEL_X, SX_REEL_Y, OP1_SINE_TABLE[sx_angle & 8191], OP1_SINE_TABLE[(sx_angle + 2048) & 8191]);
+    op1_screen_cached_extra(sx_faces);
     op1_screen_draw_cached(scr, dt, sx_reel);
     void *r = op1_raster();
 

@@ -14,7 +14,7 @@
  * encoder press (page 2, params[5..7], saved with the patch):
  *   blue press  -> PITCH  -24 .. +24 semitones per grain (centre = 0, small dead band): one detent = one
  *                         semitone (snapped), Shift + turn = one cent (OP1_PRESS_PAGE_SEMI, the word law there)
- *   green press -> MIX    dry / wet (Beads' laws: 0.75 dry at 0, 1.5 wet at full)
+ *   green press -> MIX    dry / wet (Beads' wet law, 1.5 at full; dry is 1.0 at 0, Beads has 0.75)
  *   white press -> SPACE  0..50 %: reverb 0 .. 0.75; 50..100 %: reverb stays, feedback 0 .. 1
  *   red press   -> FREEZE (latch, not saved): nothing new is recorded, grains keep playing the buffer
  *
@@ -613,8 +613,9 @@ static void bd_render(int pos, int16_t *io, const int16_t *p)
         if (!grain_done(&s->g[k])) grain_run(s->buf, &s->g[k], wet, hq0, hstep);
 
     /* feedback source (DC-blocked wet signal, used by the next block) and dry / wet in one pass:
-     * dry (1 - m)(1 + m) 0.75, wet m (2 - m) 1.5 */
-    const int32_t dry = ((((32768 - w6) * (32768 + w6)) >> 15) * 24576) >> 15;
+     * dry (1 - m)(1 + m), wet m (2 - m) 1.5. Beads' dry law has a 0.75 factor (-2.5 dB at mix 0, against FX off); it is
+     * left out so mix 0 is unity, the wet law is as Beads' */
+    const int32_t dry = (((((32768 - w6) * (32768 + w6)) >> 15)) * 32767) >> 15;     /* 32767 / 32768: 0 at full mix, not -1 LSB */
     const int32_t wt = ((((w6 * (65536 - w6)) >> 15) * 49152) >> 15);
     const int32_t ddr = (dry - s->dry) >> 6, dwt = (wt - s->wet) >> 6;
     int32_t cd = s->dry, cw = s->wet, out[OP1_FX_BLOCK], dc = s->dc, mpk = 0;

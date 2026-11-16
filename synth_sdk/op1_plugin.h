@@ -206,10 +206,19 @@ typedef struct {
 _Static_assert(sizeof(op1_fx_stereo_t) == sizeof(op1_fx_t), "op1_fx_stereo_t layout");
 /* kennel's cached static SVG prefix (docs/77): the SVG's nodes before first_live (0: all of it) never change; op1r 61
  * keeps them as a picture and draws only the live nodes each frame. Older cores / host: the whole screen. */
+/* op1_screen_cached_extra(fn), just before op1_screen_draw_cached: fn(scr) draws more static pixels (op1_raster_line
+ * etc.) that join the cached prefix: drawn with the prefix when it is captured, so later frames restore them with the
+ * art; after the whole SVG when there is no cache. Only drawing that never changes and does not overlap the live
+ * suffix belongs there. One call: the next op1_screen_draw_cached takes it (kennel 3.2.6's API, op1r 70). */
 #ifdef OP1_HOST
-#define op1_screen_draw_cached(scr, dt, first_live) ((void)(first_live), op1_screen_draw((scr), (dt)))
+static void (*op1_host_cached_extra)(void *scr) __attribute__((unused));
+static inline void op1_screen_cached_extra(void (*fn)(void *scr)) { op1_host_cached_extra = fn; }
+#define op1_screen_draw_cached(scr, dt, first_live) \
+    do { (void)(first_live); op1_screen_draw((scr), (dt)); \
+         if (op1_host_cached_extra) { void (*f_)(void *) = op1_host_cached_extra; op1_host_cached_extra = 0; f_(scr); } } while (0)
 #else
 void op1_screen_draw_cached_fn(void *scr, int dt, void *first_live);
+void op1_screen_cached_extra(void (*fn)(void *scr));
 #define op1_screen_draw_cached(scr, dt, first_live) op1_screen_draw_cached_fn((scr), (dt), (void *)(first_live))
 #endif
 /* Encoder presses on a custom FX page (dispatcher.c hooks the KeyHandler dispatch):

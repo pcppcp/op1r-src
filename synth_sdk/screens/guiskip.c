@@ -296,9 +296,12 @@ static void doc_reset(void *doc)
 static void *dc_fl, *dc_raster;
 static uint32_t dc_gen;
 struct { uint32_t calls, builds, copies, fallbacks; } gs_dc_stat;
+static void (*dc_extra)(void *scr);                              /* op1_screen_cached_extra: for the next cached draw */
+void op1_screen_cached_extra(void (*fn)(void *scr)) { dc_extra = fn; }
 void op1_screen_draw_cached_fn(void *scr, int dt, void *first_live)
 {
     uint8_t *doc = scr ? *(uint8_t **)scr : 0;
+    void (*xf)(void *) = dc_extra; dc_extra = 0;                 /* (one call) */
 #if defined(GS_ON) && !defined(GS_NOCACHE)
     if (doc && !rg_active && dc_raster && tgt_buf && g_ok && *(volatile uint32_t *)0x01B60FFC) {
         const uint8_t *vt = *(uint8_t *const *)(doc + 0x54);
@@ -312,6 +315,7 @@ void op1_screen_draw_cached_fn(void *scr, int dt, void *first_live)
                     no_hash = 1;
                     RASTER_TARGET(dc_raster, cache); RASTER_CLEAR(dc_raster);
                     draw_range(doc, begin, stop);
+                    if (xf) xf(scr);                             /* the plugin's static drawing joins the captured pixels */
                     RASTER_TARGET(dc_raster, tgt_buf);
                     no_hash = 0;
                     doc_reset(doc);
@@ -329,6 +333,7 @@ void op1_screen_draw_cached_fn(void *scr, int dt, void *first_live)
 #endif
     (void)dt;
     SCREEN_DRAW(scr, dt);
+    if (xf) xf(scr);                                             /* no cache: after the whole SVG */
 }
 
 static int slot_of(const uint32_t *b) { if (buf_id[0] == b) return 0; if (buf_id[1] == b) return 1; return -1; }
