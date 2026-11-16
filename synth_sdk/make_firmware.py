@@ -613,6 +613,14 @@ def check_collisions():
     assert not bad, 'patch collision: ' + '; '.join(f'{x[2]} [{x[0]:#x}..{x[1]:#x}) overlaps {y[2]} [{y[0]:#x}..{y[1]:#x})'
                                                    for x, y in bad)
 
+FRAME_BUF = 0x02000000   # R246's display frame buffer (crash.c), its first SDRAM block above CODE_BASE
+def layout_errors(blocks, end):
+    """our SDRAM block [CODE_BASE, end) (code + .bss) vs R246's LDR blocks (L1 ones excepted: our L1 stages replace
+    R246 code on purpose): [] if it fits. An overlap would overwrite R246 data at load or be cleared by it."""
+    err = [f'code + .bss end at {end:#x}, past {FRAME_BUF:#x} (R246 frame buffer)'] if end > FRAME_BUF else []
+    return err + [f'code + .bss [{CODE_BASE:#x}..{end:#x}) overlaps R246 LDR block [{a:#x}..{a + n:#x})'
+                  for _, c, a, n, _ in blocks if n and a < 0xFF000000 and a < end and CODE_BASE < a + n]
+
 def patch_ldr(src, dst, code, hooks, syms, opz=False, release=True):
     d = bytearray(open(src, 'rb').read())
     if opz:
@@ -659,6 +667,8 @@ def patch_ldr(src, dst, code, hooks, syms, opz=False, release=True):
     blk = ldr_hdr(0x0006, CODE_BASE, len(code), 0) + code
     bss, bss_end = syms['bss_start'], syms['bss_end']        # .bss: zero FILL block (link.ld), no payload
     assert CODE_BASE + len(code) <= bss, (hex(CODE_BASE + len(code)), hex(bss_end))   # code below .bss
+    err = layout_errors(list(ldr_blocks(d)), max(CODE_BASE + len(code), bss_end))
+    assert not err, '; '.join(err)
     if bss_end > bss:
         blk += ldr_hdr(0x0106, bss, bss_end - bss, 0)
     lst = open(os.path.join(HERE, 'build', 'synth.lst')).read()

@@ -124,6 +124,9 @@ static int l1_poke(const l1_poke_t *p)
     }
     return 1;
 }
+/* one poke at a time: an Rx.L / Rx.H pair (L1_IMM_PATCHES) is two pokes, so if only one half matched its original
+ * the address would be half patched. Both halves are checked against the same L1 image: that needs a partly
+ * different L1, and then the failed count shows on page 9. */
 static void l1_runtime_apply(void)
 {
     uint32_t ok = 0, bad = 0;
