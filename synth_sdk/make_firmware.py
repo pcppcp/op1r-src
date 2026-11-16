@@ -8,6 +8,7 @@
                                               + ../op1_246_custom-symbols.json (crash screen addresses -> names, symmap.py)
 
   --release  boot screen shows only "op1r <VERSION>" (use for the patcher); local builds add the build time
+             (refuses the OP1R_* test switches at non-default values, BUILD_ENV)
 
   --opz   also enable the hidden OP-Z controller MIDI mode (docs/12). COM -> CTRL (T2) starts in the
           normal CTRL mode; the OP-Z mode is switched on by the host-mode SysEx F0 00 20 76 00 01 03 F7
@@ -735,10 +736,29 @@ def patch_db(dbp, engs, fxs):
     c.close()
 
 DEV_BUILD = False
+# every OP1R_* switch this script reads, with its default (None: unset). Each one changes the image (test / check /
+# diagnostic builds): a release (--release, the patcher's build) refuses any of them at a non-default value, since the
+# image would ship under the normal name. A new OP1R_* variable must be added here (harness/release_env_test.py).
+BUILD_ENV = {k: None for k in (
+    'OP1R_OUTSTAGE', 'OP1R_EQ', 'OP1R_MIX', 'OP1R_MASTER', 'OP1R_CW', 'OP1R_MON', 'OP1R_DEC', 'OP1R_DC',
+    'OP1R_L1SLOT', 'OP1R_L1SLOT_CHECK', 'OP1R_GUISKIP_VERIFY', 'OP1R_GUISKIP_NOREG', 'OP1R_GUISKIP_TILESTAT',
+    'OP1R_GUISKIP_NOCACHE', 'OP1R_EAGER_SCREENS', 'OP1R_LZ_NOBG', 'OP1R_FORCE_MFX', 'OP1R_FORCE_HP', 'OP1R_TFDIAG',
+    'OP1R_SPKDIAG', 'OP1R_TAPEFREE', 'OP1R_TMDBG', 'OP1R_TMXTEST', 'OP1R_TAPEMIX', 'OP1R_CRASHTEST',
+    'OP1R_WDOG_NORESET', 'OP1R_TMCHECK', 'OP1R_TAPEIO', 'OP1R_L1READ', 'OP1R_USB_RAWIN', 'OP1R_AUDRING', 'OP1R_COOPFAST',
+    'OP1R_SINE_SKIP', 'OP1R_SLPROF')}
+BUILD_ENV.update(OP1R_GUISKIP='1', OP1R_WDOG='1', OP1R_L1_RUNTIME='1')   # on by default; '' or a list is not
+def release_env_check(env):
+    """the OP1R_* variables in env that make a release differ from the normal build (empty list: ok)"""
+    return sorted(k for k, d in BUILD_ENV.items() if env.get(k) not in (None, d) and (d or env.get(k)))
+
 def main(opz=False, release=False, plugin_files='all', builtin=''):
     global DEV_BUILD
     DEV_BUILD = not release                                       # the developer commands never reach a release (the patcher)
     check_collisions()
+    bad = release_env_check(os.environ) if release else []
+    if bad:
+        sys.exit('ERROR: --release with test build switches set: ' + ', '.join(f'{k}={os.environ[k]!r}' for k in bad)
+                 + '\nunset them (a release must be the normal build)')
     engs, fxs = plugins.load()
     seqs = plugins.load_seqs() + plugins.load_seqs('drum') + plugins.load_seqs('sampler') + plugins.load_seqs('tool')   # sequencers / drum+ / sampler+ / tools: plugin files
     # plugin files (docs/37, default: all) are built into the tree's plugins/ instead of being compiled in;

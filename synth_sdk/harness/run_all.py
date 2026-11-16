@@ -29,7 +29,7 @@ if not _plugins(): SKIP['op1p'] = 'no built plugins (build/plugins/*.op1p)'
 if not os.path.exists(os.path.join(HERE, 'build', 'oblique_hostw.h')):   # width table made from the stock font (local)
     SKIP['oblique'] = 'needs build/oblique_hostw.h (stock font widths, local only)'
 
-PY = ['pluginkit']                              # harness/<name>_test.py: run with python3, no C build
+PY = ['pluginkit', 'release_env']                  # harness/<name>_test.py: run with python3, no C build
 
 def run(name):
     if name in PY:
