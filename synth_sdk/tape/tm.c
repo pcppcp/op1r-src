@@ -513,6 +513,9 @@ volatile uint32_t tm_sl_tr[SL_N];
 volatile uint8_t tm_sl_lfoon[SL_N];                              /* LFOs with an amount, a bit each (the GUI): none = skipped */
 static int32_t sl_envstep[101];                                  /* envelope gain step per block for 0..100 (built once) */
 volatile uint8_t tm_sl_peak[SL_N][SL_PKN];
+#if defined(SL_PROF) || defined(OP1_HOST)                       /* OP1R_SLPROF=1 (docs/86): the slot engine's profile counters
+                                                                  * (perf page, op1dev perf); the host tests use the path counts */
+#define SLP(...) __VA_ARGS__
 volatile uint8_t tm_sl_paths[3];                                 /* last block: slots on the fast / general / stretch path (sysmon) */
 static uint8_t sl_np[3];
 uint32_t sl_fast_blocks, sl_direct_blocks;                       /* (harness/slfast_test.c) */
@@ -525,6 +528,9 @@ static inline uint32_t sl_cyc(void) {
     return 0;
 #endif
 }
+#else
+#define SLP(...)
+#endif
 static volatile uint8_t *sl_rpk; static int32_t sl_rpk_base;     /* the recording slot's peaks (tm_record) */
 volatile uint32_t tm_sl_rinc[64], tm_sl_dinc[SL_DIVS];
 static int32_t sl_lfo_shape(int w, uint32_t ph, uint32_t cnt, int s)   /* Q15 (the quad LFO's shapes; sine: a parabola) */
@@ -596,10 +602,10 @@ static const uint32_t sl_semi_q16[49] = {                       /* 2^(n / 12), n
 volatile uint8_t tm_sl_full;                                     /* the recording reached 2:00 (the GUI stops it) */
 volatile int32_t tm_sl_queue = -1;                               /* a chunk to queue in R246's cache (record start) */
 static inline int32_t sl_base(int s) { return (s % 3) * SL_MAX; }
-volatile uint32_t tm_prof[12];                                    /* PROFILE (docs/86): start, pre, loop, post, mix, out, rec, blocks */
+SLP(volatile uint32_t tm_prof[12];)                               /* PROFILE (docs/86): start, pre, loop, post, mix, out, rec, blocks */
 static void tm_slots_block(int32_t *accL, int32_t *accR)
 {
-    uint32_t pf = sl_cyc();
+    SLP(uint32_t pf = sl_cyc();)
 #ifndef OP1_HOST
     if (tm_sl_queue >= 0) { QUEUE_CLIP_EARLY(tm_sl_queue); tm_sl_queue = -1; }
 #endif
@@ -618,8 +624,8 @@ static void tm_slots_block(int32_t *accL, int32_t *accR)
     const int16_t *fc_src[SL_N]; int32_t fc_g[SL_N]; int nfc = 0;
     sl_dr dr[SL_N]; int ndr = 0;                                 /* (b, c): reverse / resampled blocks, after the assembly mix */   /* (equal left / right gain: one multiply) */
     sl_mpk_on = (uint8_t)fmx; sl_mpk[0] = sl_mpk[1] = sl_mpk[2] = sl_mpk[3] = 0;
-    if (++sl_pcn == 256) { for (int k = 0; k < 3; k++) { tm_sl_pcyc[k] = sl_pc[k] >> 8; sl_pc[k] = 0; } sl_pcn = 0; }
-    tm_sl_paths[0] = sl_np[0]; tm_sl_paths[1] = sl_np[1]; tm_sl_paths[2] = sl_np[2]; sl_np[0] = sl_np[1] = sl_np[2] = 0;
+    SLP(if (++sl_pcn == 256) { for (int k = 0; k < 3; k++) { tm_sl_pcyc[k] = sl_pc[k] >> 8; sl_pc[k] = 0; } sl_pcn = 0; }
+        tm_sl_paths[0] = sl_np[0]; tm_sl_paths[1] = sl_np[1]; tm_sl_paths[2] = sl_np[2]; sl_np[0] = sl_np[1] = sl_np[2] = 0;)
     const int rs = tm_sl_rec;
     {                                                            /* starts asked for: now, or (sync) at the bar in this block */
         int busy = rs >= 0 && !tm_sl_recwait, want = tm_sl_recwait && rs >= 0;
@@ -637,11 +643,11 @@ static void tm_slots_block(int32_t *accL, int32_t *accR)
         }
         sl_clock += 64;
     }
-    { const uint32_t c = sl_cyc(); tm_prof[0] += c - pf; pf = c; }
-    uint32_t pa = 0, pb = 0, pc = 0, pt;                         /* PROFILE (fast slots): top .. envelope + LFO, setup, fast part */
+    SLP({ const uint32_t c = sl_cyc(); tm_prof[0] += c - pf; pf = c; })
+    SLP(uint32_t pa = 0, pb = 0, pc = 0, pt;)                         /* PROFILE (fast slots): top .. envelope + LFO, setup, fast part */
     for (int s = 0; s < SL_N; s++) {
         volatile tm_slm *q = &tm_sl[s];
-        pt = sl_cyc();
+        SLP(pt = sl_cyc();)
         const int t = s / 3; const int32_t base = sl_base(s), len = q->len;
         if (len > 0 && ((s ^ blk) & 3) == 0) {                  /* its start stays cached (an instant start, and where a loop wraps
                                                                   * to): the first chunk, reversed the last; and the one 8192 samples
@@ -681,7 +687,7 @@ static void tm_slots_block(int32_t *accL, int32_t *accR)
             const int32_t v = sh * L->amt * 1057 >> 15;          /* x amount / 31 */
             L->val = (int16_t)v; m[L->tgt & 3] += v;
         }
-        uint32_t pt1 = sl_cyc();
+        SLP(uint32_t pt1 = sl_cyc();)
         int32_t lv = q->lvl * 10486 >> 5;
         if (m[0]) { const int32_t f = 32768 + m[0]; lv = lv * (f < 0 ? 0 : f > 65536 ? 65536 : f) >> 15; }
         const int32_t ga = g0 * lv >> 15, gb = g * lv >> 15, gd = (gb - ga) >> 6;
@@ -695,7 +701,7 @@ static void tm_slots_block(int32_t *accL, int32_t *accR)
         const uint32_t step = stretch ? pstep : (uint32_t)((uint64_t)pstep * tr >> 16);   /* tape: pitch x tempo */
         if (step == 65536 && !stretch) fr = 0;                   /* back at 1x: whole samples again (the fast path; < 1 sample) */
         const int mode = q->mode;
-        const uint32_t pt2 = sl_cyc();
+        SLP(const uint32_t pt2 = sl_cyc();)
         if (fmx && stretch && ga == gb && s != rs) {             /* stretch: the block's reads = the position's run + a grain */
             const int32_t padv = (int32_t)((fr + 64u * tr) >> 16) + 1, span = padv + SL_G + 1;
             const int32_t lo = dir > 0 ? pos : pos - span, hi = dir > 0 ? pos + span : pos;
@@ -711,7 +717,7 @@ static void tm_slots_block(int32_t *accL, int32_t *accR)
                     sl_dr *d = &dr[ndr++];
                     d->src = cp + ((base + pos) & (CHUNK - 1)); d->fr = fr; d->step = step; d->dir = dir; d->gl = gl; d->gr = gr;
                     d->s = (int8_t)s; d->c = (int8_t)c; d->bin = pos >> SL_PKS; d->ga = ga; d->str = 1; d->ph = q->gph; d->tr = tr; d->dph = dph;
-                    sl_np[2]++; sl_direct_blocks++;
+                    SLP(sl_np[2]++; sl_direct_blocks++;)
                     q->gph = (q->gph + 64u * (uint32_t)dph) & M;   /* as stepping 64 samples */
                     const uint32_t fe = fr + 64u * tr;
                     pos += dir * (int32_t)(fe >> 16); q->frac = (uint16_t)(fe & 0xFFFF); q->pos = pos;
@@ -747,12 +753,12 @@ static void tm_slots_block(int32_t *accL, int32_t *accR)
                         for (int k = 0; k < 64; k += 31) { const int32_t a = src[k] < 0 ? -src[k] : src[k]; if (a > pk) pk = a; }
                         { const uint8_t a = (uint8_t)(pk >> 7); volatile uint8_t *pp = &tm_sl_peak[s][pos >> SL_PKS]; if (a > *pp) *pp = a; }
                         { const int32_t mp = pk * ga >> 15; if (mp > sl_mpk[c]) sl_mpk[c] = mp; }
-                        sl_np[0]++; sl_fast_blocks++;
+                        SLP(sl_np[0]++; sl_fast_blocks++;)
                     } else {                                     /* (b, c) reverse / any rate: the direct loop after the mix */
                         sl_dr *d = &dr[ndr++];
                         d->src = src; d->fr = fr; d->step = step; d->dir = dir; d->gl = gl; d->gr = gr; d->s = (int8_t)s; d->c = (int8_t)c;
                         d->bin = pos >> SL_PKS; d->ga = ga; d->str = 0;
-                        sl_np[1]++; sl_direct_blocks++;
+                        SLP(sl_np[1]++; sl_direct_blocks++;)
                     }
                     const int32_t pe = pos + dir * (int32_t)((fr + 64u * step) >> 16);   /* as stepping 64 samples */
                     q->frac = (uint16_t)((fr + 64u * step) & 0xFFFF); pos = pe; q->pos = pos;
@@ -764,7 +770,7 @@ static void tm_slots_block(int32_t *accL, int32_t *accR)
                         if (dir < 0 && cn > (base >> 15)) tm_chunk(t, cn - 1, 1);
                         (void)off;
                     }
-                    { const uint32_t e = sl_cyc(); pa += pt1 - pt; pb += pt2 - pt1; pc += e - pt2; }
+                    SLP({ const uint32_t e = sl_cyc(); pa += pt1 - pt; pb += pt2 - pt1; pc += e - pt2; })
                     continue;
                 }
             }
@@ -777,9 +783,8 @@ static void tm_slots_block(int32_t *accL, int32_t *accR)
         int32_t gg = ga;
         for (int i = 0; i < 64; i++) o[i] = 0;
         if (s == rs) { sl_od_h0 = pos; sl_od_step = dir * (int32_t)(stretch ? tr : step); }   /* overdub: record along the playback */
-        const int path = stretch ? 2 : step == 65536 && !fr && dir > 0 && mode == 0 && len > 128 ? 0 : 1;
-        sl_np[path]++;
-        const uint32_t pc0 = sl_cyc();
+        SLP(const int path = stretch ? 2 : step == 65536 && !fr && dir > 0 && mode == 0 && len > 128 ? 0 : 1;)
+        SLP(sl_np[path]++; const uint32_t pc0 = sl_cyc();)
         if (stretch) {       /* stretch: two grains (half a grain apart, triangle windows)
                                                                   * read at the pitch around a 1x position */
             uint32_t ph = q->gph; const int32_t dph = (int32_t)step - (int32_t)tr;   /* grains at the pitch, the position at the tempo */ const uint32_t M = ((uint32_t)SL_G << 16) - 1;
@@ -849,7 +854,7 @@ static void tm_slots_block(int32_t *accL, int32_t *accR)
                 else { pos %= len; if (pos < 0) pos += len; }
             }
         }
-        sl_pc[path] += sl_cyc() - pc0;
+        SLP(sl_pc[path] += sl_cyc() - pc0;)
         q->frac = (uint16_t)fr; q->pdir = (int8_t)dir;
         if (q->stage == 3 && g == 0) q->play = 0;                /* released */
         q->pos = pos;
@@ -869,8 +874,7 @@ static void tm_slots_block(int32_t *accL, int32_t *accR)
         if (c < last) tm_chunk(t, c + 1, 1);                     /* the chunks either side (reverse, ping-pong) */
         if (c > (base >> 15) && (dir < 0 || mode == 2 || stretch)) tm_chunk(t, c - 1, 1);   /* behind: only when it can go there */
     }
-    { const uint32_t c = sl_cyc(); tm_prof[1] += c - pf; pf = c; }   /* the slot loop (all slots) */
-    tm_prof[8] += pa; tm_prof[9] += pb; tm_prof[10] += pc;
+    SLP({ const uint32_t c = sl_cyc(); tm_prof[1] += c - pf; pf = c; } tm_prof[8] += pa; tm_prof[9] += pb; tm_prof[10] += pc;)
     for (int k = 0; k < nfc || k == 0; k += 8) {                 /* the fast mix (tape/sl_mix.S): centred slots, 8 per pass, both
                                                                   * sides at once; the first pass assigns (no zeroing) */
         sl_m8 m8; m8.add = k > 0;
@@ -893,7 +897,7 @@ static void tm_slots_block(int32_t *accL, int32_t *accR)
         }
         sl_mpk[c] = mp;
     }
-    { const uint32_t c = sl_cyc(); tm_prof[4] += c - pf; }
+    SLP({ const uint32_t c = sl_cyc(); tm_prof[4] += c - pf; })
     for (int t = 0; t < 4; t++) rec_step[t] = 0;
     sl_rpk = rs >= 0 && rs < SL_N ? tm_sl_peak[rs] : 0; sl_rpk_base = rs >= 0 ? sl_base(rs) : 0;
     if (rs >= 0 && rs < SL_N && MODE == 1 && !tm_sl_recwait) {                     /* recording: this block's head path on the slot's track */
@@ -945,9 +949,9 @@ static void tm_block_body(void)
     if (tm_on == 2) {                                            /* the slot machine: its own clock, any transport state */
         int32_t aL[64], aR[64];                                  /* (tm_slots_block assigns them) */
         tm_slots_block(aL, aR);
-        { extern volatile uint32_t tm_prof[12]; const uint32_t c0 = sl_cyc();
+        SLP(const uint32_t c0 = sl_cyc();)
         tm_out(aL, aR, 0x7FFF, 0x7FFF);
-        tm_prof[5] += sl_cyc() - c0; tm_prof[7]++; }
+        SLP(tm_prof[5] += sl_cyc() - c0; tm_prof[7]++;)
 #ifndef OP1_HOST
         {                                                        /* R246's transport (it runs while a slot records) kept from
                                                                   * the tape end, as FREE: it would stop there, and the take */
@@ -1132,7 +1136,7 @@ void tm_rec_entry(void *bus)                                     /* audio ISR, i
     uint32_t c0; __asm__ volatile ("%0 = CYCLES;" : "=d"(c0));
     tm_rec_body(bus);
     uint32_t c1; __asm__ volatile ("%0 = CYCLES;" : "=d"(c1));
-    tm_cyc += c1 - c0; tm_prof[6] += c1 - c0;
+    tm_cyc += c1 - c0; SLP(tm_prof[6] += c1 - c0;)
 }
 static void tm_rec_body(void *bus)
 {

@@ -441,6 +441,8 @@ def build(engs, fxs):
             + (['-DGS_NOCACHE'] if os.environ.get('OP1R_GUISKIP_NOCACHE') else []) \
             + (['-DGS_EAGER'] if os.environ.get('OP1R_EAGER_SCREENS') else []) \
             + (['-DLZ_NOBG'] if os.environ.get('OP1R_LZ_NOBG') else [])   # docs/79: eager screens / test without background parsing
+    if os.environ.get('OP1R_SLPROF') == '1':                                  # docs/86: ELSE-MARIE's profile counters (perf page, op1dev perf)
+        for f in ('tape/tm.c', 'screens/sysmon.c'): flags[f] = flags.get(f, []) + ['-DSL_PROF']
     if DEV_BUILD:                                                             # local builds: SysEx peek / poke / key / turn (devupd/du_fw.c)
         flags['devupd/du_fw.c'] = flags.get('devupd/du_fw.c', []) + ['-DOP1R_DEV']
     for s in srcs:

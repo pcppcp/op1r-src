@@ -444,10 +444,12 @@ static void sm_update(void *scr, int dt)
         else {
             q = put_u(put_s(q, "cb "), (uint32_t)v_pct[SM_DSP]); q = put_u(put_s(q, " code "), (uint32_t)pf_pct[0]);
             q = put_u(put_s(q, " data "), (uint32_t)pf_pct[1]);
+#ifdef SL_PROF
             { extern volatile uint8_t tm_sl_paths[3];         /* ELSE-MARIE: slots on the fast / general / stretch path */
               extern volatile uint32_t tm_sl_pcyc[3];         /* + their cycles per block, thousands */
               static const char *const pn[3] = { " f", " g", " s" };
               for (int k = 0; k < 3; k++) { q = put_u(put_s(q, pn[k]), tm_sl_paths[k]); q = put_s(put_u(put_s(q, ":"), tm_sl_pcyc[k] / 1000), "k"); } }
+#endif
         }
     } else if (sm_page == PG_STAGES) {                       /* "5/6 blk 18 eq 6 out 7 dec 3 tp 0" (stock timers) */
 #ifdef L1SLOT
