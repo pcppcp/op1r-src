@@ -441,6 +441,35 @@ int main(void)
         CHECK(P[P_O1_FREQ] == o1f, "a sound loaded on the same slot, same setup and contour: rebuilt too (%d)", P[P_O1_FREQ]);
         host_slot = 0;
     }
+    {   /* The audio is an interrupt: it renders between the core's turn of a word and the frame that puts the word back
+         * (the Shift layer on home: a relative turn). It must not take that word for another sound: on a preset (its
+         * word sits at the end of its slot) the oscillators of the neighbour played for a frame, and the session edits
+         * were derived away (v3.27). The same between a view's borrowing of the words and the audio's next block. */
+        int16_t own[8] = { 1013, 12000, 9000, 12000, 0x5301, 9000, 5000, 8192 };
+        host_slot = 5; memcpy(W(), own, sizeof own); host_shift = 0; frame(); frame(); play_block();
+        int e = entry_of(1013);
+        P[P_O1_WAVE] = W_NARROW; P[P_SAT] = 20000;                  /* session edits (oscillator and analog views) */
+        frame(); play_block();
+        host_shift = 1; for (int f = 0; f < SH_SETTLE + 1; f++) { frame(); play_block(); }
+        int bad = 0;
+        for (int n = 0; n < 6; n++) {                                /* Shift + blue (detune), both ways, + green (drive) */
+            fw_turn(0, n & 1 ? -CLICK_S : 3 * CLICK_S); fw_turn(1, CLICK_S);
+            play_block();
+            if (mm_derived_setup != e) bad++;
+            frame(); play_block();
+        }
+        host_shift = 0; frame(); play_block();
+        CHECK(!bad && P[P_O1_WAVE] == W_NARROW && P[P_SAT] == 20000 && entry_of(W()[0]) == e && W()[1] == 12000,
+              "Shift + blue on a preset, the audio between turn and frame: the sound and its session edits stay "
+              "(%d blocks of another sound, wave %d, sat %d)", bad, P[P_O1_WAVE], P[P_SAT]);
+        fw_press(1); frame();                                        /* to the oscillator view: the words are capped */
+        CHECK(mm_view == V_OSC1 && W()[0] == CAP_MARGIN && P[P_SETUP] == 1013, "a view borrows the words (blue capped at %d)", W()[0]);
+        play_block();
+        CHECK(mm_derived_setup == e && P[P_O1_WAVE] == W_NARROW, "... and the audio still plays the sound from P");
+        fw_press(0); frame(); play_block();
+        CHECK(mm_view == V_HOME && W()[0] == 1013 && mm_derived_setup == e && P[P_SAT] == 20000, "back home: the words and the edits as they were");
+        host_slot = 0;
+    }
     printf(fails ? "%d FAILED\n" : "ui ok\n", fails);
     return fails != 0;
 }

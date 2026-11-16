@@ -532,7 +532,7 @@ static void view_home(void *r)
 {
     uint8_t c[4];
     int lit[4];                                                                  /* a home knob turning: what it moves lights */
-    for (int k = 0; k < 4; k++) lit[k] = !ui_layer && ui_idle[k] < SC_TURN;
+    for (int k = 0; k < 4; k++) lit[k] = !mm_layer && ui_idle[k] < SC_TURN;
     /* the cutoff the sound has now (on a note: the note's) */
     int32_t kq = emph_k(mg_lv(P_EMPH)), gin = make_up(kq), pos = (mg_lv(P_CUTOFF) * 10 * 1024) >> 15;
     if (mm_last < OP1_VOICES) {
@@ -569,7 +569,7 @@ static void view_home(void *r)
     sc_num_was = num;
     mg_value(t, P_SETUP, num);
     sc_number(r, 7, 5, 22, t, sc_fade(sc_nf, SC_HOLD), sc_nblue);
-    if (ui_layer) sc_shf = 0; else sc_age(&sc_shf);
+    if (mm_layer) sc_shf = 0; else sc_age(&sc_shf);
     for (int k = 0; k < 4; k++) {
         int id = mm_map[k];
         if (ui_idle[k] < SC_TURN) sc_kf[k] = 0; else sc_age(&sc_kf[k]);
@@ -605,7 +605,7 @@ static void view_advanced(void *r)
         int id = ADV[i].id, hl = -1;
         for (int k = 0; k < 4; k++) if (ui_hl[k] == id) hl = k;
         if (hl >= 0) mg_shade(c, MG_COL[hl], 256);
-        else if (id == P_O3_VOL && mm_osc3_off) mg_shade(c, MG_COL[3], 120);
+        else if (mm_rest >= 0 && id == P_O(mm_rest, 3)) mg_shade(c, MG_COL[3], 120);
         else mg_shade(c, MG_GREY, 256);
         mg_knob(r, OP1_Q10(ADV[i].x), OP1_Q10(ADV[i].y), OP1_Q10(hl >= 0 ? 8 : 7), mg_norm(id, mg_lv(id)), c, hl >= 0);
         if (hl < 0) mg_shade(c, MG_GREY, 170);
@@ -645,12 +645,15 @@ static void mg_scope(void *r, int x0, int y0, int x1, int y1, int osc)
     uint8_t c[4];
     mg_box(r, x0, y0, x1, y1, MG_DARK);
     int32_t ym = (y0 + y1) / 2, h = (y1 - y0) / 2 - 4;
-    if (osc == 2 && mm_osc3_off) {                                               /* osc 3 rests: why */
+    if (osc == mm_rest) {                                                        /* this oscillator rests: why */
+        _Static_assert(ECO_OSC_AT == 5, "the text below says 5+ notes, back with 3");
+        char t[12] = "OSC 1 RESTS";
+        t[4] = (char)('1' + osc);
         mg_shade(c, MG_COL[3], 230);
-        mg_ctext(r, (x0 + x1) / 2, ym - 17, 1024, "OSC 3 RESTS", c);
-        mg_ctext(r, (x0 + x1) / 2, ym - 4, 1024, mm_osc3_why == 2 ? "IN UNISON" : "4+ NOTES PLAY", c);
+        mg_ctext(r, (x0 + x1) / 2, ym - 17, 1024, t, c);
+        mg_ctext(r, (x0 + x1) / 2, ym - 4, 1024, mm_eco_why == 2 ? "IN UNISON" : "5+ NOTES PLAY", c);
         mg_shade(c, MG_LIGHT, 160);
-        mg_ctext(r, (x0 + x1) / 2, ym + 12, 800, "BACK WITH 2 OR LESS", c);
+        mg_ctext(r, (x0 + x1) / 2, ym + 12, 800, "BACK WITH 3 OR LESS", c);
         return;
     }
     LN(OP1_Q10(x0), OP1_Q10(ym), OP1_Q10(x1), OP1_Q10(ym), 0x400, MG_DARK);
@@ -681,7 +684,7 @@ static void mg_scope(void *r, int x0, int y0, int x1, int y1, int osc)
     int lo = 9;                                                                 /* the lowest range sounding */
     for (int i = 0; i < 3; i++) {
         int rg = P[P_O(i, 0)];
-        if (rg > R_LO && P[P_O(i, 3)] && !(i == 2 && mm_osc3_off) && RANGE_OCT[rg] < lo) lo = RANGE_OCT[rg];   /* (LO: ticks, no pitch) */
+        if (rg > R_LO && P[P_O(i, 3)] && i != mm_rest && RANGE_OCT[rg] < lo) lo = RANGE_OCT[rg];   /* (LO: ticks, no pitch) */
     }
     if (lo == 9) lo = 0;
     uint32_t pf = 0xFFFFFFFFu / v->key_inc;                                     /* samples per cycle at 8' */
@@ -741,7 +744,7 @@ static void view_osc(void *r, int cur)
     static const int16_t KX[4] = { 36, 74, 112, 150 };
     uint8_t c[4], c2[4];
     for (int i = 0; i < 3; i++) {
-        int y = 14 + i * 25, on = i == cur, rest = i == 2 && mm_osc3_off;
+        int y = 14 + i * 25, on = i == cur, rest = i == mm_rest;
         char n[2] = { (char)('1' + i), 0 };
         mg_shade(c, on ? MG_COL[1] : MG_GREY, on ? 256 : 170);
         mg_text(r, 6, y - 6, 1536, n, c);
@@ -753,7 +756,7 @@ static void view_osc(void *r, int cur)
             mg_shade(c2, on ? MG_LIGHT : MG_GREY, on ? 230 : 170);
             mg_vtext(r, KX[k], y + 10, 700, id, mg_lv(id), c2);
         }
-        if (rest) { mg_shade(c, MG_COL[3], 230); mg_text(r, KX[3] + 12, y - 3, 800, mm_osc3_why == 2 ? "UNI" : "POLY", c); }
+        if (rest) { mg_shade(c, MG_COL[3], 230); mg_text(r, KX[3] + 12, y - 3, 800, mm_eco_why == 2 ? "UNI" : "POLY", c); }
     }
     {                                                                            /* modulation (mix, osc, filter) and noise */
         static const int8_t ID[4] = { P_MOD_MIX, P_MOD_PITCH, P_MOD_FILT, P_NOISE };
@@ -844,7 +847,7 @@ static void view_analog(void *r)
         if (lv <= 300) continue;
         uint32_t z = (mg_t >> 2) * 2654435761u;                                  /* the noise: new every 4th frame */
         int rg = i == 3 ? R8 : P[P_O(i, 0)];
-        if (i < 3 && (rg <= R_LO || (i == 2 && mm_osc3_off))) continue;
+        if (i < 3 && (rg <= R_LO || i == mm_rest)) continue;
         /* 2 cycles across for the lowest range, x 2 per octave above it, x the interval */
         int32_t e = i == 3 ? 4096 : (RANGE_OCT[rg] - lo) * 1024 + pclamp(P_O(i, 2), P[P_O(i, 2)]) * 1024 / 1200 + 4096;
         uint32_t cyc = (uint32_t)mg_exp2_q12(e < 0 ? 0 : e) >> 3;               /* Q12 */

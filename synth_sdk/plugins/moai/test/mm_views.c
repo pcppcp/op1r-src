@@ -73,7 +73,7 @@ int main(int argc, char **argv)
     if (note) ENGINE_moai.note_on(host_voice_mem, w);
     for (int f = 0; f < frames; f++) {
         if (note) for (int b = 0; b < 6; b++) ENGINE_moai.render(host_voice_mem, out, w);
-        if (argc > 11 && atoi(argv[11])) { mm_osc3_off = 1; mm_osc3_why = 1; }
+        if (argc > 11 && atoi(argv[11])) { mm_eco = 2; mm_rest = 2; mm_eco_why = 1; }
         if (f == frames - 1 && getenv("MM_TURN")) for (const char *t = getenv("MM_TURN"); *t; t++) ui_idle[(*t - '0') & 3] = 3;
         mg_screen_update(0, 16);
     }

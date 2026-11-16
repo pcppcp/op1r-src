@@ -5,24 +5,21 @@
  * tracking; osc 3 in LO and the noise modulate the pitch and the filter, as the Model D's controllers do.
  * The amplitude envelope and the level are the OP-1's own (the envelope tab), as for every engine.
  *
- *   page 1 (filter)    blue   CUTOFF    20 Hz .. 20 kHz at C4 (exponential); the key's pitch moves it half way
- *                      green  EMPHASIS  resonance; 100 % self-oscillates (a sine at the cutoff pitch)
- *                      white  CONTOUR   how far the filter envelope opens the filter: 0 .. 8 octaves
- *                      red    DECAY     contour decay and release, 4 ms .. 2.4 s; the top quarter raises the
- *                                       sustain level instead (100 % = the filter stays open while the key is held)
- *   page 2 (press)     blue   SETUP     the oscillator setup, one of 32 (SETUPS in moai.h: ranges, waves, intervals of
- *                                       the three oscillators), shown on the screen; a few clicks per setup
- *                      green  DETUNE    osc 2 up, osc 3 down: 5 .. 40 cents of thickness
- *                      white  OSC 3     osc 3 level (its range, wave and interval come with the setup)
- *   Page 2 values that were never touched read 0: setup CLASSIC (v1's sound: 8' saw, 8' saw, 16' saw), 5 cents,
- *   osc 3 off. Velocity: level and contour depth.
+ *   home     blue   the sound: one of the 32 setups (SETUPS in moai.h) or the presets, by its number
+ *            green  CUTOFF    20 Hz .. 20 kHz at C4 (exponential); the key's pitch moves it half way
+ *            white  EMPHASIS  resonance; 100 % self-oscillates (a sine at the cutoff pitch)
+ *            red    CONTOUR   one knob for the filter envelope: its amount, then decay, sustain and a slower attack
+ *   Pressing an encoder opens a view (advanced, oscillators, filter, contour, analog: mm_ui.h) whose four knobs edit
+ *   the rest: every oscillator's range, wave, interval and volume, the noise, feedback, the contour's times, detune,
+ *   drift, drive, saturation, the modulation. Seven words are saved with a sound (the home knobs, detune, drive,
+ *   drift); the others come from the setup or preset (moai.h, "parameters"). Velocity: level and contour depth.
  *
  * The ladder is a zero-delay-feedback (trapezoidal) design: the feedback is solved within the sample, so the
  * resonance sits exactly on the cutoff pitch and self-oscillation starts at a feedback gain of 4 at every cutoff.
- * The input is soft-clipped (the Minimoog's overdriven filter input). Every stage keeps the remainder of its
- * multiplication (error feedback), so slow cutoffs do not stall in a dead zone. Oscillators use polyBLEP for the
- * edges of saw and pulse. Like analog oscillators they run free (a note does not restart them) and drift slowly in
- * pitch, a little and independently.
+ * The input is soft-clipped (the Minimoog's overdriven filter input); driven hard, every stage is (the transistor
+ * stages). The stages' states are Q16, so slow cutoffs do not stall in a dead zone. Oscillators use polyBLEP for the
+ * edges of saw and pulse. Like analog oscillators they run free (a note on a sounding voice does not restart them)
+ * and drift slowly in pitch, a little and independently.
  *
  * Speed (the audio interrupt is shared with the FX, the tape and the other instruments): the block is rendered in
  * passes, one per oscillator into the output buffer and then the filter in place, so each loop keeps its state in
@@ -434,14 +431,23 @@ MM_COLD static void derive_osc(int16_t *q, int e)               /* entry (setup 
  * decay 15 ms .. 2.4 s over the first 75 %, then sustain up to 70 %, and in the last 15 % a slower attack.
  * On a preset the amount is scaled so that at the preset's own contour it is the preset's amount (and still 0 at 0). */
 static inline int32_t contour_amount(int32_t u) { int32_t a = (clampk(u) * 5) >> 1; return ((a > 32767 ? 32767 : a) * 27853) >> 15; }
-MM_COLD static void derive_contour(int16_t *q, int32_t u, int e)
+/* (the scale is a Q12 ratio, kept per entry in *c: the LFO on the contour knob derives every block, and the three
+ * divisions of the ratio were 4 % of a voice there. c: the caller's own, the audio's and the GUI thread's apart) */
+typedef struct { int16_t e; int32_t k, full; } amt_t;
+MM_COLD static void derive_contour(int16_t *q, int32_t u, int e, amt_t *c)
 {
     u = clampk(u);
     int32_t a = contour_amount(u);
-    const preset_t *pr = preset_of(e);
-    if (pr) {
-        int32_t at = contour_amount(pct(pr->con));
-        a = at > 0 ? a * pct(pr->amt) / at : pct(pr->amt);
+    if (preset_of(e)) {
+        if (c->e != e) {
+            const preset_t *pr = preset_of(e);
+            int32_t at = contour_amount(pct(pr->con));
+            c->full = pct(pr->amt);
+            c->k = at > 0 ? ((c->full << 12) + (at >> 1)) / at : -1;  /* (its own contour at 0: the amount as it is) */
+            if (c->k > 77000) c->k = 77000;                           /* a * k stays in 32 bits (a <= 27853): up to 18.8x */
+            c->e = (int16_t)e;
+        }
+        a = c->k < 0 ? c->full : (a * c->k + 2048) >> 12;
         if (a > 32767) a = 32767;
     }
     q[P_AMOUNT] = (int16_t)a;
@@ -451,18 +457,19 @@ MM_COLD static void derive_contour(int16_t *q, int32_t u, int e)
     q[P_SUSTAIN] = (int16_t)(u > 22937 ? ((u - 22937) * 2333) >> 10 : 0);
     q[P_ATTACK] = (int16_t)(u > 27852 ? ((u - 27852) * 4167) >> 10 : 0);
 }
-volatile uint8_t mm_home_hold, mm_ui_beat;
 int16_t mm_derived_setup = -1;                           /* what P's oscillator / contour values come from */
 int32_t mm_derived_contour = -1;
-void sync_derived(int32_t setup_word, int32_t contour_word)          /* audio and GUI thread: same result */
+static amt_t mm_amt_audio = { -1, 0, 0 }, mm_amt_gui = { -1, 0, 0 };
+static void sync_to(int32_t setup_word, int32_t contour_word, amt_t *amt)
 {
     int e = entry_of(setup_word), np = 0;
     if (e != mm_derived_setup) {                          /* another sound: its contour too (a preset's amount) */
         np = 1;
         derive_osc(P, e); mm_derived_setup = (int16_t)e;
     }
-    if (np || contour_word != mm_derived_contour) { derive_contour(P, contour_word, e); mm_derived_contour = contour_word; }
+    if (np || contour_word != mm_derived_contour) { derive_contour(P, contour_word, e, amt); mm_derived_contour = contour_word; }
 }
+void sync_derived(int32_t setup_word, int32_t contour_word) { sync_to(setup_word, contour_word, &mm_amt_gui); }   /* the GUI thread's */
 
 /* The ladder's input level and where the make-up goes (v3.7). The input clip is also the resonance's limiter (the
  * feedback is in the clipped sum, as on the real ladder): a hot input crushes the resonance. Until v3.6 the make-up
@@ -487,8 +494,28 @@ int16_t mm_scope[SCOPE_N] __attribute__((aligned(4)));
 uint16_t mm_scope_w;
 uint8_t mm_scope_sh;
 uint32_t mm_serial;
-uint8_t mm_osc3_off;
-uint8_t mm_osc3_why;
+uint8_t mm_eco;
+int8_t mm_rest = -1;
+uint8_t mm_eco_why;
+volatile uint8_t mm_layer;
+#ifdef OP1_HOST
+__attribute__((weak)) int16_t host_voice_env[OP1_BLOCK];    /* (host programs that do not set the OP-1 envelope: 0) */
+#endif
+
+/* the oscillator the guard rests: the quietest of those in the mix, a pulse counting 3/4 (it costs twice a saw, so
+ * of two about as loud the pulse goes); of equals the later one. -1: one oscillator or none, it stays */
+static int rest_osc(const int16_t *q)
+{
+    int k = -1, n = 0;
+    int32_t low = 0;
+    for (int i = 0; i < 3; i++) {
+        int32_t l = q[P_O(i, 3)];
+        if (q[P_O(i, 0)] == R_OFF || l <= 0) continue;
+        if (q[P_O(i, 1)] >= W_SQUARE) l -= l >> 2;
+        if (!n++ || l <= low) { low = l; k = i; }
+    }
+    return n > 1 ? k : -1;
+}
 
 static int sounding_voices(void)
 {
@@ -514,13 +541,25 @@ MM_COLD static void mm_note_on(void *self, const int16_t *params)
     int vi = vidx(self);
     mm_voice_t *v = &V[vi];
     (void)params;
-    if (!v->rng) v->rng = 0x9E3779B9u * (uint32_t)(vi + 1);
-    for (int i = 0; i < 3; i++) v->ph[i] += rnd(&v->rng);         /* free-running oscillators: any phase */
-    if (!v->nrng) v->nrng = v->rng ^ 0x5A5A5A5Au;
-    v->lad = (lad_t){ 0, 0, 0, 0, { 0, 0, 0, 0 } };
-    v->env = 0; v->stage = 0; v->fresh = 1;
-    v->yprev = 0; v->dc[0] = v->dc[1] = v->dc[2] = 0;
+    v->stage = 0; v->fresh = 2;                                   /* (its first block starts it: voice_start) */
     mm_last = (uint8_t)vi;
+}
+
+/* A note's first block. A voice that is still heard goes on from where it is: the oscillators run on, the filter
+ * keeps its state and the contour attacks from its level, as on the Minimoog (a retrigger in MONO, a voice taken for a
+ * new note while it sounds). Starting it anew would step the output under an open envelope: a click, up to half of
+ * full scale. Still heard = the OP-1's envelope was open at the end of the voice's last block and is open at the
+ * start of this one; from silence the voice starts anew, as before v3.27. */
+#define AMP_HEARD 256                   /* the OP-1 envelope above 1/128 (-42 dB) */
+MM_COLD static __attribute__((noinline)) void voice_start(mm_voice_t *v)
+{
+    if (!v->rng) v->rng = 0x9E3779B9u * (uint32_t)(v - V + 1);
+    if (!v->nrng) v->nrng = v->rng ^ 0x5A5A5A5Au;
+    if (v->amp > AMP_HEARD && OP1_VOICE_ENV[0] > AMP_HEARD) { v->fresh = 0; return; }
+    for (int i = 0; i < 3; i++) v->ph[i] += rnd(&v->rng);         /* free-running oscillators: any phase */
+    v->lad = (lad_t){ 0, 0, 0, 0, { 0, 0, 0, 0 } };
+    v->env = 0; v->fresh = 1;
+    v->yprev = 0; v->dc[0] = v->dc[1] = v->dc[2] = 0;
 }
 
 /* one oscillator, ready to render: its wave, increment / ramp, polyBLEP reciprocal, level, phase index */
@@ -705,6 +744,7 @@ MM_LINE static void mm_render(void *self, int16_t *out, const int16_t *params)
     mm_voice_t *v = &V[vi];
     const int32_t *inc = OP1_PITCH_INC;
     int32_t vel = vel_gain(vi);                                   /* Q15 */
+    if (__builtin_expect(v->fresh > 1, 0)) voice_start(v);
     PROF(0);
 
     /* ---- this block's parameters: the stored words, P[], and the LFO on the visible view's knobs ----
@@ -714,6 +754,7 @@ MM_LINE static void mm_render(void *self, int16_t *out, const int16_t *params)
     int16_t q[P_N];
     const int16_t *lw = live_words();
     int home = mm_view == V_HOME;
+    const int16_t *hw = mm_layer ? P : lw;                        /* the home knobs: P[] while Shift borrows the words */
     for (int i = 0; i < P_N; i++) q[i] = P[i];
     int32_t lo[4];                                                /* the LFO offsets, LFO_GAIN x (not the sound number) */
     for (int k = 0; k < 4; k++) {
@@ -722,35 +763,36 @@ MM_LINE static void mm_render(void *self, int16_t *out, const int16_t *params)
         lo[k] = o > 32767 ? 32767 : (o < -32767 ? -32767 : o);
         mm_lfo[k] = (int16_t)lo[k];
     }
-    static uint8_t beat_seen, idle;                                 /* blocks since the screen's last frame */
-    if (mm_ui_beat != beat_seen) { beat_seen = mm_ui_beat; idle = 0; } else if (idle < 255) idle++;
-    const int hold = home && mm_home_hold && idle < 64;            /* home + Shift on screen (moai.h): P's words */
-    const int16_t *hw = hold ? P : lw;
     if (home) for (int i = 0; i < 4; i++) q[i] = (int16_t)clampk(hw[i] + lo[i]);
     for (int i = 0; i < 3; i++) q[P_DETUNE + i] = (int16_t)clampk(params[5 + i]);
     mm_lfo_seq++;
     int32_t base_setup = home ? hw[0] : P[P_SETUP], base_contour = home ? hw[3] : P[P_CONTOUR];
-    sync_derived(base_setup, base_contour);
-    for (int i = 0; i < P_N; i++) if (i >= P_O1_RANGE) q[i] = P[i];          /* (re)derived values */
+    sync_to(base_setup, base_contour, &mm_amt_audio);
+    for (int i = P_O1_RANGE; i < P_N; i++) q[i] = P[i];                      /* (re)derived values */
     if (!home)
         for (int k = 0; k < 4; k++) {
             int id = mm_map[k];
             if (id >= 0 && lo[k]) q[id] = (int16_t)pclamp(id, q[id] + poffset(id, lo[k]));
         }
-    int e0 = entry_of(base_setup), e = e0;
+    int e0 = mm_derived_setup, e = e0;                                          /* = entry_of(base_setup): just synced */
     if (q[P_SETUP] != clampk(base_setup)) {                                     /* LFO on the setup: an entry per 1024 */
         e = entry_step(e, (q[P_SETUP] - clampk(base_setup) + 512) >> 10);
         if (e != e0) derive_osc(q, e);
     }
     if (q[P_CONTOUR] != base_contour || (e != e0 && (preset_of(e) || preset_of(e0))))
-        derive_contour(q, q[P_CONTOUR], e);                                     /* LFO on the contour (or a preset's) */
+        derive_contour(q, q[P_CONTOUR], e, &mm_amt_audio);                      /* LFO on the contour (or a preset's) */
 
     PROF(1);
-    /* ---- CPU guard: osc 3 off while many voices sound ---- */
+    /* ---- CPU guard (moai.h): the transistor stages rest from ECO_TR_AT voices, an oscillator from ECO_OSC_AT ---- */
     v->serial = ++mm_serial;
-    int nv = sounding_voices();
-    if (nv >= OSC3_OFF_AT) {
-        mm_osc3_off = 1;
+    v->amp = OP1_VOICE_ENV[OP1_BLOCK - 1];                        /* (for the next note on this voice) */
+    int nv = sounding_voices(), eco = mm_eco;
+    if (nv >= ECO_OSC_AT) eco = 2; else if (eco == 2 && nv <= ECO_OSC_AT - 2) eco = 1;
+    if (nv >= ECO_TR_AT) eco = eco ? eco : 1; else if (nv <= ECO_TR_AT - 2) eco = 0;
+    mm_eco = (uint8_t)eco;
+    int rk = eco == 2 ? rest_osc(q) : -1;
+    mm_rest = (int8_t)rk;
+    if (eco == 2) {
         int uni = 1;                                              /* unison: the voices within 1/32 (~1/2 semitone) */
         uint32_t ki = (uint32_t)inc[0];
         for (int i = 0; i < OP1_VOICES; i++)
@@ -758,25 +800,31 @@ MM_LINE static void mm_render(void *self, int16_t *out, const int16_t *params)
                 uint32_t d = V[i].key_inc > ki ? V[i].key_inc - ki : ki - V[i].key_inc;
                 if (d > (ki >> 5)) uni = 0;
             }
-        mm_osc3_why = uni ? 2 : 1;
-    } else if (nv <= OSC3_ON_AT) mm_osc3_off = 0;
-    int32_t g3t = mm_osc3_off ? 0 : 32767;
-    if (v->fresh) v->g3 = g3t;                                    /* a new note starts as it should be */
-    else v->g3 = v->g3 < g3t ? (v->g3 + 2048 > g3t ? g3t : v->g3 + 2048) : (v->g3 - 2048 < g3t ? g3t : v->g3 - 2048);   /* 23 ms */
+        mm_eco_why = uni ? 2 : 1;
+    }
+    for (int i = 0; i < 3; i++) {             /* 93 ms fades: 64 blocks at the OP-1's 689 calls / s (upstream: 1024 a block at 344) */
+        int32_t t = i == rk ? 0 : 32767, g = v->g[i];
+        v->g[i] = (int16_t)(v->fresh ? t : (g < t ? (g + 512 > t ? t : g + 512) : (g - 512 < t ? t : g - 512)));
+    }
 
     /* ---- oscillators and noise: one pass each into out[] (half scale: all of them stay in 16 bits) ---- */
     int32_t dk = detune_q16(q[P_DETUNE]), dr = drift_amount(q[P_DRIFT]);
-    if ((v->dtick ^= 1))                                          /* every other block: the design's 2.9 ms step */
-        for (int i = 0; i < 3; i++) {                             /* drift: leaky random walk (~2 cents at 8192), ~1.5 s */
+    /* drift: a random walk per oscillator (steps without a bias: -15 .. 15), held near the pitch by a constant pull
+     * (it sets the wander at the default: 0.7 cents rms, moving within ~0.4 s, as up to v3.26) and a leak (~1.5 s: it
+     * bounds the wide wander at the knob's top, 5.6 cents rms). 8 more fraction bits than the Q16 it is used in: a
+     * leak of 1/512 needs them, or the walk settles off the pitch (up to v3.26 the step was -8 .. 7 and the walk sat
+     * 7 cents flat at half the knob, 26 at the top, all three oscillators alike: out of tune with the tape). */
+    if ((v->dtick ^= 1))                                          /* every other block: the design's 2.9 ms step (kennel, 88.2 kHz) */
+        for (int i = 0; i < 3; i++) {
             int32_t d = v->drift[i];
-            d += ((((int32_t)((rnd(&v->rng) >> 27) & 15) - 8) * dr) >> 13) - (d >> 9);
+            d += ((((int32_t)((rnd(&v->rng) >> 27) & 15) * 2 - 15) * dr) >> 6) - (d >> 9) - (d > 0 ? 128 : (d < 0 ? -128 : 0));
             v->drift[i] = d;
         }
     int32_t i0 = inc[0], di = (inc[OP1_BLOCK - 1] - inc[0]) >> 7;  /* pitch: a linear ramp over the block */
     if ((uint32_t)i0 != v->key_inc) {                             /* a new key (or a bend): its reciprocal and octave */
         v->key_inc = (uint32_t)i0; v->key_rcp = rcp30((uint32_t)i0); v->key_oct = pitch_oct((uint32_t)i0);
     }
-    const int32_t qd[3] = { v->drift[0], dk + v->drift[1], -(dk >> 1) + v->drift[2] };
+    const int32_t qd[3] = { v->drift[0] >> 8, dk + (v->drift[1] >> 8), -(dk >> 1) + (v->drift[2] >> 8) };
 
     /* ---- modulation: the source at the four chunks and at the block's end (osc 3's phase before its pass) ---- */
     int32_t mod[5] = { 0, 0, 0, 0, 0 }, mpd = mod_depth(q[P_MOD_PITCH], MOD_PITCH_MAX), mfd = mod_depth(q[P_MOD_FILT], MOD_FILT_MAX);
@@ -809,7 +857,7 @@ MM_LINE static void mm_render(void *self, int16_t *out, const int16_t *params)
     int no = 0, wrote = 0;
     for (int i = 0; i < 3; i++) {
         int32_t lvl = q[P_O(i, 3)] >> 1;                          /* 0 .. 16383: a full saw = +-8192 */
-        if (i == 2) lvl = (lvl * v->g3) >> 15;
+        if (v->g[i] < 32767) lvl = (lvl * v->g[i]) >> 15;         /* resting (or fading) for CPU */
         no += i < 2 ? osc_prep(&os[no], i, q[P_O(i, 1)], q[P_O(i, 0)], q[P_O(i, 2)], qd[i], lvl, pi0, pdi, prcp)
                     : osc_prep(&os[no], i, q[P_O(i, 1)], q[P_O(i, 0)], q[P_O(i, 2)], qd[i], lvl, i0, di, v->key_rcp);
     }
@@ -840,7 +888,7 @@ MM_LINE static void mm_render(void *self, int16_t *out, const int16_t *params)
     int sat = q[P_SAT] > 64;
     if (sat) { sat_coef(&st, q[P_SAT]); og = (og * level_comp(SAT_COMP, q[P_SAT])) >> 15; }   /* saturation is loud */
     if (q[P_DRIVE] > 0) og = (og * level_comp(DRIVE_COMP, q[P_DRIVE])) >> 15;                 /* and so is drive */
-    int tr = q[P_DRIVE] > DRIVE_TR ? 8 : 0;                                    /* driven: the transistor stages */
+    int tr = q[P_DRIVE] > DRIVE_TR && !eco ? 8 : 0;                            /* driven: the transistor stages (the guard rests them) */
 
     lad_t lad = v->lad;
     int32_t pos = v->pos, yp = v->yprev, dc[3] = { v->dc[0], v->dc[1], v->dc[2] }, gxog = (gx & 0xFFFF) | (og << 16);

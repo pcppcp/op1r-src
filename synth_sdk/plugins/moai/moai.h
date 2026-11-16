@@ -21,7 +21,8 @@ typedef struct { int32_t ggk, c12, c34, invk; } lad_coef_t;             /* Q15 p
 
 typedef struct {
     uint32_t ph[3];                     /* oscillator phases, 2^32 = one cycle (free running) */
-    int32_t  drift[3];                  /* slow pitch drift per oscillator, ratio - 1 in Q16 (about +-2 cents) */
+    int32_t  drift[3];                  /* slow pitch drift per oscillator, ratio - 1 in Q16 with 8 more fraction
+                                           bits (the walk's own resolution: moai.c, "drift") */
     lad_t    lad;
     int32_t  env;                       /* contour, Q22 (1.0 = 1 << 22) */
     int32_t  pos;                       /* smoothed cutoff position, Q10 octaves above 20 Hz */
@@ -31,11 +32,13 @@ typedef struct {
     uint32_t key_rcp;                   /* 2^30 / (key_inc >> 8): polyBLEP reciprocal (1 % is plenty: shared by all 3) */
     int32_t  key_oct;                   /* the key's pitch in octaves from C4, Q10 */
     uint8_t  stage;                     /* 0 attack, 1 decay / sustain, 2 release */
-    uint8_t  fresh;                     /* first block of a note: no smoothing */
+    uint8_t  fresh;                     /* 2: a note was started (its first block decides how: voice_start in moai.c);
+                                           1: the first block of a note from silence: no smoothing */
     uint8_t  tr;                        /* the last block ran the transistor stages (lad.t valid) */
     uint8_t  dtick;                     /* the drift steps on every other block (the design's 2.9 ms) */
     uint32_t serial;                    /* mm_serial at this voice's last render (counts the sounding voices) */
-    int32_t  g3;                        /* osc 3 gain, Q15: fades to 0 while osc 3 is switched off for CPU */
+    int16_t  g[3];                      /* oscillator gains, Q15: one fades to 0 while it rests for CPU (the guard) */
+    int16_t  amp;                       /* the OP-1 envelope at the end of the voice's last block: is it still heard? */
     int32_t  yprev;                     /* the ladder's last output (feedback), Q16 */
     int32_t  dc[3];                     /* output DC blockers (after the filter, after the saturation): the DC they remove,
                                            Q16; [2]: the saturation's low-pass state */
@@ -227,16 +230,11 @@ extern volatile int8_t mm_map[4];            /* the visible view's knobs */
 extern volatile int16_t mm_lfo[4];                       /* the OP-1 LFO's offset per knob (x LFO_GAIN), ... */
 extern volatile uint8_t mm_lfo_seq;                      /* ... and a count of the blocks (the screen: is it fresh?) */
 
-/* home + Shift (mm_ui.h): the knob words 0..3 hold the core's Shift clicks until the next frame puts them back, and a
-   preset's word sits at the top of its slot, so one click crosses into the next sound. While the screen has Shift
-   held on home (mm_home_hold, frames counted in mm_ui_beat) the audio thread takes the home words from P[0..3] (what
-   the screen accepted), never from the words: else it derived the other sound for a few blocks, and its contour reset
-   AMT (a user saw DET do nothing and AMT move, 2026-11-08). */
-extern volatile uint8_t mm_home_hold;
-extern volatile uint8_t mm_ui_beat;
+/* home + Shift: see mm_layer below (upstream v3.27's fix of the race a user saw on 2026-11-08: DET did nothing and
+   AMT moved; op1r's own fix, mm_home_hold, replaced by it; harness test: MM_RACE_HOOK in test/mm_ui.c) */
 extern int16_t mm_derived_setup;                        /* what P's oscillator / contour values come from */
 extern int32_t mm_derived_contour;
-void sync_derived(int32_t setup_word, int32_t contour_word);        /* audio and GUI thread: same result */
+void sync_derived(int32_t setup_word, int32_t contour_word);        /* the GUI thread's; the audio derives the same */
 
 /* detune (word 5, 0 = never set: 5 cents) -> ratio - 1 in Q16 for osc 2 (osc 3 gets half of it, flat) */
 static inline int32_t detune_q16(int32_t w) { return w > 0 ? (1514 * ((w * w) >> 15)) >> 15 : 190; }
@@ -268,7 +266,7 @@ static inline int32_t emph_k(int32_t emp) { return emp < 256 ? 0 : (emp + (emp >
 static inline int32_t make_up(int32_t k) { return 4096 + ((k * 1400) >> 12); }  /* passband make-up for the resonance, Q12 */
 
 /* contour times: decay / release steps per chunk (Q16), attack step per chunk (Q22), sustain (Q22) */
-typedef struct { int32_t att, dcoef, rcoef, sus, depth; } envc_t;
+typedef struct { int32_t att, dcoef, rcoef, sus; } envc_t;
 void contour_coefs(envc_t *e, const int16_t *q);
 
 extern uint8_t mm_last;                 /* the voice that started last (the screen follows it) */
@@ -277,14 +275,21 @@ extern int16_t mm_scope[SCOPE_N];       /* the latest note's output, a ring (the
 extern uint16_t mm_scope_w;             /* next write position */
 extern uint8_t mm_scope_sh;             /* it keeps every (1 << mm_scope_sh)th sample (the scope sets it: long periods) */
 
-/* CPU guard: with many voices sounding (poly chords, unison) osc 3 is switched off for all voices: off from
- * OSC3_OFF_AT voices, on again at OSC3_ON_AT or fewer (hysteresis), with a 23 ms fade. A voice sounds if it rendered
- * within the last OP1_VOICES renders (every sounding voice renders once per audio callback) or was just started. */
-#define OSC3_OFF_AT 4
-#define OSC3_ON_AT  2
+/* CPU guard: with many voices sounding (poly chords, unison) the costly extras rest, for every voice, in two steps
+ * (docs/PERFORMANCE.md, v3.27):
+ *   1  from ECO_TR_AT voices   the transistor stages (DRIVE's top half runs the plain ladder: no note loses a part)
+ *   2  from ECO_OSC_AT voices  also one oscillator: the quietest of the sound's (a pulse counts 3/4: it costs twice a
+ *                              saw; of equals the later one), never the only one; a 93 ms fade
+ * Each step ends two voices lower (hysteresis). A voice sounds if it rendered within the last OP1_VOICES renders
+ * (every sounding voice renders once per audio callback) or was just started. */
+#define ECO_TR_AT   4
+#define ECO_OSC_AT  5
 extern uint32_t mm_serial;              /* render calls, all voices */
-extern uint8_t mm_osc3_off;             /* osc 3 switched off for CPU (the screen shows it) */
-extern uint8_t mm_osc3_why;             /* why: 1 poly (4+ notes), 2 unison (the voices share a pitch) */
+extern uint8_t mm_eco;                  /* the guard's step: 0, 1, 2 */
+extern int8_t mm_rest;                  /* the oscillator that rests (step 2), -1: none (the screen shows it) */
+extern uint8_t mm_eco_why;              /* why: 1 poly (many notes), 2 unison (the voices share a pitch) */
+extern volatile uint8_t mm_layer;       /* home + Shift: the home knobs' words are turned and put back (mm_ui.h); the
+                                           audio takes them from P[] meanwhile */
 
 #ifndef OP1_HOST
 #define MM_SLOT (*(volatile int *)0xFF8016D4 & 7)        /* the synth slot that plays (and that the screen shows) */

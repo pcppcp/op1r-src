@@ -124,9 +124,16 @@ C3). 002 is the right-channel bass, rounder (8' triangle, 16' saw, less emphasis
 vibrato from osc 3 in LO; the record's lead was a Roland SH-2000) and 004 strings (three saws, detuned, a slow swell,
 for the Solina part). The song changes as it goes: these are starting points, not copies.
 
-**Osc 3 rests in poly / unison**: when 4 or more voices sound at once, osc 3 is switched off for every voice (a 23 ms
-fade; back on at 2 or fewer) so chords and unison fit the OP-1's DSP. The oscillator view says POLY or UNI (all the
-sounding voices on one pitch).
+**The CPU guard in poly / unison**: so that chords and unison fit the OP-1's DSP, the costly extras rest while many
+voices sound, for every voice, in two steps. From 4 voices the transistor stages rest (DRIVE's top half runs the plain
+ladder: a little darker when driven, no note loses a part; back at 2 or fewer). From 5 voices one oscillator rests as
+well, with a 93 ms fade (back at 3 or fewer): the quietest one of the sound, not always osc 3 (a pulse counts 3/4 of
+its volume, as it costs twice a saw; of equals the later one goes), and never the only one. The oscillator view says
+which one, and POLY or UNI (all the sounding voices on one pitch).
+
+**A new note on a voice that still sounds** (a retrigger in MONO, a voice taken for a new note in POLY) goes on from
+where the voice is: the oscillators run on, the filter keeps its state and the contour attacks from its level, as on
+the Minimoog. From silence a note starts anew (random oscillator phases, the filter and the contour at rest).
 
 ## Setups
 
@@ -185,7 +192,8 @@ jump) or another slot brings the home view back.
 ## How the sound works
 
 * **Oscillators**: saw, pulse (saw minus a shifted saw) and their mixes, band-limited with polyBLEP; triangle; noise.
-  Free running and slowly drifting in pitch, as analog ones.
+  Free running and slowly drifting in pitch, as analog ones (DRIFT: a wander of 0.7 cents at its default, 5 to 6 at
+  the top, around the pitch: never off it on average).
 * **Ladder**: four trapezoidal one-pole stages with the feedback solved inside the sample (zero-delay feedback), so the
   resonance sits on the cutoff pitch and self-oscillation starts at a feedback gain of 4 at every cutoff. Soft-clipped
   input (the drive goes there) and output, AC-coupled output (14 Hz), as the Minimoog's.
@@ -223,18 +231,19 @@ and `mm_ui`), `make bench` (Blackfin cycles in the simulator, host == Blackfin o
 
 | tool / script | checks |
 |---|---|
-| `mm_ui` | the views and knobs against an emulation of the firmware (turns, presses, a turn racing a press, a sound loaded on another view, a slot change, the LFO on a view and its needles, the home Shift layer a Shift turn landing late (`MM_RACE_HOOK`), and the audio thread rendering before the frame takes a Shift click back (it derived the next sound and reset AMT: the bug a user hit, 2026-11-08; `mm_home_hold`), setup characters, LO and the modulation, the presets: stepping, the words they write, saved and loaded again; the initial sound; the words a save puts into the sound, from another view too; session edits not following into another sound) |
+| `mm_ui` | the views and knobs against an emulation of the firmware (turns, presses, a turn racing a press, a sound loaded on another view, a slot change, the LFO on a view and its needles, the home Shift layer a Shift turn landing late (`MM_RACE_HOOK`), and the audio thread rendering before the frame takes a Shift click back (it derived the next sound and reset AMT: the bug a user hit, 2026-11-08; `mm_layer` since v3.27), setup characters, LO and the modulation, the presets: stepping, the words they write, saved and loaded again; the initial sound; the words a save puts into the sound, from another view too; session edits not following into another sound) |
 | `levels.py` | levels of typical settings (a report: prints, does not judge) |
 | `filter_response.py`, `ring_check.py` | the ladder: resonance position / height / corner, self-oscillation (reports) |
 | `osc_check.py` | oscillator pitch, level and aliasing (polyBLEP vs naive) (a report) |
 | `env_check.py` | contour times, the contour knob, keyboard tracking, velocity (white box) (a report) |
-| `cpu_guard.py` | osc 3 off from 4 voices, on with fewer (fails `make test` otherwise) |
+| `cpu_guard.py` | the CPU guard: its two steps and where they end, which oscillator rests, no click in the fades or on a retrigger of a sounding voice (fails `make test` otherwise) |
 | `fuzz.py` | the top keys with osc 3 in LO and the modulation at full, bent both ways, then 300 random knob / session settings (modulation too), pitches up to the top key and bends: no overflow, no clipping, no DC (fails `make test` otherwise) |
 | `preview.py` / `demo.py` | every view as an image (pycairo) / a demo WAV |
 
 ## Kennel version
 
-Imported from op-moai 71c58d5 (kennel PROVENANCE.md). On the Blackfin the sixteen filter loops are `moai_fc.S`,
+Imported from op-moai 71c58d5 (kennel PROVENANCE.md), updated to v3.27 (e7a2a2e, 2026-11-15: a three-way merge; its
+fades and the drift's step converted to 88.2 kHz as the rest). On the Blackfin the sixteen filter loops are `moai_fc.S`,
 generated by `gen_fc.py` from the same operations as `filter_chunk_t` in `moai.c`, packed into the Blackfin's parallel
 slots, and the saw, pulse, triangle and shark oscillator passes are `moai_osc.S` from `gen_osc.py`: bit-exact with the
 C (`synth_sdk/harness/moai_fc_cmp.py` and `exact_check.py`), about 24 % less work for six voices. Run `python3 gen_fc.py`
