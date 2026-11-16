@@ -153,7 +153,8 @@ static int open_rw(void) { return Y_OPEN(MS_FILE, O_RDWR_CREAT, 0x180); }
 /* 0 ok; 1 the file ends before (none yet: created empty, so a failed open is a read error); -1 read error (retried) */
 static int e_read(int off, void *p, int n)
 {
-    if (op1r_safe_boot) return -1;                                    /* safe mode: the file is not opened */
+    if (op1r_safe_boot) return 1;                                     /* safe mode: the file is not opened; as none (an
+                                                                       * empty song, as before; its writes fail) */
     int fd = open_rw(), r = -1;
     if (fd < 0) return -1;
     if (Y_LSEEK(fd, off, 0) == off) { int k = Y_READ(fd, p, (unsigned)n); r = k == n ? 0 : k >= 0 ? 1 : -1; }

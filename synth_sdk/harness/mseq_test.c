@@ -259,7 +259,7 @@ int main(void)
         kept = !memcmp(&dhead, &hk, sizeof hk) && !memcmp(&disk[first], &keep, sizeof keep);
         printf("  header read error at boot: song on disk %s, %d writes\n", kept ? "kept" : "ERASED", writes - w0);
         assert(lr == -1 && kept && writes == w0 && B.dropped);
-        err_head = 0; settle(&B);
+        err_head = 0; for (int k = 0; k < 130; k++) ms_service(&B, 1000);   /* (the header is retried every 64th call) */
         assert(ms_load_range(&B, 0, 0, MS_PAGES - 1) == 0 && ms_count(&B, 0) == 200);
         rec(&B, 3, 2000, 1, 256); settle(&B);
         assert(ms_count(&B, 3) == 1 && dhead.first[3][0] != MS_NONE && used_n() == u0 + 1);

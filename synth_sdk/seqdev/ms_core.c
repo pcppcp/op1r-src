@@ -378,6 +378,10 @@ void ms_service(ms_t *s, int budget)
 {
     if (s->ro) {                                             /* header unread: retry, write nothing meanwhile */
         static ms_head tmp;
+        static uint8_t tick;                                 /* a retry every 64th call, one I/O of the budget (a lasting
+                                                              * read error must not open the file on every main loop pass) */
+        if ((tick++ & 63) || budget <= 0) return;
+        budget--;
         int r = s->env->read_head(&tmp, (int)sizeof tmp);
         if (r < 0) return;
         if (!r && !head_check(&tmp)) {                       /* (else none or damaged: the empty song stays) */
