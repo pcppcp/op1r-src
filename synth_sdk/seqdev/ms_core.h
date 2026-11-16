@@ -43,9 +43,9 @@ typedef struct {                            /* firmware / host services */
     int (*tape_playing)(void);
     int (*loop)(int32_t *in, int32_t *out); /* 1: loop on */
     void (*play)(int track, int dest, int ch, int kind, int d1, int d2, int on);   /* note on / off, CC (on = 1) */
-    int (*read_slot)(int slot, ms_slot *out);          /* 0 ok */
+    int (*read_slot)(int slot, ms_slot *out);          /* 0 ok, >0 not in the file (as damage), <0 read error (retried) */
     int (*write_slot)(int slot, const ms_slot *in);
-    int (*read_head)(void *h, int len);
+    int (*read_head)(void *h, int len);                /* as read_slot (>0: no store yet) */
     int (*write_head)(const void *h, int len);
     uint32_t (*irq_off)(void);
     void (*irq_on)(uint32_t);
@@ -68,6 +68,11 @@ typedef struct {
     uint8_t  ram_dirty[MS_RAM], ram_use[MS_RAM];
     uint8_t  where[MS_SLOTS];               /* RAM buffer of each file slot (0xFF: not resident) */
     uint8_t  head_dirty;
+    uint8_t  ro;                            /* header read error: no new slots, no writes until ms_service reads it */
+    uint8_t  seen[MS_SLOTS / 8];            /* used map rebuild (ms_core.c scan_step): slots reached by a chain */
+    int scan;                               /* chain being scanned (t * MS_PAGES + p), -1 none */
+    uint16_t scan_sl;                       /* its next slot (MS_NONE: the chain's first) */
+    uint32_t gen, scan_gen;                 /* slot allocations + frees; at the scan start */
     /* transport / recording */
     int32_t prev;                           /* tape position of the last block (-1: stopped) */
     int sel, rec;                           /* selected track, recording on */
@@ -90,7 +95,8 @@ typedef struct {
 enum { MS_Q_OFF, MS_Q_4, MS_Q_8, MS_Q_16, MS_Q_32, MS_Q_8T, MS_Q_16T, MS_Q_N };
 
 void ms_init(ms_t *s, const ms_env *env);  /* empty song */
-int  ms_load(ms_t *s);                      /* header from the file (0 ok; else an empty song) */
+int  ms_load(ms_t *s);                      /* header from the file (0 ok; 1 none / damaged: an empty song; -1 read error:
+                                             * empty and read-only until ms_service reads it) */
 void ms_block(ms_t *s);                     /* audio thread, once per 64-sample block */
 void ms_service(ms_t *s, int budget);       /* main loop: prefetch around the playhead, write dirty slots (budget I/O) */
 /* recording input (any thread; the audio thread inserts at its next block in the firmware glue, here directly) */
