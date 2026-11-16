@@ -14,6 +14,7 @@
 #include "op1p_load.h"
 #include "op1_input.h"
 #include "seq/seq_text.h"
+#include "seq/plk.h"
 
 /* plugin tables (RAM, used by dispatcher.c): built-ins copied from build/engines_table.c, then the files */
 const op1_engine_t *op1_engines[OP1_SLOTS];
@@ -25,6 +26,7 @@ const char         *op1_engine_svgs[OP1_SLOTS];
 const op1_fx_t     *op1_fxs[OP1_SLOTS];
 uint8_t            op1_fx_stereo[OP1_SLOTS];
 const op1_engine_ext_t *op1_engine_exts[OP1_SLOTS];   /* extended engines (file flag OP1P_F_EXT), else 0 */
+uint16_t           op1_engine_plock[OP1_SLOTS], op1_fx_plock[OP1_SLOTS];   /* docs/87: 0x100 declared | word mask */
 uint8_t            op1_engine_coarse[OP1_SLOTS];   /* synth: knobs (bit k) turned in 8 steps (file flag) */   /* the FX has render_stereo (file flag OP1P_F_STEREO, or built in) */
 int                 op1_fx_count;
 const char         *op1_fx_names[OP1_SLOTS + 1];
@@ -57,6 +59,7 @@ extern const int                 op1_builtin_fx_count;
 extern const char *const         op1_builtin_fx_names[];
 extern const op1_screen_t *const op1_builtin_fx_screens[];
 extern const char *const         op1_builtin_fx_svgs[];
+extern const uint16_t            op1_builtin_engine_plock[], op1_builtin_fx_plock[];
 static void tables_init(void)
 {
     int ne = op1_builtin_engine_count, nf = op1_builtin_fx_count;
@@ -65,6 +68,7 @@ static void tables_init(void)
         op1_engine_screens[i] = op1_builtin_engine_screens[i];
         op1_engine_svgs[i] = op1_builtin_engine_svgs[i];
         op1_engine_names[i] = op1_builtin_engine_names[i];             /* ne - 1 names + the 0 end */
+        op1_engine_plock[i] = op1_builtin_engine_plock[i];
     }
     for (int i = 0; op1_builtin_sample_engine_names[i]; i++) op1_sample_engine_names[i] = op1_builtin_sample_engine_names[i];
     for (int i = 0; i < nf; i++) {
@@ -73,6 +77,7 @@ static void tables_init(void)
         op1_fx_screens[i] = op1_builtin_fx_screens[i];
         op1_fx_svgs[i] = op1_builtin_fx_svgs[i];
         op1_fx_names[i] = op1_builtin_fx_names[i];
+        op1_fx_plock[i] = op1_builtin_fx_plock[i];
     }
     op1_engine_count = ne; op1_fx_count = nf;
 }
@@ -143,6 +148,7 @@ static void fx_fast_alloc(void)                 /* boot thread: the first file t
     }
 }
 static const struct { const char *name; void *addr; } exports[] = {
+    { "plk_set_tracks", (void *)plk_set_tracks }, { "plk_track_restart", (void *)plk_track_restart },   /* seq/plk.c */
     { "op1_fx_fast", (void *)op1_fx_fast }, { "op1_fx_big", (void *)op1_fx_big },
     { "op1_eng_page", (void *)op1_eng_page }, { "op1_input_tuner_active", (void *)op1_input_tuner_active },
     { "op1_input_gain_db", (void *)op1_input_gain_db }, { "op1_fx_page", (void *)op1_fx_page }, { "op1_fx_wrap", (void *)op1_fx_wrap },
@@ -531,6 +537,7 @@ static int load_one(void *db, const char *file)
             op1_engine_screens[n] = scr; op1_engine_svgs[n] = svg;
             if (v.hdr->flags & OP1P_F_USES_SAMPLE) reg_list(op1_sample_engine_names, name);
             op1_engine_coarse[n] = (uint8_t)OP1P_COARSE(v.hdr->flags);
+            op1_engine_plock[n] = (uint16_t)(v.hdr->flags & OP1P_F_PLOCK ? 0x100 | OP1P_PLOCK(v.hdr->flags) : 0);
             op1_engine_exts[n] = (v.hdr->flags & OP1P_F_EXT) && !(v.hdr->flags & OP1P_F_INPUT)   /* extended engine (op1r 60) */
                                  ? (const op1_engine_ext_t *)op1_engines[n] : 0;
             if (v.hdr->flags & OP1P_F_INPUT) {                       /* input engine (input/in_host.c): the extended entry */
@@ -541,6 +548,7 @@ static int load_one(void *db, const char *file)
         } else {
             op1_fxs[n] = (const op1_fx_t *)(mem + v.hdr->entry_off);
             op1_fx_stereo[n] = (v.hdr->flags & OP1P_F_STEREO) != 0;     /* older files: the struct ends at press */
+            op1_fx_plock[n] = (uint16_t)(v.hdr->flags & OP1P_F_PLOCK ? 0x100 | OP1P_PLOCK(v.hdr->flags) : 0);
             reg_name(op1_fx_names, n, &op1_fx_count, name);
             op1_fx_screens[n] = scr; op1_fx_svgs[n] = svg;
         }

@@ -35,6 +35,9 @@
 #define OP1P_F_EXT         8u      /* synth: the entry is an op1_engine_ext_t (plugin.json "engine_ext", op1r 60) */
 #define OP1P_COARSE(flags) (((flags) >> 16) & 15)   /* synth: knobs turned in 8 steps (plugin.json "coarse": [k..]) */
 #define OP1P_PREF(flags) (((flags) >> 8) & 0xFF)   /* preferred number (plugin.json order 1..31: keeps old sounds), 0 none */
+#define OP1P_F_PLOCK       (1u << 23)                 /* synth / fx: plugin.json "plock" given (else the core's default) */
+#define OP1P_PLOCK(flags) (((flags) >> 24) & 0xFF)   /* knob words worth recording as parameter locks (bit w: word w, 0..3
+                                                        page 1, 5..7 page 2; docs/87) */
 
 #define OP1P_ABS32 1
 #define OP1P_HI16  2

@@ -61,7 +61,8 @@ static int16_t host_bus[64];
 #define TPOS       (*(volatile int32_t *)(X + 0x14))             /* samples << 6 */
 /* R246's per-block track gains (a stack array in tape_play_mix: L[4], R[4]), copied by op1r's mix-loop hooks (hook.S
  * mix_hook_fwd / rev); X + 0x38 / 0x40 are only inputs to that computation (docs/82) */
-volatile int16_t tm_g[8] = { 32767, 32767, 32767, 32767, 32767, 32767, 32767, 32767 };
+volatile int16_t tm_g[8] __attribute__((aligned(4))) = { 32767, 32767, 32767, 32767, 32767, 32767, 32767, 32767 };
+/* (aligned: tape/tm_l1.S stores it as 32-bit words; at a 2-byte address that faulted: misaligned access in the audio ISR) */
 #define GAIN_L(t)  (tm_g[t])
 #define GAIN_R(t)  (tm_g[4 + (t)])
 

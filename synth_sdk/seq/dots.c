@@ -103,6 +103,7 @@ static dt_bank_t dt[2];                                 /* 0 synth, 1 drum */
 #ifdef OP1_HOST
 int host_dt_changed;
 #define DT_CHANGED() (host_dt_changed++)
+#define DT_PLK_RESTART(m, k) ((void)0)
 void host_dt_note_on(int pos, int note, int vel);
 void host_dt_note_off(int pos, int note);
 #define DT_NOTE_ON(pos, n, k, v) (host_dt_note_on((pos), (n), (v)), (n))
@@ -117,6 +118,8 @@ static void dt_irq_on(uint32_t m) { host_dt_masked = (int)m; }
 #else
 static void dt_changed(void);
 #define DT_CHANGED() dt_changed()
+extern void plk_set_tracks(int mode, int n), plk_track_restart(int mode, int track);   /* core seq/plk.c */
+#define DT_PLK_RESTART(m, k) plk_track_restart((m), (k))
 int  eu_fw_note_on(int pos, int note, int key, int vel);   /* seq/euclid.c: VoiceCtl note on / off */
 void eu_fw_note_off(int midi);
 #define DT_NOTE_ON(pos, n, k, v) eu_fw_note_on((pos), (n), (k), (v))
@@ -580,7 +583,9 @@ static void dt_advance(int pos, uint64_t inc)
         const dt_cfg_t *q = dt_q(b, k);
         uint64_t S = (uint64_t)r->start << 16;
         while (S + (uint64_t)r->planned * L <= t1 + L / 2) { dt_decide(r, q, r->planned, S + (uint64_t)r->planned * L); r->planned++; }
-        r->step = (int16_t)(t1 >= S ? (int32_t)((t1 - S) / L) : -1);
+        const int16_t ns = (int16_t)(t1 >= S ? (int32_t)((t1 - S) / L) : -1);
+        if (ns != r->step && ns >= 0 && q->len && ns % q->len == 0) DT_PLK_RESTART(pos & 1, k | (ns ? 0 : 0x100));   /* (0x100: started) */   /* parameter locks (docs/87) */
+        r->step = ns;
         for (;;) {                                      /* due hits, earliest first */
             dt_plan_t *p = 0; uint64_t th = 0;
             for (int i = 0; i < 2; i++) if (r->p[i].on) {
@@ -891,6 +896,7 @@ static void dt_load(void)
 }
 void *dt_player_get(void)
 {
+    plk_set_tracks(DT_MODE(), DT_SLOTS);
     if (!dt_bg_ready) dt_load();
     return &dt_player;
 }

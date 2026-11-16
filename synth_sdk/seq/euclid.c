@@ -71,6 +71,7 @@ static void eu_changed(void);
 void host_eu_note_on(int pos, int note, int vel);
 void host_eu_note_off(int pos, int note);
 #define EU_NOTE_ON(pos, n, k, v)  (host_eu_note_on((pos), (n), (v)), (n))   /* -> note id for the note-off */
+#define EU_PLK_RESTART(m, k) ((void)0)
 #define EU_NOTE_OFF(pos, n)    host_eu_note_off((pos), (n))
 #else
 /* firmware: notes go through VoiceCtl like the stock sequencers (ok_player). A synth slot stores its pitch at octave 0
@@ -84,6 +85,8 @@ void host_eu_note_off(int pos, int note);
 int  eu_fw_note_on(int pos, int note, int key, int vel);    /* seq/seq_core.c (core, shared with the other sequencers) */
 void eu_fw_note_off(int midi);
 #define EU_NOTE_ON(pos, n, k, v)  eu_fw_note_on((pos), (n), (k), (v))
+extern void plk_set_tracks(int mode, int n), plk_track_restart(int mode, int track);   /* core seq/plk.c */
+#define EU_PLK_RESTART(m, k) plk_track_restart((m), (k))
 #define EU_NOTE_OFF(pos, n)    eu_fw_note_off(n)
 #endif
 
@@ -396,6 +399,7 @@ static void eu_advance(int pos, uint64_t inc)
         uint64_t in = (t1 - st0) % r;                   /* position inside the step, Q16 ticks */
         if (q->sounding && in >= r * q->gate / 100) eu_silence(pos & 1, q);
         if (step != q->step) {
+            if (q->steps && step % q->steps == 0) EU_PLK_RESTART(pos & 1, k | (step ? 0 : 0x100));   /* (0x100: started) */   /* parameter locks (docs/87) */
             q->step = step;
             eu_silence(pos & 1, q);
             int i = step % q->steps;
@@ -645,6 +649,7 @@ void *eu_player_get(void)
 {
     if (!eu_bg_ready) eu_load();
     if (!eu_active[EU_MODE()]) return ((void *(*)(void))0x019ED460)();   /* finger */
+    plk_set_tracks(EU_MODE(), EU_MAX);
     return &eu_player;
 }
 

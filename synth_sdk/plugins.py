@@ -15,6 +15,8 @@ plugin.json fields (paths relative to the plugin folder):
   uses_sample    (synth, optional) engine reads the slot's sampler recording (synth_<slot>.raw loaded at boot)
   stereo         (fx, optional) op1_fx_t.render_stereo is set: the master position renders left / right itself
   coarse         (synth, optional) knob numbers 0..3 turned in 8 steps over the range (both pages), e.g. a selector
+  plock          (synth / fx, optional) knob words worth recording as parameter locks on the sequencer pages (docs/87):
+                 0..3 page 1, 5..7 page 2, e.g. [0, 1, 3, 5]. Without it: page 1's four. [] = none
   engine_ext     (synth, optional) `symbol` is an op1_engine_ext_t (op1_plugin.h): key callback, service, Shift pages
                  (op1r 60; plugin files only, not together with input_engine)
   input_engine   (synth, optional) `symbol` is an op1_input_engine_t (op1_input.h): plays the selected input; plugin
@@ -48,6 +50,8 @@ def load():
             e['screen'] = dict(p['screen'], svg=rel(p['screen']['svg']))
         assert p['kind'] in ('synth', 'fx', 'seq', 'drum', 'sampler', 'tool'), pj
         e['dir'] = d
+        assert 'plock' not in p or (isinstance(p['plock'], list) and all(w in (0, 1, 2, 3, 5, 6, 7) for w in p['plock'])), \
+            f'{pj}: plock takes knob words 0..3 and 5..7'
         if p['kind'] in ('seq', 'drum', 'sampler', 'tool'):
             continue
         (engs if p['kind'] == 'synth' else fxs).append(e)
