@@ -1,0 +1,11 @@
+{
+  "name": "bubbler",
+  "author": "ESC_CODE (Volker Junginger), after Tom Erbe / SoundHack's +bubbler; op1r port by pcppcp",
+  "kind": "fx",
+  "symbol": "FX_bubbler",
+  "sources": ["bubbler.c", "bubbler_dsp.c", "bubbler_params.c"],
+  "defaults": [20480, 12000, 26214, 16384],
+  "page2_defaults": [8192, 14745, 30187],
+  "screen": { "svg": "bubbler.svg", "symbol": "SCREEN_bubbler" },
+  "source_cflags": { "bubbler_dsp.c": ["-O2"] }
+}

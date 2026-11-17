@@ -1,0 +1,11 @@
+{
+  "name": "delayed",
+  "author": "ESC_CODE (Volker Junginger), after Tom Erbe / SoundHack's +delay; op1r port by pcppcp",
+  "kind": "fx",
+  "symbol": "FX_delayed",
+  "sources": ["delayed.c", "delay_dsp.c"],
+  "defaults": [21760, 8192, 32767, 16384],
+  "page2_defaults": [0, 0, 0],
+  "screen": { "svg": "delayed.svg", "symbol": "SCREEN_delayed" },
+  "source_cflags": { "delay_dsp.c": ["-O2"] }
+}

@@ -15,26 +15,26 @@ static const char *const synth_groups[] = { "all", "analog", "digital", "keys", 
 const char *const *const fg_names[FG_KINDS] = { fx_groups, synth_groups };
 const uint8_t fg_ngroups[FG_KINDS] = { sizeof fx_groups / sizeof *fx_groups, sizeof synth_groups / sizeof *synth_groups };
 typedef struct { const char *name; uint8_t g; } fg_def_t;
-static const fg_def_t fx_def[] = {
-    { "spring", 1 }, { "reverb", 1 }, { "nostromo", 1 }, { "father", 1 }, { "sister", 1 }, { "snowglobe", 1 },
-    { "palme", 1 }, { "in a room", 1 },
-    { "delay", 2 }, { "tape", 2 },
-    { "clouds", 3 }, { "hail", 3 },
+static const fg_def_t fx_def[] = {   /* by group, then name */
+    { "father", 1 }, { "in a room", 1 }, { "nostromo", 1 }, { "palme", 1 }, { "rackverb", 1 }, { "reverb", 1 },
+    { "sister", 1 }, { "snowglobe", 1 }, { "spring", 1 },
+    { "delay", 2 }, { "delayed", 2 }, { "pitch delay", 2 }, { "tape", 2 },
+    { "bubbler", 3 }, { "clouds", 3 }, { "hail", 3 },
     { "juni_chorus", 4 }, { "washer", 4 },
-    { "ente", 5 }, { "punch", 5 }, { "nitro", 5 },
-    { "stutter", 6 }, { "steve", 6 }, { "grid", 6 },
-    { "phone", 7 }, { "cwo", 7 }, { "filter", 7 },
+    { "ente", 5 }, { "nitro", 5 }, { "punch", 5 },
+    { "grid", 6 }, { "steve", 6 }, { "stutter", 6 },
+    { "cwo", 7 }, { "filter", 7 }, { "phone", 7 },
 };
-static const fg_def_t synth_def[] = {
-    { "pulse", 1 }, { "voltage", 1 }, { "dsynth", 1 }, { "blot", 1 }, { "monolit", 1 }, { "juni", 1 }, { "elg", 1 },
-    { "supersaw", 1 }, { "sid", 1 },
-    { "digital", 2 }, { "fm", 2 }, { "phase", 2 }, { "cluster", 2 }, { "drwave", 2 }, { "dna", 2 }, { "wavetable", 2 },
-    { "taffy", 2 },
-    { "pew", 3 }, { "mixtur", 3 }, { "fmbell", 3 },
+static const fg_def_t synth_def[] = {   /* by group, then name */
+    { "blot", 1 }, { "dsynth", 1 }, { "elg", 1 }, { "juni", 1 }, { "moai", 1 }, { "monolit", 1 }, { "pulse", 1 },
+    { "sid", 1 }, { "supersaw", 1 }, { "voltage", 1 },
+    { "cluster", 2 }, { "digital", 2 }, { "dna", 2 }, { "drwave", 2 }, { "fm", 2 }, { "percsyn", 2 }, { "phase", 2 },
+    { "taffy", 2 }, { "wavetable", 2 },
+    { "bloodmoon", 3 }, { "fmbell", 3 }, { "mixtur", 3 }, { "pew", 3 },
     { "eva", 4 }, { "vapora", 4 },
-    { "string", 5 }, { "brassophone", 5 }, { "mbira", 5 }, { "hollowsaint", 5 },
-    { "sampler", 6 }, { "sampler+", 6 }, { "granular", 6 }, { "amp", 6 },
-    { "aether", 7 }, { "arc", 7 }, { "dddd", 7 }, { "iter", 7 },
+    { "brassophone", 5 }, { "hollowsaint", 5 }, { "mbira", 5 }, { "reedie", 5 }, { "string", 5 }, { "windwood", 5 },
+    { "amp", 6 }, { "granular", 6 }, { "sampler", 6 }, { "sampler+", 6 },
+    { "aether", 7 }, { "arc", 7 }, { "dddd", 7 }, { "iter", 7 }, { "reactor", 7 },
 };
 static const fg_def_t *const fg_defs[FG_KINDS] = { fx_def, synth_def };
 static const uint8_t fg_ndefs[FG_KINDS] = { sizeof fx_def / sizeof *fx_def, sizeof synth_def / sizeof *synth_def };

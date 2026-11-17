@@ -1,0 +1,11 @@
+{
+  "name": "pitch delay",
+  "author": "ESC_CODE (Volker Junginger), after Tom Erbe / SoundHack's +pitchdelay; op1r port by pcppcp",
+  "kind": "fx",
+  "symbol": "FX_pitchdelay",
+  "sources": ["pitchdelay.c", "pitch_dsp.c"],
+  "defaults": [21760, 8192, 16384, 16384],
+  "page2_defaults": [0, 0, 16384],
+  "screen": { "svg": "pitchdelay.svg", "symbol": "SCREEN_pitchdelay" },
+  "source_cflags": { "pitch_dsp.c": ["-O2"] }
+}
