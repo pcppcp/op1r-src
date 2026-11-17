@@ -105,6 +105,7 @@ SECTIONS {
   .hook_taperase 0x0191B9F0 : { KEEP(*(.hook_taperase)) }
   .hook_tapesave 0x01A54842 : { KEEP(*(.hook_tapesave)) }
   .hook_tapeflush 0x019F0BE2 : { KEEP(*(.hook_tapeflush)) }
+  .hook_wdshut 0x019F0B9E : { KEEP(*(.hook_wdshut)) }       /* wdog_nmi.S, only with the hang detector */
   .hook_lander1 0x01A3BDB0 : { KEEP(*(.hook_lander1)) }
   .hook_lander2 0x019C35F0 : { KEEP(*(.hook_lander2)) }
   .hook_lander3 0x019C369C : { KEEP(*(.hook_lander3)) }

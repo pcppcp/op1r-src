@@ -64,3 +64,7 @@ _wd_nmi:
 	SSYNC;
 .Lw:	jump .Lw;
 	.size _wd_nmi, .-_wd_nmi
+/* power-off (wdog.c wd_shutdown): CALL @0x019F0B9E, the first stock call after the main loop ends. Here, not in
+ * hook.S: only built with the hang detector (make_firmware.py WDOG_HOOKS). */
+	.section .hook_wdshut,"ax"
+	call _wd_shutdown;
