@@ -27,7 +27,8 @@ int main(void)
     CHECK(!fxs_push(&A, w, 0, 1) && !fxs_push(&B, w, 3, 1), "other knobs / FX: not ours");
     CHECK((uint16_t)fxs_keep_push_bits(&A, w[7], 0x1234) == (0x1234 | 0x8000), "a CC keeps bit 15");
     CHECK(fxs_keep_push_bits(&B, w[7], 0x1234) == 0x1234, "no push bits: as written");
-    for (int i = 0; i < 8; i++) op1_fx_shift((const op1_fx_t *)(&A + 1 + i), 0, 2);   /* fill the table */
+    static const op1_fx_t fill[8];                                    /* (not &A + 1 + i: that can be &B) */
+    for (int i = 0; i < 8; i++) op1_fx_shift(&fill[i], 0, 2);   /* fill the table */
     CHECK(!fxs_n(&B, 0), "table full: unregistered stays stock");
     printf(fails ? "fxshift: %d failed\n" : "fxshift: ok\n", fails);
     return fails != 0;
