@@ -798,7 +798,7 @@ static uint32_t *lz_obj[0x44];
 static volatile uint8_t lz_state[0x44];
 volatile uint32_t lz_stat[5];
 volatile uint8_t lz_shown[16], lz_shown_slot[16];   /* debug: which object (boot slot) / table slot was parsed for a frame */                 /* shown, guarded, background, slowest (us), last guarded slot */
-static volatile uint32_t lz_sp;               /* the parsing thread's SP while lz_load runs (0: none) */
+static volatile uint32_t lz_sp[0x44];         /* per screen: its parsing thread's SP while lz_load runs (0: none) */
 static int lz_load(int i)                     /* any thread; 1 = parsed now */
 {
     uint32_t m; __asm__ volatile ("cli %0;" : "=d"(m));
@@ -807,14 +807,15 @@ static int lz_load(int i)                     /* any thread; 1 = parsed now */
     __asm__ volatile ("sti %0;" : : "d"(m));
     if (!mine) return 0;
     uint32_t sp; __asm__ volatile ("%0 = SP;" : "=d"(sp));
-    lz_sp = sp;                                 /* lz_guard: find_node from this parse (its init) must not wait */
+    lz_sp[i] = sp;                              /* lz_guard: find_node from this parse (its init) must not wait;
+                                                 * per screen: a nested parse or another thread's keeps it */
     uint32_t *o = lz_obj[i], c0 = op1_cycles();
     if (!o[0] && o[2]) o[0] = (uint32_t)SVG_LOAD((void *)o[2]);
     const uint8_t *vt = (const uint8_t *)o[3];
     ((void (*)(void *))*(const uint32_t *)(vt + 0x24))((uint8_t *)o + *(const int16_t *)(vt + 0x20));
     uint32_t us = (op1_cycles() - c0) / 400u;
     if (us > lz_stat[3]) lz_stat[3] = us;
-    lz_sp = 0;
+    lz_sp[i] = 0;
     lz_state[i] = 0;
     return 1;
 }
@@ -829,7 +830,7 @@ void lz_guard(uint32_t *o)                    /* Screen::find_node entry (hook.S
          * interrupt (IVG6..14 active), at most ~1 s (VDK ticks ~10 ms), then as before. */
         uint32_t sp, ip = *(volatile uint32_t *)0xFFE02108;  /* IPEND */
         __asm__ volatile ("%0 = SP;" : "=d"(sp));
-        const uint32_t ls = lz_sp;
+        const uint32_t ls = lz_sp[i];
         if ((ls && sp <= ls && ls - sp < 0x10000) || (ip & 0x7FC0)) return;
         for (int n = 0; n < 100 && lz_state[i] == 2; n++) ((void (*)(unsigned))0xFFA0BD2C)(1);   /* VDK::Sleep */
         lz_stat[1]++;
