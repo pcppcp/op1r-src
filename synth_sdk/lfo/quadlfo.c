@@ -79,6 +79,9 @@
 extern int mx_engine_plugin(int n), mx_fx_plugin(int n);            /* dispatcher.c */
 #define ENGINE_PLUGIN(sel) mx_engine_plugin((sel) - OP1_ENGINE_MAGIC)
 #define FX_PLUGIN(sel)     mx_fx_plugin((sel) - OP1_ENGINE_MAGIC)
+#define LFO_RANGE_OK     ((int (*)(int, int, const int16_t *))0x01A1DF9C)   /* stock LFO word range check */
+static uint32_t irq_off(void) { uint32_t m; __asm__ volatile ("cli %0;" : "=d"(m) : : "memory"); return m; }
+static void irq_on(uint32_t m) { __asm__ volatile ("sti %0;" : : "d"(m) : "memory"); }
 #else                                                          /* host test: harness/quadlfo_test.c */
 void host_knob_range_synth(int, int16_t *, int, void *);
 void host_fx_knob_mod(int16_t *, const int16_t *, int16_t *);
@@ -113,6 +116,10 @@ extern uint32_t host_cycles, host_tempo_rate; extern int host_shift, host_pos;
 extern int host_lfo_on[2];
 #define LFO_ON(pos)      ((pos) == 2 ? ml_on : host_lfo_on[pos])
 #define READ_CYCLES()    (host_cycles)
+int host_lfo_range_ok(int type, int i, const int16_t *v);
+#define LFO_RANGE_OK     host_lfo_range_ok
+static uint32_t irq_off(void) { return 0; }
+static void irq_on(uint32_t m) { (void)m; }
 #endif
 #ifndef READ_CYCLES
 static inline uint32_t READ_CYCLES(void) { uint32_t c; __asm__ volatile ("%0 = CYCLES;" : "=d"(c)); return c; }
@@ -178,6 +185,42 @@ static int ql_is_fox(const int16_t *w) { return ((uint16_t)w[7] >> 8) == FOX_MAR
 int ql_is_pond(const int16_t *w) { return ((uint16_t)w[7] >> 8) == POND_MARK; }
 /* every hook (apply / trigger stubs, range check, read, screen, keys): quad, pond, old and dropped fox words */
 int ql_is_quad(const int16_t *w) { return ql_mark_quad((uint16_t)w[7] >> 8) || ql_is_fox(w) || ql_is_pond(w) || ql_is_old(w); }
+
+/* patch loading validates the 8 LFO words one by one against the LFO type's ranges (parse_patch_json, CALL
+ * 0x01A1DF9C at 0x01A042A2, each word in one temporary, words 0..7 in order, stops at the first failure). A failure
+ * ends in the assert patch.cpp:390 "Invalid synth patch ... error 27" = the OP-1 locks at boot, so quad words must
+ * always pass. quad runs as the midi type (4). Current quad words: marker 0xA5 in the high byte of word 7 (or a per-LFO
+ * mute variant of it, ql_mark_quad); op1r <= 15
+ * quad words: 0x4000 / 0x6000 marker in words 4..7 (read as defaults, ql_is_old). For type 4 words that fail the midi
+ * ranges are accepted provisionally; word 7 decides: a quad set -> ok, otherwise the stock result.
+ * Patches are parsed on several threads (boot, background jobs, main loop, key thread) and one can preempt another
+ * inside its word loop: the state is per parse, found by the address of its word temporary (a local of
+ * parse_patch_json, so on that parse's own stack). Not found (table full): word 7 decides alone. */
+static struct { const int16_t *v; uint8_t bad, oldq; } lr_st[8];   /* parses in progress (v 0: free) */
+int lfo_range_ok(int type, int i, const int16_t *v)
+{
+    int ok = LFO_RANGE_OK(type, i, v);
+    if (type != 4) return ok;
+    int k = 0;
+    if (i == 0) {
+        uint32_t m = irq_off();
+        while (k < 8 && lr_st[k].v != v) k++;                     /* (left by a parse that ended early) */
+        if (k == 8) for (k = 0; k < 8 && lr_st[k].v; k++) ;
+        if (k < 8) { lr_st[k].v = v; lr_st[k].bad = 0; lr_st[k].oldq = 1; }
+        irq_on(m);
+    } else while (k < 8 && lr_st[k].v != v) k++;
+    uint8_t none[2] = { 0, 1 };                                   /* a word failed the midi ranges / old quad markers */
+    uint8_t *bad = k < 8 ? &lr_st[k].bad : &none[0], *oldq = k < 8 ? &lr_st[k].oldq : &none[1];
+    if (i >= 4) *oldq &= (uint8_t)ql_old_ctrl(*v);
+    if (!ok) *bad = 1;
+    if (i < 7) return 1;
+    int was_bad = *bad, was_oldq = *oldq;
+    if (k < 8) lr_st[k].v = 0;                                    /* this parse is done */
+    if (((uint16_t)*v >> 8) >= QL_MARK && ((uint16_t)*v >> 8) <= POND_MARK) return 1;   /* quad / fox / pond words */
+    if (ql_mark_quad((uint16_t)*v >> 8)) return 1;                /* quad words with muted LFOs */
+    if (was_oldq) return 1;                                       /* old quad words */
+    return !was_bad;
+}
 /* bit stream over the 8 words */
 static uint32_t ql_get(const int16_t *w, int pos, int n)
 {

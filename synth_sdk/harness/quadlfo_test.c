@@ -47,6 +47,12 @@ void *host_text_ctor(void *o, int32_t x, int32_t y, int32_t z, const uint8_t *c)
 void host_text_set(void *t, const char *s) { snprintf(((htext_t *)t)->s, 32, "%s", s); }
 void host_text_draw(void *t, void *r, const int32_t *m) { (void)r; (void)m; if (ntexts < 32) texts[ntexts++] = t; }
 
+int host_lfo_range_ok(int type, int i, const int16_t *v) { (void)type; (void)i; return *v >= 0 && *v <= 0x3FFF; }   /* stand-in: midi ranges */
+/* a patch parse as parse_patch_json does it: words 0..7 through one temporary (*tmp), stopping at the first failure */
+typedef struct { const int16_t *w; int16_t *tmp; int i, r; } lr_parse;
+static void lr_step(lr_parse *p) { if (p->r && p->i < 8) { *p->tmp = p->w[p->i]; p->r = lfo_range_ok(4, p->i, p->tmp); p->i++; } }
+static int lr_run(lr_parse *p, int to) { while (p->r && p->i < to) lr_step(p); return p->r; }
+
 static int fails;
 #define CHECK(c, ...) do { if (!(c)) { fails++; printf("FAIL: " __VA_ARGS__); printf("\n"); } } while (0)
 /* current-format words: freq(rate 0..63, wave, sync, smooth, offset), ctrl(type, target 0..11, amount -31..31) */
@@ -196,6 +202,34 @@ int main(int argc, char **argv)
     CHECK(!ql_is_quad(midi_def), "midi defaults detected as quad");
     int16_t w[8] = { fq(31, 0, 0, 0, 0), 0, 0, 0, ct(QT_VOICE, 2, 31), ct(QT_VOICE, 5, 0), ct(QT_FREE, 11, -16), ct(QT_VOICE, 4, 20) }; pk(w);
     CHECK(ql_is_quad(w), "quad words not detected");
+
+    {   /* patch load range check (lfo_range_ok): per parse, also when another parse preempts one inside its words */
+        static const int16_t stock[8] = { 100, 200, 300, 400, 500, 600, 700, 800 };
+        static const int16_t badw[8] = { 100, -5, 300, 400, 500, 600, 700, 800 };
+        static const int16_t quad[8] = { 0x7123, -5, 0x7FFF, 0x5A5A, 0x1234, -200, 0x7000, (int16_t)0xA512 };
+        static const int16_t old[8] = { 9000, 9000, 9000, 9000, 0x4001, 0x6002, 0x4003, 0x6004 };
+        int16_t ta, tb;
+        lr_parse a = { stock, &ta, 0, 1 }; CHECK(lr_run(&a, 8), "stock midi LFO words accepted");
+        a = (lr_parse){ badw, &ta, 0, 1 }; CHECK(!lr_run(&a, 8), "stock words out of range rejected at word 7");
+        a = (lr_parse){ quad, &ta, 0, 1 }; CHECK(lr_run(&a, 8), "quad words accepted");
+        a = (lr_parse){ old, &ta, 0, 1 }; CHECK(lr_run(&a, 8), "op1r <= 15 quad words accepted");
+        for (int m = 0; m < 16; m++) {                              /* every per-LFO mute variant of the marker */
+            int16_t qm[8]; memcpy(qm, quad, sizeof qm);
+            qm[7] = (int16_t)((0xA5 ^ ((m & 1) | (m & 2) << 1 | (m & 4) << 1 | (m & 8) << 3)) << 8 | 0x12);
+            a = (lr_parse){ qm, &ta, 0, 1 }; CHECK(lr_run(&a, 8), "quad words with mute marker %02X accepted", (uint16_t)qm[7] >> 8);
+        }
+        for (int at = 1; at < 8; at++) {                           /* B's whole parse between A's words at-1 and at */
+            lr_parse pa = { stock, &ta, 0, 1 }, pb = { quad, &tb, 0, 1 };
+            lr_run(&pa, at); CHECK(lr_run(&pb, 8), "quad parse preempting a stock one (at %d): accepted", at);
+            CHECK(lr_run(&pa, 8), "stock parse preempted by a quad one (at %d): still accepted", at);
+            pa = (lr_parse){ badw, &ta, 0, 1 }; pb = (lr_parse){ stock, &tb, 0, 1 };
+            lr_run(&pa, at); CHECK(lr_run(&pb, 8), "valid parse preempting a bad one (at %d): accepted", at);
+            CHECK(!lr_run(&pa, 8), "bad parse preempted by a valid one (at %d): still rejected", at);
+        }
+        lr_parse ab = { stock, &ta, 0, 1 }; lr_run(&ab, 3);       /* a parse that never reaches word 7 */
+        a = (lr_parse){ badw, &ta, 0, 1 }; CHECK(!lr_run(&a, 8), "the next parse on that temporary starts afresh");
+        a = (lr_parse){ stock, &ta, 0, 1 }; CHECK(lr_run(&a, 8), "and again");
+    }
 
     /* routing: LFO0 synth knob 2 full +, LFO1 env amount 0 (no call), LFO2 fx knob 3, LFO3 env A */
     n_synth = n_env = n_fx = 0; max_mod = 0;

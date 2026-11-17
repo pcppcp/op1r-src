@@ -223,7 +223,7 @@ static void fx_sanitize(void)
             int16_t *p = (int16_t *)(pos == 2 ? 0xFF8016C4 : (pos ? 0xFF8015C4 : 0xFF801444) + slot * 16);   /* 2: master */
             int n = p[4] - OP1_ENGINE_MAGIC;
             if (!fx_index(n)) continue;
-            if (pos == 2 && *(volatile int *)0xFF801090 != 5) continue;   /* master runs another FX type */
+            if (*(volatile int *)(pos == 2 ? 0xFF801090 : (pos ? 0xFF801754 : 0xFF801734) + slot * 4) != 5) continue;   /* runs another FX type */
             for (int i = 0; i < 4; i++) {
                 const int16_t *rg = (const int16_t *)(0x01DE5C50 + 5 * 0x30 + i * 6);
                 int lo = rg[0], hi = rg[1];
@@ -467,29 +467,7 @@ void *read_lfo_param_safe(int slot, int pos)
     return READ_LFO_PARAM(slot, pos);
 }
 
-/* patch loading validates the 8 LFO words one by one against the LFO type's ranges (parse_patch_json, CALL
- * 0x01A1DF9C at 0x01A042A2, each word in one temporary, words 0..7 in order, stops at the first failure). A failure
- * ends in the assert patch.cpp:390 "Invalid synth patch ... error 27" = the OP-1 locks at boot, so quad words must
- * always pass. quad runs as the midi type (4). Current quad words: marker 0xA5 in the high byte of word 7 (or a per-LFO
- * mute variant of it, (b & 0xB2) == 0xA0, lfo/quadlfo.c); op1r <= 15
- * quad words: 0x4000 / 0x6000 marker in words 4..7 (lfo/quadlfo.c reads them as defaults). For type 4 words that fail
- * the midi ranges are accepted provisionally; word 7 decides: a quad set -> ok, otherwise the stock result. */
-#define LFO_RANGE_OK ((int (*)(int, int, const int16_t *))0x01A1DF9C)
-int lfo_range_ok(int type, int i, const int16_t *v)
-{
-    static uint8_t bad, oldq;                                     /* a word failed the midi ranges / old quad markers */
-    if (i == 0) { bad = 0; oldq = 1; }
-    int ok = LFO_RANGE_OK(type, i, v);
-    if (type != 4) return ok;
-    int oldctrl = (*v & 0xE000) == 0x4000 || (*v & 0xE000) == 0x6000;
-    if (i >= 4) oldq &= (uint8_t)oldctrl;
-    if (!ok) bad = 1;
-    if (i < 7) return 1;
-    if (((uint16_t)*v >> 8) >= 0xA5 && ((uint16_t)*v >> 8) <= 0xA7) return 1;   /* quad / fox / pond words */
-    if ((((uint16_t)*v >> 8) & 0xB2) == 0xA0) return 1;          /* quad words with muted LFOs */
-    if (oldq) return 1;                                           /* old quad words */
-    return !bad;
-}
+/* patch loading's LFO word range check (hook_lforange): lfo_range_ok in lfo/quadlfo.c */
 
 /* Sounds store the FX by name; an unknown name asserts in fx_types.cpp:42 ("unknown fx name") and the OP-1 locks at
  * boot. The table entry "filter" also matches every name that is not a stock FX (custom FX, plugin files, renamed or
@@ -1105,9 +1083,10 @@ static const op1_seq_t *seq_page(void)          /* the sequencer plugin whose sc
  * written into the patch: patch::set_lfo_params 0x019FF734 / set_knobs 0x01A00D14 (patch, int16 words[8]), which
  * also mark the patch changed (vt+0x34). Patch objects: synth 0x01DDD7E8, drum 0x01DDD9A8, + slot * 0x38. */
 #define PATCH_OBJ(drum, slot) ((void *)((drum ? 0x01DDD9A8 : 0x01DDD7E8) + ((slot) & 7) * 0x38))
-#define PATCH_SET_LFO   ((void (*)(void *, const int16_t *))0x019FF734)
-#define PATCH_SET_KNOBS ((void (*)(void *, const int16_t *))0x01A00D14)
-#define PATCH_SET_FX    ((void (*)(void *, const int16_t *))0x019FF664)   /* JSON "fx_params" */
+/* (knob and key threads: not while a save / type job serializes the patch, docs/66) */
+#define PATCH_SET_LFO(p, w)   (op1_patch_wait(), ((void (*)(void *, const int16_t *))0x019FF734)(p, w))
+#define PATCH_SET_KNOBS(p, w) (op1_patch_wait(), ((void (*)(void *, const int16_t *))0x01A00D14)(p, w))
+#define PATCH_SET_FX(p, w)    (op1_patch_wait(), ((void (*)(void *, const int16_t *))0x019FF664)(p, w))   /* JSON "fx_params" */
 
 /* tape markers (tape/markers.c, docs/22): only while the stock tape screen is the current one */
 extern void *tm_scr;
@@ -1178,7 +1157,7 @@ void key_event_hook(int code, int pressed)
 {
     lz_input++;                                                  /* lazy screens: no background parse while playing */
     plk_poll();                                                  /* parameter-lock clips: load / save (seq/plk.c) */
-    if (pressed) { extern void bgs_flush(void); bgs_flush(); }   /* delayed saves (bgsave.c): a key may change mode / start disk mode */
+    if (pressed && pressed != 0xA5) { extern void bgs_flush(void); bgs_flush(); }   /* delayed saves (bgsave.c): a key may change mode / start disk mode (not MX_KEY below: MIDI CCs keep the debounce) */
     { extern void in_screen_sync(void), in_flush(void); extern int in_press(int); in_flush(); in_screen_sync();   /* input engines: T2 tuner */
       if (in_press(code)) return; }
     if (code >= 0x02 && code <= 0x05) {                          /* the Lander combo: all four held -> swallowed */

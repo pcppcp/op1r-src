@@ -233,6 +233,7 @@ void mx_apply(void)                                       /* KeyHandler thread: 
     for (int i = 0; i < MX_N; i++) v[i] = val[i];
     queued = 0;
     irq_on(m);
+    op1_patch_wait();                                     /* the setters write the patch JSON (docs/66) */
     for (int id = 0; id < MX_N; id++) if (p[id >> 5] >> (id & 31) & 1) apply(id, v[id]);
 }
 #endif

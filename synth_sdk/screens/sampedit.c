@@ -891,6 +891,7 @@ static void se_peaks(void)                                        /* as SampleBu
 static void se_markers(void)                                      /* persist the markers */
 {
     se_loop_clamp(&se);                                           /* also after trim / cut / paste */
+    op1_patch_wait();                                             /* not while a save / type job serializes the patch */
     if (se.drum) SE_DRUM_TO_PATCH(SE_PATCH_D(se_slot)); else SE_SET_KNOBS(SE_PATCH_S(se_slot), se.w);
 }
 static void se_store(int audio)                                   /* persist markers (+ audio) */
