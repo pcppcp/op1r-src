@@ -57,26 +57,27 @@ static void tm_save(void) { tm_fmt(tm_host_saved); }
 static void tm_load(void) { int n = 0; while (tm_host_saved[n]) n++; tm_parse(tm_host_saved, n); }
 #else
 #define TM_DB_HANDLE ((void *(*)(void))0x0196DD44)
-#define TM_DB_EXEC   ((void (*)(void *, const char *))0x0196F950)
 #define TM_DB_GET    ((void (*)(void *, void *, const char *))0x0196FBD0)
 typedef struct { uint32_t alloc; union { char buf[16]; char *ptr; } u; uint32_t size, cap; uint32_t pad; } tm_dstr;
 static char tm_sql[64 + TM_MAX * 9];
 static const char TM_CREATE[] = "CREATE TABLE IF NOT EXISTS op1rmarkers (id INTEGER PRIMARY KEY, data TEXT NOT NULL)";
+static uint8_t tm_nostore;                                  /* no table: markers live until power off (euclid.c eu_load) */
 static void tm_save(void)                                   /* KeyHandler thread, on change */
 {
+    if (tm_nostore) return;
     static const char head[] = "INSERT OR REPLACE INTO op1rmarkers VALUES (0,'";
     char *o = tm_sql;
     for (const char *h = head; *h; h++) *o++ = *h;
     o += tm_fmt(o);
     *o++ = '\''; *o++ = ')'; *o = 0;
     void *db = TM_DB_HANDLE();
-    TM_DB_EXEC(db, TM_CREATE);
+    op1_db_write(db, TM_CREATE);
     op1_db_write(db, tm_sql);                         /* (no assert: long statement) */
 }
 static void tm_load(void)
 {
     void *db = TM_DB_HANDLE();
-    TM_DB_EXEC(db, TM_CREATE);
+    if (op1_db_write(db, TM_CREATE)) { tm_nostore = 1; return; }
     tm_dstr s = { 0 };
     TM_DB_GET(&s, db, "SELECT data FROM op1rmarkers WHERE id=0");
     if (s.size) tm_parse(s.cap > 15 ? s.u.ptr : s.u.buf, (int)s.size);   /* (heap copy once per boot, not freed) */

@@ -605,7 +605,6 @@ volatile uint8_t eu_active[2];                          /* euclid selected (synt
 #define BG_REGISTER ((void (*)(void *))0x0193F010)
 #define BG_DIRTY    ((void (*)(void *))0x0193EF3C)
 #define DB_HANDLE   ((void *(*)(void))0x0196DD44)
-#define DB_EXEC     ((void (*)(void *, const char *))0x0196F950)
 #define DB_GET      ((void (*)(void *, void *, const char *))0x0196FBD0)
 typedef struct { uint32_t alloc; union { char buf[16]; char *ptr; } u; uint32_t size, cap; uint32_t pad; } eu_dstr;
 static const char EU_CREATE[] = "CREATE TABLE IF NOT EXISTS euclidseq (is_synth INTEGER PRIMARY KEY, data TEXT NOT NULL)";
@@ -615,7 +614,7 @@ static void eu_bg_save(void *self)
     (void)self;
     static char sql[1400];                              /* 4 patterns: <= ~1250 chars per row */
     void *db = DB_HANDLE();
-    DB_EXEC(db, EU_CREATE);
+    op1_db_write(db, EU_CREATE);
     for (int pos = 0; pos < 2; pos++) {
         static const char head[] = "INSERT OR REPLACE INTO euclidseq VALUES (";
         int o = 0;
@@ -628,12 +627,14 @@ static void eu_bg_save(void *self)
 }
 static const uint32_t eu_bg_vt[6] = { 0, 0, 0, (uint32_t)eu_bg_nop, 0, (uint32_t)eu_bg_save };
 static struct { uint8_t dirty, saving, pad[2]; const uint32_t *vt; uint32_t more[2]; } eu_bg;
-static uint8_t eu_bg_ready;
-static void eu_changed(void) { if (eu_bg_ready) BG_DIRTY(&eu_bg); }
+static uint8_t eu_bg_ready;                             /* 1: loaded + saver, 2: no table, defaults, not saved */
+static void eu_changed(void) { if (eu_bg_ready == 1) BG_DIRTY(&eu_bg); }
 static void eu_load(void)
 {
     void *db = DB_HANDLE();
-    DB_EXEC(db, EU_CREATE);
+    /* no db2::exec: it asserts, and a CREATE needs free pages (full flash on the first op1r boot: assert every
+     * boot). No table: its reads would assert too, and a save could overwrite rows we could not read. */
+    if (op1_db_write(db, EU_CREATE)) { eu_bg_ready = 2; return; }
     for (int pos = 0; pos < 2; pos++) {
         eu_dstr s = { 0 };
         DB_GET(&s, db, pos ? "SELECT data FROM euclidseq WHERE is_synth=0" : "SELECT data FROM euclidseq WHERE is_synth=1");

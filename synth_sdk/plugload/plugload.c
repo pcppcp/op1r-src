@@ -109,7 +109,6 @@ void op1_key_played(int midi, int vel, int on);                   /* seqdev/ms_f
 #define CLIPS_LOAD ((void (*)(void *))0x0195CE88)          /* (clips object) */
 #define DB_HANDLE  ((void *(*)(void))0x0196DD44)            /* user/op1.db: the number map */
 #define DB_FACTORY ((void *(*)(void))0x0196DD38)            /* content/op1_factory.db: synth_types / fx_types */
-#define DB_EXEC    ((void (*)(void *, const char *))0x0196F950)
 #define DB_GET     ((void (*)(void *, void *, const char *))0x0196FBD0)
 typedef struct { uint32_t alloc; union { char buf[16]; char *ptr; } u; uint32_t size, cap; uint32_t pad; } pl_dstr;
 
@@ -204,10 +203,11 @@ static char *sdup(const char *s) { char *d = MALLOC(slen(s) + 1); if (d) scat(d,
 /* ---- name -> number map, one text row in op1.db: "s:name=n,f:name=n," (- prefix: row deleted) ---- */
 #define MAP_MAX 64
 static struct { char kind, present; char name[16]; int n; } map[MAP_MAX];
-static int map_n, map_dirty;
+static int map_n, map_dirty, map_nostore;
 static void map_load(void *db)
 {
-    DB_EXEC(db, "CREATE TABLE IF NOT EXISTS op1rplugins (id INTEGER PRIMARY KEY, data TEXT NOT NULL)");
+    /* no db2::exec assert (seq/euclid.c eu_load): no table = empty map, not saved */
+    if (op1_db_write(db, "CREATE TABLE IF NOT EXISTS op1rplugins (id INTEGER PRIMARY KEY, data TEXT NOT NULL)")) { map_nostore = 1; return; }
     pl_dstr s; dstr_init(&s);
     DB_GET(&s, db, "SELECT data FROM op1rplugins WHERE id=0");
     const char *p = s.cap > 15 ? s.u.ptr : s.u.buf, *e = p + s.size;
@@ -626,7 +626,7 @@ void plug_boot(void)
                  : seq_taken(map[i].name);
         if (!here) { row_delete(DB_FACTORY(), map[i].kind, map[i].name); map[i].present = 0; map_dirty = 1; }
     }
-    if (map_dirty) map_save(db);
+    if (map_dirty && !map_nostore) map_save(db);
 }
 
 /* ---- name lookup on load (docs/37): a sound's plugin is found by its type name, params[4] = this device's number.

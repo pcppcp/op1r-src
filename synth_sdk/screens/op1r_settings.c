@@ -22,7 +22,6 @@ static void db_put(const char *key, int val)
 void op1r_setting_host_clear(void) { ntab = 0; }
 #else
 #define DB_HANDLE ((void *(*)(void))0x0196DD44)
-#define DB_EXEC   ((void (*)(void *, const char *))0x0196F950)
 #define DB_GET    ((void (*)(void *, void *, const char *))0x0196FBD0)
 typedef struct { uint32_t alloc; union { char buf[16]; char *ptr; } u; uint32_t size, cap; uint32_t pad; } dstr;
 static const char CREATE[] = "CREATE TABLE IF NOT EXISTS op1rsettings (key TEXT PRIMARY KEY, val INTEGER NOT NULL)";
@@ -37,12 +36,22 @@ static char *put_i(char *e, int v)
     return e;
 }
 
+/* The table, made once without db2::exec: that asserts on any error, and a CREATE needs free pages, so a full
+ * flash on the first op1r boot asserted before the UI on every boot. Without it: defaults, nothing saved (db2's get
+ * asserts on a missing table too). */
+static volatile uint8_t made;
+static int table(void *db)
+{
+    if (!made && !op1_db_write(db, CREATE)) made = 1;
+    return made;
+}
+
 static int db_get(const char *key, int dflt)
 {
-    static char q[96];
+    char q[96];                                             /* per call: GUI and KeyHandler both read */
     *put_s(put_s(put_s(q, "SELECT val FROM op1rsettings WHERE key='"), key), "'") = 0;
     void *db = DB_HANDLE();
-    DB_EXEC(db, CREATE);
+    if (!table(db)) return dflt;
     dstr s = { 0 };
     DB_GET(&s, db, q);
     const char *p = s.cap > 15 ? s.u.ptr : s.u.buf;         /* (heap copy for long strings, not freed: short values) */
@@ -55,13 +64,12 @@ static int db_get(const char *key, int dflt)
 
 static void db_put(const char *key, int val)
 {
-    static char q[112];
+    char q[112];
     char *e = put_s(q, "INSERT OR REPLACE INTO op1rsettings VALUES ('");
     e = put_i(put_s(put_s(e, key), "',"), val);
     *put_s(e, ")") = 0;
     void *db = DB_HANDLE();
-    DB_EXEC(db, CREATE);
-    DB_EXEC(db, q);
+    if (table(db)) op1_db_write(db, q);                     /* (full flash: not saved, no assert) */
 }
 #endif
 /* safe mode (safeboot.c): the defaults, and no table is created or written (a full flash asserts on it) */

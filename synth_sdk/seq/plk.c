@@ -354,19 +354,20 @@ void plk_page_turn(int m, int knob, int delta)
 #define BG_REGISTER ((void (*)(void *))0x0193F010)
 #define BG_DIRTY    ((void (*)(void *))0x0193EF3C)
 #define DB_HANDLE   ((void *(*)(void))0x0196DD44)
-#define DB_EXEC     ((void (*)(void *, const char *))0x0196F950)
 #define DB_GET      ((void (*)(void *, void *, const char *))0x0196FBD0)
 typedef struct { uint32_t alloc; union { char buf[16]; char *ptr; } u; uint32_t size, cap; uint32_t pad; } dstr;
 static const char CREATE[] = "CREATE TABLE IF NOT EXISTS plk (id INTEGER PRIMARY KEY, data TEXT NOT NULL)";
 static char sql[64 + 16 + 8 * PLK_EV];
 typedef char sql_fits[sizeof sql < 0x2000 - 64 ? 1 : -1];        /* the firmware's SQL format buffer: 8 KB */
 static void bg_nop(void *self) { (void)self; }
+static uint8_t nostore;                                           /* no table (full flash): clips live until power off */
 static int row_used(int id) { return (id & 15) == 15 || (id & 15) < PLK_LANES; }
 static void bg_save(void *self)                                   /* saver thread */
 {
     (void)self;
+    if (nostore) return;
     void *db = DB_HANDLE();
-    DB_EXEC(db, CREATE);
+    op1_db_write(db, CREATE);
     for (int id = 0; id < 32; id++) {
         if (!row_used(id)) continue;
         static const char head[] = "INSERT OR REPLACE INTO plk VALUES (";
@@ -385,8 +386,8 @@ static uint8_t bg_ready;
 static void load(void)                                            /* GUI thread, once */
 {
     void *db = DB_HANDLE();
-    DB_EXEC(db, CREATE);
-    for (int id = 0; id < 32; id++) {
+    if (op1_db_write(db, CREATE)) nostore = 1;                    /* (db2::exec asserts on a full flash; db2's get on a missing table) */
+    for (int id = 0; id < 32 && !nostore; id++) {
         if (!row_used(id)) continue;
         static char q[] = "SELECT data FROM plk WHERE id=00";
         q[sizeof q - 3] = (char)('0' + id / 10); q[sizeof q - 2] = (char)('0' + id % 10);
