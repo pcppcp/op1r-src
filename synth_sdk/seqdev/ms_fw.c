@@ -202,9 +202,12 @@ static int src_of(uint32_t ret)
     return MS_DEST_SEQ;
 }
 static int in_kind(void) { return ms->h.in[ms->sel & 3] & 15; }
+volatile int16_t ms_last_note = -1;                               /* op1_last_note (op1_plugin.h): every synth note */
+int op1_last_note(void) { return ms_last_note; }
 void ms_vc_down(const int32_t *rec, int param, uint32_t ret)      /* VoiceCtl key_down entry (hook.S): every note played */
 {
     (void)param;
+    if (rec[0] >= 0 && rec[0] <= 127) ms_last_note = (int16_t)rec[0];
     if (own_play || !recording() || rec[0] < 0 || rec[0] > 127 || src_of(ret) != in_kind()) return;
     q_put(0, rec[0], rec[1] < 1 ? 100 : rec[1] > 127 ? 127 : rec[1], 1);
     if (waiting()) { arm_go = 1; rec_arm = 1; }                      /* armed / REC held from stop: the note starts the tape,

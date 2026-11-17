@@ -105,10 +105,19 @@ void *dp_keep_op1r(void *patch, void *fresh)
     void *old = JV_KEY(patch, "op1r");                 /* (adds a null member if absent: patch is overwritten next) */
     int keep = jv_type(old) == JV_OBJECT;
     if (keep) JV_ASSIGN(JV_KEY(fresh, "op1r"), old);
-    if (dp_loading_slot >= 0)
+    void *ox = JV_KEY(patch, "op1r_fx");               /* the FX Shift words (screens/fxshiftx.c) */
+    int keepx = jv_type(ox) == JV_OBJECT;
+    if (keepx) JV_ASSIGN(JV_KEY(fresh, "op1r_fx"), ox);
+    extern void fxx_slot_loaded(int drum, int slot, const void *op);
+    if (dp_loading_slot >= 0) {
         for (int i = 0; i < op1_drum_n; i++) op1_drums[i]->slot_loaded(dp_loading_slot, keep ? JV_KEY(fresh, "op1r") : 0);
+        fxx_slot_loaded(1, dp_loading_slot, keepx ? JV_KEY(fresh, "op1r_fx") : 0);
+    }
     uint32_t off = (uint32_t)patch - (SYNTH_PATCHES + 4);              /* a synth slot's patch (sampler+, docs/46) */
-    if (off < 8 * 0x38 && off % 0x38 == 0) sp_slot_loaded((int)(off / 0x38), keep ? JV_KEY(fresh, "op1r") : 0);
+    if (off < 8 * 0x38 && off % 0x38 == 0) {
+        sp_slot_loaded((int)(off / 0x38), keep ? JV_KEY(fresh, "op1r") : 0);
+        fxx_slot_loaded(0, (int)(off / 0x38), keepx ? JV_KEY(fresh, "op1r_fx") : 0);
+    }
     return JV_ASSIGN(patch, fresh);
 }
 

@@ -109,6 +109,25 @@ FX_STATES_BY_NAME = {
                ('frozen (red press)', None, 12, 60, -1, 0b1000, 16384, 22938, 0),
                ('all page 2 + frozen', (30000, 25000, 26000, 30000), 6, 60, -1, 0b1111, 4000, 20000, 20000)],
 }
+FX_STATES_BY_NAME['delayed'] = [('defaults', None, 12, 50, -1, 0, 0, 0, 0, {'HOST_SHIFTW': '14208,0,2730,16384'}),
+    ('short time, feedback 150 %, filter low', (9000, 24576, 9000, 20000), 12, 50, -1, 0, 0, 0, 0, {'HOST_SHIFTW': '14208,0,2730,16384'}),
+    ('Shift held: the LFO (rate 1 Hz, depth 50 %, tri)', (21760, 20000, 32767, 16384), 12, 50, -1, 0, 0, 0, 0, {'HOST_SHIFT': '1', 'HOST_SHIFTW': '22000,16384,8192,16384'}),
+    ('LFO on, Shift released: the echoes sway', (21760, 20000, 32767, 16384), 12, 50, -1, 0, 0, 0, 0, {'HOST_SHIFTW': '22000,16384,8192,24000'}),
+    ('reso page (white press)', (21760, 20000, 12000, 16384), 12, 50, -1, 0b0100, 0, 0, 26000, {'HOST_SHIFTW': '14208,0,2730,16384'}),
+    ('freeze (red press)', (21760, 26000, 32767, 32767), 12, 50, -1, 0b1000, 0, 0, 0, {'HOST_SHIFTW': '14208,0,2730,16384'}),
+    ('Shift layer 2 (Shift + press): smooth on', (21760, 20000, 32767, 16384), 12, 50, -1, 0, 0, 0, 0, {'HOST_SHIFT': '1', 'HOST_LAYER': '1', 'HOST_SHIFTW': '22000,16384,8192,16384,24576,0,0,0'})]
+FX_STATES_BY_NAME['pitch delay'] = [('defaults: 10/7 (+6 st) per repeat', None, 12, 50, -1, 0, 0, 0, 16384),
+    ('+12 st, feedback 120 %', (14000, 19660, 32767, 20000), 12, 50, -1, 0, 0, 0, 16384),
+    ('octave -1 (white press), 3/2', (14000, 16384, 18000, 16384), 12, 50, -1, 0b0100, 0, 0, 11702),
+    ('Shift held: loop depth 100 % (Shift + red)', (21760, 8192, 16384, 16384), 12, 50, -1, 0, 0, 0, 16384, {'HOST_SHIFT': '1', 'HOST_SHIFTW': '0,0,0,32767'}),
+    ('pitch 0: a plain delay', (21760, 16384, 0, 16384), 12, 50, -1, 0, 0, 0, 16384)]
+FX_STATES_BY_NAME['bubbler'] = [('defaults, input bursts', None, 12, 60, -1, 0, 8192, 14745, 30187, {'HOST_SHIFTW': '4112,4112,4112,0'}),
+    ('dense, long grains (size 60 %, blue press)', (20480, 12000, 32767, 16384), 12, 60, -1, 0b0001, 20000, 16384, 30187, {'HOST_SHIFTW': '4112,4112,4112,0'}),
+    ('pitch +7 (green press)', (20480, 12000, 26214, 16384), 12, 60, -1, 0b0010, 8192, 27306, 30187, {'HOST_SHIFTW': '4112,4112,4112,0'}),
+    ('pitch -12, filter dark (white press)', (20480, 16000, 26214, 16384), 12, 60, -1, 0b0100, 8192, 1820, 9000, {'HOST_SHIFTW': '4112,4112,4112,0'}),
+    ('Shift held: variations, reverse 50 %', (20480, 12000, 26214, 16384), 12, 60, -1, 0, 8192, 16384, 30187, {'HOST_SHIFT': '1', 'HOST_SHIFTW': '16000,8000,20000,16384'}),
+    ('Shift layer 2 (Shift + press): pitch var 50 %, reso 70 %', (20480, 12000, 26214, 16384), 12, 60, -1, 0, 8192, 14745, 30187, {'HOST_SHIFT': '1', 'HOST_LAYER': '1', 'HOST_SHIFTW': '4112,4112,4112,0,16384,23000,0,0'}),
+    ('pitch key (green press): the last note', (20480, 12000, 26214, 16384), 12, 60, -1, 0b0010, 8192, 16384, 30187, {'HOST_SHIFTW': '4112,4112,4112,32767'})]
 FX_STATES = [('defaults, silent', None, 0, 20, -1),
              ('defaults, input bursts', None, 12, 50, -1),
              ('all knobs min, bursts', (0, 0, 0, 0), 6, 50, -1),

@@ -30,6 +30,7 @@ static const void *h_cget(const void *json, const char *k) { (void)k; int s = (i
 #define TYPE_JOB       stock_job
 #define JV_CGET        h_cget
 void sp_slot_loaded(int slot, void *op1r) { (void)slot; (void)op1r; }
+void fxx_slot_loaded(int drum, int slot, const void *op) { (void)drum; (void)slot; (void)op; }
 void patch_repair(void *json) { (void)json; }
 void pj_begin(void) {} void pj_end(void) {}
 void dpu_sync(int editor_open_on_10);

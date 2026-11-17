@@ -293,6 +293,51 @@ static inline int op1_fx_list(int32_t q15, int n)
 /* raw word of entry i (the core's step; lo / hi: the knob's raw range) */
 static inline int16_t op1_fx_list_word(int i, int n, int32_t lo, int32_t hi) { return (int16_t)(lo + (i * (hi - lo) + (n - 1) / 2) / (n - 1)); }
 extern volatile uint8_t op1_fx_page[3][4];
+/* Shift + turn and a push flag on a custom FX's page (op1r 72+, kennel's API and word layout: screens/fxshift.h; an
+ * older core refuses the file: unknown import). From the screen's init (GUI thread), with the FX's op1_fx_t:
+ *   op1_fx_shift(fx, k, n): Shift + knob k on the FX page sets a second value, saved with the sound: blue word 5 and
+ *     green word 6 (n = 1: fine, delta / 4 a tick; n = 2..127: one step a click, step i's word (2i+1) * 32768 / (2n),
+ *     an unset word from step 0), white and red two 7-bit fields of word 7 (white bits 0..6, red bits 8..14; one unit a
+ *     click through 0..n-1, n = 2..127, or 0..127 for n = 1). Read: (word * n) >> 15, (w7 >> 0 / 8) & 127.
+ *   op1_fx_push_bit(fx, k, bit): a push of knob k toggles bit 7 or 15 of word 7 (saved), instead of the knob's press.
+ * Words 0..4 are not touched; an FX that calls neither keeps every stock path. A knob with a Shift value should not
+ * also be an OP1_PRESS_PAGE knob (both use word 5 + k). Shift held: op1_shift_held(), for the screen. */
+#ifndef OP1_HOST
+void op1_fx_shift(const op1_fx_t *fx, int knob, int n);
+void op1_fx_push_bit(const op1_fx_t *fx, int knob, int bit);
+#else
+#define op1_fx_shift(fx, knob, n) ((void)(fx), (void)(knob), (void)(n))
+#define op1_fx_push_bit(fx, knob, bit) ((void)(fx), (void)(knob), (void)(bit))
+#endif
+/* the last note the synth played (op1r 72+): MIDI 0..127 from the keyboard, a sequencer, the arpeggio or received
+ * MIDI (every VoiceCtl key down), -1 before the first; any thread. E.g. an FX that follows the played pitch. */
+#ifndef OP1_HOST
+int op1_last_note(void);
+#else
+__attribute__((weak)) int op1_host_last_note = 60;
+static inline int op1_last_note(void) { return op1_host_last_note; }
+#endif
+/* FX Shift words (op1r 72+, op1r only): four more saved values per FX, separate from the knob words, so an FX can have
+ * page-2 presses (words 5..7) AND a Shift layer. From the screen's init: op1_fx_shift_ext(fx, k, n, dflt): Shift + knob
+ * k on the FX page edits Shift word k (0..32767; n = 2..127 steps, one a click, step i = ((2i+1) * 32768) / (2n), read
+ * (v * n) >> 15; n = 1 fine), dflt for a fresh pick. Read them with op1_fx_shift_words(pos) (any thread, 4 words: the
+ * FX at pos; synth / drum: the current slot's). Saved in the patch ("op1r_fx", synth / drum) or op1rsettings (master);
+ * the values belong to the FX that set them. Takes precedence over op1_fx_shift for the same knob.
+ * Second Shift layer (op1r 72+): register k = 4..7 (knob k - 4): then Shift + an encoder press switches the Shift layer
+ * 1 <-> 2 (per FX position, not saved; the presses without Shift stay the FX's). op1_fx_shift_words(pos) then has 8
+ * words; op1_fx_shift_layer(pos) (0 / 1) tells the screen which layer to show while Shift is held. */
+#ifndef OP1_HOST
+void op1_fx_shift_ext(const op1_fx_t *fx, int knob, int n, int dflt);
+const int16_t *op1_fx_shift_words(int pos);
+int op1_fx_shift_layer(int pos);
+#else
+#define op1_fx_shift_ext(fx, knob, n, d) ((void)(fx), (void)(knob), (void)(n), (void)(d))
+static const int16_t op1_host_shift_words[3][8] = { { 0 } };
+__attribute__((weak)) const int16_t *op1_host_shift_words_hook(int pos);
+static inline const int16_t *op1_fx_shift_words(int pos) { return op1_host_shift_words_hook ? op1_host_shift_words_hook(pos) : op1_host_shift_words[pos % 3]; }
+__attribute__((weak)) int op1_host_shift_layer;
+static inline int op1_fx_shift_layer(int pos) { (void)pos; return op1_host_shift_layer; }
+#endif
 
 /* ---- page-2 words as shown (needs op1r 53+): the quad LFO modulates page 2 (words 5..7) only in the audio stage
  * copy, so a screen showing words 5..7 reads them through op1_knobs_shown(): a copy of the 8 words with 5..7

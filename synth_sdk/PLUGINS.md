@@ -102,6 +102,25 @@ steps, one per click; the FX may set `op1_fx_wrap[pos][k] = m` to turn round wit
 starts at the position). `press[k] = OP1_FX_PAGE_STEPS(n)` (n = 2..31): the press toggles page 2, where word 5 + k
 turns in n steps (read it with `(word * n) >> 15`). Example: `plugins/rackverb` (program, unit, mode).
 
+**FX Shift layer** (op1r 72+, kennel's API and word layout): from the screen's init, `op1_fx_shift(&FX_x, k, n)` makes
+Shift + knob k on the FX page set a second value, saved with the sound: blue word 5 and green word 6 (n = 2..127 steps,
+one per click, read `(word * n) >> 15`; n = 1 fine), white and red two 7-bit fields of word 7 (bits 0..6 and 8..14,
+0..n-1). `op1_fx_push_bit(&FX_x, k, 7 or 15)`: a push of knob k toggles that bit of word 7 (saved) instead of the
+knob's press; MIDI CCs on word 7 keep it. Words 0..4 are not touched. Don't also make that knob an `OP1_PRESS_PAGE`
+knob (both use word 5 + k). The screen shows the Shift values while `op1_shift_held()`. Host test:
+`harness/fxshift_test.c`.
+
+**FX Shift words** (op1r 72+, op1r only): to have page-2 presses AND a Shift layer, `op1_fx_shift_ext(&FX_x, k, n,
+dflt)` (screen init) makes Shift + knob k edit one of four extra values, separate from the knob words; read them with
+`op1_fx_shift_words(pos)` (any thread). Saved in the patch (`"op1r_fx"`, synth / drum) or op1rsettings (master); they
+belong to the FX that set them (another FX at the slot starts from its own defaults). Takes precedence over
+`op1_fx_shift` for the same knob. A second Shift layer: register k = 4..7 (knob k - 4); Shift + an encoder press then
+switches the Shift layer 1 <-> 2 (per position, not saved), `op1_fx_shift_layer(pos)` tells the screen which one.
+Host test: `harness/fxshiftx_test.c`.
+
+**Last played note** (op1r 72+): `op1_last_note()` = the last note the synth played (keyboard, sequencers, arpeggio,
+received MIDI; -1 before the first), any thread. Example: bubbler's "key" pitch.
+
 **FX leases** (op1r 63+, kennel's API): `op1_fx_fast(pos, &size)` gives 224 KB per position from heap 0, taken at boot
 only when a loaded plugin imports it; `op1_fx_big` has no pool in op1r (size 0). Read the size, fall back when it is 0.
 

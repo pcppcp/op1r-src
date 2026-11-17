@@ -20,6 +20,8 @@ int16_t  host_voice_vel[6]; int16_t host_voice_env[128]; int16_t host_accel[3] =
 int16_t  host_knobs[8][8];
 int      host_slot;
 int      host_shift;                                         /* Shift held (op1_shift_held) */
+static int16_t host_shiftw[8] = { -1 };                   /* HOST_SHIFTW="a,b,c,d": op1_fx_shift_words */
+const int16_t *op1_host_shift_words_hook(int pos) { (void)pos; return host_shiftw[0] < 0 ? op1_host_shift_words[0] : host_shiftw; }
 const uint8_t *host_sample_buffer[8];
 int16_t  host_fx_knobs[3][8];
 int16_t  host_fx_meter[3];
@@ -107,6 +109,9 @@ int main(int argc, char **argv)
         host_sample_buffer[0] = sb;
     }
 #endif
+    if (getenv("HOST_SHIFTW")) sscanf(getenv("HOST_SHIFTW"), "%hd,%hd,%hd,%hd,%hd,%hd,%hd,%hd", &host_shiftw[0], &host_shiftw[1], &host_shiftw[2], &host_shiftw[3], &host_shiftw[4], &host_shiftw[5], &host_shiftw[6], &host_shiftw[7]);
+    if (getenv("HOST_LAYER")) op1_host_shift_layer = atoi(getenv("HOST_LAYER"));
+    if (getenv("HOST_SHIFT")) host_shift = atoi(getenv("HOST_SHIFT"));   /* Shift held (screens with Shift views) */
 #ifdef FX
     static int32_t scratch[2][44115];
     for (int p = 0; p < 2; p++) host_fx_scratch[p] = scratch[p];
@@ -140,7 +145,6 @@ int main(int argc, char **argv)
     *(uint32_t *)v0 = 0xdeadbeef;                           /* firmware vtable word */
     for (int i = 0; i < 128; i++) host_voice_env[i] = 24000;   /* stock envelope: sustaining */
     if (note) ENGINE.note_on(v0, host_knobs[0]);
-    if (getenv("HOST_SHIFT")) host_shift = atoi(getenv("HOST_SHIFT"));   /* Shift held (screens with Shift views) */
     if (getenv("HOST_ACCEL")) sscanf(getenv("HOST_ACCEL"), "%hd,%hd,%hd", &host_accel[0], &host_accel[1], &host_accel[2]);   /* after note-on: tilted from home */
     SCREEN.init(0);
     for (int f = 0; f < frames; f++) {

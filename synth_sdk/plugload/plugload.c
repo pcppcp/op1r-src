@@ -92,6 +92,7 @@ void eu_fw_note_off(int midi);
 extern volatile uint8_t eu_rec_play;
 void dpu_sync_auto(void);                                          /* dispatcher.c */
 void op1_key_played(int midi, int vel, int on);                   /* seqdev/ms_fw.c (docs/50) */
+int op1_last_note(void);                                           /* seqdev/ms_fw.c */
 
 #define Y_OPEN     ((int (*)(const char *, int, int))0x01A997F4)
 #define Y_CLOSE    ((int (*)(int))0x01A99908)
@@ -147,6 +148,8 @@ static void fx_fast_alloc(void)                 /* boot thread: the first file t
     }
 }
 static const struct { const char *name; void *addr; } exports[] = {
+    { "op1_fx_shift_ext", (void *)op1_fx_shift_ext }, { "op1_fx_shift_words", (void *)op1_fx_shift_words }, { "op1_fx_shift_layer", (void *)op1_fx_shift_layer },   /* screens/fxshiftx.c */
+    { "op1_fx_shift", (void *)op1_fx_shift }, { "op1_fx_push_bit", (void *)op1_fx_push_bit },   /* screens/fxshift.h (dispatcher.c) */
     { "plk_set_tracks", (void *)plk_set_tracks }, { "plk_track_restart", (void *)plk_track_restart },   /* seq/plk.c */
     { "op1_fx_fast", (void *)op1_fx_fast }, { "op1_fx_big", (void *)op1_fx_big },
     { "op1_eng_page", (void *)op1_eng_page }, { "op1_input_tuner_active", (void *)op1_input_tuner_active },
@@ -169,7 +172,7 @@ static const struct { const char *name; void *addr; } exports[] = {
     /* drum engine (docs/43) */
     { "dpu_sync_auto", (void *)dpu_sync_auto },
     /* chord mode (docs/50): a consumed key for the MIDI recorder input I */
-    { "op1_key_played", (void *)op1_key_played }, { "op1_dbg", (void *)op1_dbg },
+    { "op1_key_played", (void *)op1_key_played }, { "op1_last_note", (void *)op1_last_note }, { "op1_dbg", (void *)op1_dbg },
     /* static / dynamic screen regions (screens/guiskip.c, docs/75) */
     { "op1_screen_regions", (void *)op1_screen_regions }, { "op1_screen_static", (void *)op1_screen_static },
     { "op1_screen_static_done", (void *)op1_screen_static_done }, { "op1_screen_static_dirty", (void *)op1_screen_static_dirty },

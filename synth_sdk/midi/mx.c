@@ -177,7 +177,11 @@ static void apply(int id, int v)
     if (g == MX_AUX) { fr_set_send(k, v * 100 / 127); return; }
     tgt_t t;
     if (!locate(id, &t)) return;
-    if (t.page2) t.w[t.k] = (int16_t)(t.page2 == 2 ? 1 + v * 32766 / 127 : v * 32767 / 127);   /* engine page words: 0 = unset */
+    if (t.page2) {
+        extern int16_t fx_keep_push_bits(const int16_t *w, int16_t old, int16_t v);   /* dispatcher.c: an FX's push bits */
+        int16_t nv = (int16_t)(t.page2 == 2 ? 1 + v * 32766 / 127 : v * 32767 / 127);   /* engine page words: 0 = unset */
+        t.w[t.k] = t.page2 == 1 && t.k == 7 ? fx_keep_push_bits(t.w, t.w[7], nv) : nv;
+    }
     else { if (t.rg[1] <= t.rg[0]) return; t.w[t.k] = (int16_t)mx_scale(t.rg, v); }
     if (t.set) t.set(t.patch, t.w);
     if (t.save_master) ((void (*)(void *))0x0193EF3C)((void *)0x01AAD610);   /* master controller's saveable */

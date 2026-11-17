@@ -41,6 +41,12 @@ copyright lines are kept)
   cwo, punch, phone, nitro, grid, spring and delay effects and the Phase and Voltage engines. Copyright (C) 2026
   coldsoldr. op1r adds a run counter for its test builds (OP1R_COOP_HITS) and the glue (dsp/coop/coop_fast.c).
 
+- delayed, pitch delay, bubbler (plugins/delayed, plugins/pitchdelay, plugins/bubbler): the DSP (*_dsp.c, tables,
+  bubbler_params.c) is ESC_CODE's (Volker Junginger) Delay Trio (https://github.com/VolkerJunginger/OP-1, Delay-Trio),
+  GPL-3.0-or-later, fixed-point ports of Tom Erbe / SoundHack's +delay, +pitchdelay and +bubbler (SoundHack's BSD
+  terms in each folder's SoundHack-LICENSE.txt). op1r adds the glue, the screens and two small changes noted in the
+  files (delayed: the time slew step per block; bubbler: a 65,536-sample delay line).
+
 THIRD-PARTY CODE (MIT License, compatible with the GPL; their notices are kept)
 - Fixed-point ports of Mutable Instruments Clouds and the Elements reverb: original code (c) 2014 Emilie Gillet,
   MIT License.
