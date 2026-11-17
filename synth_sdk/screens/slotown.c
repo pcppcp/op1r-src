@@ -6,7 +6,7 @@
 static uint32_t irq_off(void) { return 0; }
 static void irq_on(uint32_t m) { (void)m; }
 #else
-static uint32_t irq_off(void) { uint32_t m; __asm__ volatile ("cli %0;" : "=d"(m)); return m; }
+static uint32_t irq_off(void) { uint32_t m; __asm__ volatile ("cli %0;" : "=d"(m) : : "memory"); return m; }
 static void irq_on(uint32_t m) { __asm__ volatile ("sti %0;" : : "d"(m) : "memory"); }
 #endif
 static so_owner *so_all;
