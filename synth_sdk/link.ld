@@ -104,6 +104,13 @@ SECTIONS {
   .hook_sqlcache 0x0196F942 : { KEEP(*(.hook_sqlcache)) }
   .hook_taperase 0x0191B9F0 : { KEEP(*(.hook_taperase)) }
   .hook_tapesave 0x01A54842 : { KEEP(*(.hook_tapesave)) }
+  .hook_psql1 0x0193F664 : { KEEP(*(.hook_psql1)) }
+  .hook_psql2 0x0193FB28 : { KEEP(*(.hook_psql2)) }
+  .hook_psql3 0x0193FE2C : { KEEP(*(.hook_psql3)) }
+  .hook_psql4 0x01940468 : { KEEP(*(.hook_psql4)) }
+  .hook_psql5 0x019405D4 : { KEEP(*(.hook_psql5)) }
+  .hook_psql6 0x0194063E : { KEEP(*(.hook_psql6)) }
+  .hook_psql7 0x019408AC : { KEEP(*(.hook_psql7)) }
   .hook_tapeflush 0x019F0BE2 : { KEEP(*(.hook_tapeflush)) }
   .hook_wdshut 0x019F0B9E : { KEEP(*(.hook_wdshut)) }       /* wdog_nmi.S, only with the hang detector */
   .hook_lander1 0x01A3BDB0 : { KEEP(*(.hook_lander1)) }

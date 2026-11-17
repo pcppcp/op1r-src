@@ -55,7 +55,8 @@ void in_bus(uint32_t *monitor, uint32_t caller)              /* hook.S in_highpa
     pc_split();                                                /* one clock channel: the input = the other channel */
     int mute = (caller == 0xFFA02896u || caller == 0xFFA02464u || caller == 0xFFA01EC2u) && pc_mute();
     int n = caller == 0xFFA02896u ? current() : 0;
-    if (!n) { dc_run(); if (mute) *monitor = 0; return; }
+    extern void dc_mono_gap(int pos, int16_t *bus);            /* dsp/declick.c: R246's FX swap left the FX out */
+    if (!n) { dc_run(); if (mute) *monitor = 0; dc_mono_gap(caller == 0xFFA02464u, (int16_t *)0xFF800BB4); return; }
     const op1_input_engine_t *d = op1_input_engines[n];
     int slot = (int)SLOT;
     if (d != active || slot != active_slot || active_rate != rate || active_source != INPUT_SOURCE || active_mode != INPUT_MODE) {
@@ -75,6 +76,7 @@ void in_bus(uint32_t *monitor, uint32_t caller)              /* hook.S in_highpa
     d->process(input, (int16_t *)0xFF800BB4, words, rate);
     sm_cy[SMC_SYNTH] += op1_cycles() - t;
     *monitor = 0;                                            /* no dry monitor of the input */
+    dc_mono_gap(0, (int16_t *)0xFF800BB4);
 }
 void in_end(void)                                            /* audio callback end: deactivate when not run */
 {

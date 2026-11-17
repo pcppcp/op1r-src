@@ -26,6 +26,10 @@ dp_extra dp_x[DP_SLOTS][DP_PADS];                             /* filled by the d
 dp_pre   dp_c[DP_SLOTS][DP_PADS];
 uint8_t  dp_isplus[DP_SLOTS];                                 /* slot has an "op1r" object (drum+ pages) */
 static dp_xvoice dp_xs[DP_VOICES];
+/* the kit slot each voice was started in, + 1 (0: not started here: the current slot). A voice keeps its kit's pad
+ * settings after a kit switch (3615694's rule, per voice): a stock hit stays stock when the new kit has drum+ extras
+ * on that pad, and a drum+ hit keeps its extras when the new pad has none (hundekraft 3.3). */
+static uint8_t dp_vslot[DP_VOICES];
 
 static int voice_index(void *self)
 {
@@ -34,14 +38,18 @@ static int voice_index(void *self)
 }
 static dp_voice *model(void *self) { return (dp_voice *)((uint8_t *)self + 8); }   /* pos, state, blocks */
 static int slot_ok(void) { return (uint32_t)DRUM_SLOT < DP_SLOTS; }
+static int voice_slot(int v) { return dp_vslot[v] ? dp_vslot[v] - 1 : DRUM_SLOT; }   /* v >= 0 */
+static int voice_ok(int v) { return v >= 0 && (uint32_t)voice_slot(v) < DP_SLOTS; }
 static int pad_of(int v) { int p = VOICE_PAD[v]; return (uint32_t)p < DP_PADS ? p : 0; }
 static uint32_t samples_per_beat(void) { int32_t l = BEAT_LEN >> 14; return l > 0 ? (uint32_t)l : 22050; }
 
 static void dpx_note_on(void *self, const dp_pad *pad)
 {
     int v = voice_index(self);
+    if (v >= 0) dp_vslot[v] = 0;
     if (v < 0 || !slot_ok()) { STOCK_NOTE_ON(self, pad); return; }
     int slot = DRUM_SLOT, p = pad_of(v);
+    dp_vslot[v] = (uint8_t)(slot + 1);
     dp_voice *vp[DP_VOICES]; uint8_t vpad[DP_VOICES];
     for (int i = 0; i < DP_VOICES; i++) { vp[i] = model(VOICE_OBJ[i]); vpad[i] = (uint8_t)pad_of(i); }
     /* (voice v itself may be stolen and get marked: its note-on below clears the fade) */
@@ -58,16 +66,16 @@ static void dpx_note_on(void *self, const dp_pad *pad)
 static void dpx_note_off(void *self, const dp_pad *pad)
 {
     int v = voice_index(self);
-    if (v < 0 || !slot_ok() || !dp_c[DRUM_SLOT][pad_of(v)].active) { STOCK_NOTE_OFF(self, pad); return; }
-    int slot = DRUM_SLOT, p = pad_of(v);
+    if (!voice_ok(v) || !dp_c[voice_slot(v)][pad_of(v)].active) { STOCK_NOTE_OFF(self, pad); return; }
+    int slot = voice_slot(v), p = pad_of(v);
     dp_plus_note_off(model(self), &dp_xs[v], pad, &dp_x[slot][p], &dp_c[slot][p]);
 }
 
 static void dpx_render(void *self, int16_t *out, const dp_pad *pad)
 {
     int v = voice_index(self);
-    if (v < 0 || !slot_ok()) { STOCK_RENDER(self, out, pad); return; }
-    int slot = DRUM_SLOT, p = pad_of(v);
+    if (!voice_ok(v)) { STOCK_RENDER(self, out, pad); return; }
+    int slot = voice_slot(v), p = pad_of(v);
     if (!dp_c[slot][p].active && !dp_xs[v].fading) { STOCK_RENDER(self, out, pad); return; }
     dp_extra *x = &dp_x[slot][p]; const dp_pre *c = &dp_c[slot][p];
     if (dp_plus_fast_pre(model(self), &dp_xs[v], x, c, BUF_INC, BUF_VEL)) {    /* stock render on our buffers */

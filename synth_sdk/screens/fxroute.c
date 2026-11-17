@@ -147,7 +147,19 @@ static void fr_route_aux(void (*fx)(void *, int16_t *, int16_t *, const int16_t 
 
 extern const int16_t *ml_params(const int16_t *params);   /* master LFO (lfo/ql_master.h): modulated copy */
 /* master FX call: run fx on the instrument part only when chosen and captured this block, else on l / r */
+static void fr_route_(void (*fx)(void *, int16_t *, int16_t *, const int16_t *), void *self, int16_t *l, int16_t *r, const int16_t *params);
+#ifdef OP1_HOST
+#define dc_master(fx, l, r, l0, r0) ((void)(fx), (void)(l0), (void)(r0))   /* (harness/declick_test.c tests it) */
+#else
+void dc_master(const void *fx, int16_t *l, int16_t *r, int16_t l0, int16_t r0);   /* dsp/declick.c */
+#endif
 void fr_route(void (*fx)(void *, int16_t *, int16_t *, const int16_t *), void *self, int16_t *l, int16_t *r, const int16_t *params)
+{
+    const int16_t l0 = l[0], r0 = r[0];
+    fr_route_(fx, self, l, r, params);
+    dc_master((const void *)fx, l, r, l0, r0);                  /* FX switch declick, on the routed result */
+}
+static void fr_route_(void (*fx)(void *, int16_t *, int16_t *, const int16_t *), void *self, int16_t *l, int16_t *r, const int16_t *params)
 {
     params = ml_params(params);                              /* every master FX render passes here */
     if (fr_src == 2) { fr_route_aux(fx, self, l, r, params); return; }

@@ -567,6 +567,20 @@ __hook_taperase:
 	.global __hook_tapesave
 __hook_tapesave:
 	call _tape_safe_write;
+	.section .hook_psql1,"ax"
+	call _patch_sql;
+	.section .hook_psql2,"ax"
+	call _patch_sql;
+	.section .hook_psql3,"ax"
+	call _patch_sql;
+	.section .hook_psql4,"ax"
+	call _patch_sql;
+	.section .hook_psql5,"ax"
+	call _patch_sql;
+	.section .hook_psql6,"ax"
+	call _patch_sql;
+	.section .hook_psql7,"ax"
+	call _patch_sql;
 	.section .hook_tapeflush,"ax"
 	.global __hook_tapeflush
 __hook_tapeflush:

@@ -49,7 +49,12 @@ SLOTS = {'synth_render': (VT_ITER, 2, 0x019B99D4), 'synth_note_on': (VT_ITER, 3,
          'pj_slot_save_job': (0x0190F4AC, 2, 0x01940574),                   # patch jobs on the BgFileWorker: counted, live
          'pj_patch_job_a': (0x0190F2F4, 2, 0x0193F578),                     # patch JSON is not changed meanwhile
          'pj_patch_job_b': (0x0190F3A4, 2, 0x019407DC),                     # (patchjob.c, docs/66)
-         'tombola_advance': (0x01911E04, 6, 0x01A65BBC)}                    # Tombola player advance: long frames in short steps (seq/tombola.c)
+         'tombola_advance': (0x01911E04, 6, 0x01A65BBC),                    # Tombola player advance: long frames in short steps (seq/tombola.c)
+         # FX switch declick (dsp/declick.c): the stock mono FX renders
+         'dc_mono_delay': (0x0190FB6C, 2, 0x0197D8C4), 'dc_mono_grid': (0x01910204, 2, 0x019AF338),
+         'dc_mono_punch': (0x01910C1C, 2, 0x019E6260), 'dc_mono_phone': (0x019112F4, 2, 0x01A1BB74),
+         'dc_mono_spring': (0x019113BC, 2, 0x01A326E8), 'dc_mono_nitro': (0x01910014, 2, 0x019A62A4),
+         'dc_mono_cwo': (0x0190F574, 2, 0x0194480C)}                    # Tombola player advance: long frames in short steps (seq/tombola.c)
 FX_BUILTIN = {'delay','grid','punch','phone','spring','filter','nitro','cwo'}
 # FILTER defaults for a fresh pick: LP IV, FREQ fully open, RES 0, DRIVE 60 (op1repacker's [7548, 0, 8272, 19572] was
 # AP, DRIVE 45). Words 0..3 = FREQ, RES, type (0 = LP IV, 8192 = AP), DRIVE.
@@ -120,6 +125,13 @@ HOOKS = {0x019B975C: ('hook_namecmp', bytes.fromhex('18300b32')),      # instr_t
          0x0191B9F0: ('hook_taperase', bytes.fromhex('09e38cc8')),       # clipboard cmd 4 (erase tape): only chunks with clips
          0x019F0BE2: ('hook_tapeflush', bytes.fromhex('03e3971d')),      # shutdown: CALL tape_c::service(1) loop -> tape_service (flushes every dirty clip)
          0x01A54842: ('hook_tapesave', bytes.fromhex('02e3a12b')),       # tape_c::service: yaffs_write of a dirty clip -> bounce buffer (docs/42)
+         0x0193F664: ('hook_psql1', bytes.fromhex('08e33a6b')),       # drum kit load job 0x0193F578: CALL snprintf(UPDATE ..._slots, 5000) -> patch_sql (patch_sql.c)
+         0x0193FB28: ('hook_psql2', bytes.fromhex('08e3d868')),       # drum type job 0x0193F86C: CALL snprintf(UPDATE ..._slots, 5000) -> patch_sql (patch_sql.c)
+         0x0193FE2C: ('hook_psql3', bytes.fromhex('08e35667')),       # drum type job 0x0193F86C (second): CALL snprintf(UPDATE ..._slots, 5000) -> patch_sql (patch_sql.c)
+         0x01940468: ('hook_psql4', bytes.fromhex('08e33864')),       # synth type job 0x0193FFAC: CALL snprintf(UPDATE ..._slots, 5000) -> patch_sql (patch_sql.c)
+         0x019405D4: ('hook_psql5', bytes.fromhex('08e38263')),       # slot save job 0x01940574, drum: CALL snprintf(UPDATE ..._slots, 5000) -> patch_sql (patch_sql.c)
+         0x0194063E: ('hook_psql6', bytes.fromhex('08e34d63')),       # slot save job 0x01940574, synth: CALL snprintf(UPDATE ..._slots, 5000) -> patch_sql (patch_sql.c)
+         0x019408AC: ('hook_psql7', bytes.fromhex('08e31662')),       # synth preset load job 0x019407DC: CALL snprintf(UPDATE ..._slots, 5000) -> patch_sql (patch_sql.c)
          0x01A044A8: ('hook_dpkeep', bytes.fromhex('fde38ccc')),         # parse_patch_json: keep "op1r" (drum+, docs/31)
          0x01977900: ('hook_dpbrowse', bytes.fromhex('04e37f53')),       # DrumController Shift+T1: start row (user kit -> DRUM, drum+ -> DRUM+)
          0x01995680: ('hook_pparse1', bytes.fromhex('03e39470')),       # insert_user_patch: parse -> JSON repair first (patch_repair.c)
@@ -389,7 +401,7 @@ def gen_table(engs, fxs):
 def build(engs, fxs):
     os.makedirs(os.path.join(HERE, 'build'), exist_ok=True)
     gen_table(engs, fxs)
-    srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'seq/plk.c', 'seq/tombola.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/pcpage.c', 'screens/usbtrack.c', 'screens/tr_rs.S', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'boottime.c', 'build/l1_runtime.c', 'dsp/outstage.c', 'dsp/outstage_l1.c', 'dsp/eq.c', 'dsp/fir.S', 'dsp/eq_l1.c', 'dsp/fir_l1.S', 'dsp/mix.c', 'dsp/mix_l1.S', 'dsp/dec.c', 'dsp/dec_l1.S', 'dsp/dc.c', 'dsp/cw.c', 'dsp/mon.c', 'plugload/op1p_load.c', 'screens/settings.c', 'screens/stxt.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/tm.c', 'tape/tm_loop.S', 'tape/sl_mix.S', 'tape/tm_l1.S', 'screens/tfscreen.c', 'screens/slotown.c', 'tape/mixdrop.c', 'crash.c', 'safeboot.c', 'patchjob.c', 'l1pool.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxgroups.c', 'screens/guiskip.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c', 'input/in_host.c', 'dsp/coop/coop_fast.c'] + ['dsp/coop/%s_fast.S' % n for n in ('dsynth', 'cwo', 'punch', 'phone', 'nitro', 'grid', 'spring', 'delay', 'phase', 'voltage')] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
+    srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'seq/plk.c', 'seq/tombola.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/pcpage.c', 'screens/usbtrack.c', 'screens/tr_rs.S', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'boottime.c', 'build/l1_runtime.c', 'dsp/outstage.c', 'dsp/outstage_l1.c', 'dsp/eq.c', 'dsp/fir.S', 'dsp/eq_l1.c', 'dsp/fir_l1.S', 'dsp/mix.c', 'dsp/mix_l1.S', 'dsp/dec.c', 'dsp/dec_l1.S', 'dsp/dc.c', 'dsp/cw.c', 'dsp/mon.c', 'plugload/op1p_load.c', 'screens/settings.c', 'screens/stxt.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/tm.c', 'tape/tm_loop.S', 'tape/sl_mix.S', 'tape/tm_l1.S', 'screens/tfscreen.c', 'screens/slotown.c', 'patch_sql.c', 'dsp/declick.c', 'tape/mixdrop.c', 'crash.c', 'safeboot.c', 'patchjob.c', 'l1pool.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxgroups.c', 'screens/guiskip.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c', 'input/in_host.c', 'dsp/coop/coop_fast.c'] + ['dsp/coop/%s_fast.S' % n for n in ('dsynth', 'cwo', 'punch', 'phone', 'nitro', 'grid', 'spring', 'delay', 'phase', 'voltage')] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
     objs = []
     cmds = []
     if os.environ.get('OP1R_WDOG', '1') == '1': srcs += ['wdog.c', 'wdog_nmi.S']   # hang detector (wdog.c, docs/18), on by default (OP1R_WDOG=0: off)

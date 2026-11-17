@@ -155,11 +155,13 @@ void rec_end_patch(int slot, uint32_t base_freq, int len)
 #define FILTER_INIT   ((void (*)(void *, int))0x019E780A)
 
 static int fx_pos = 0, fx_cur = -1, fx_cur_master = -1;
+static uint8_t fx_epoch, fx_epoch_master;                       /* inits: the same plugin again counts as a switch (declick) */
 
 void fx_init(void *self, int pos)
 {
     fx_pos = pos & 1;                              /* one mono FX object: synth (0) or drum (1) */
     fx_cur = -1;                                   /* (re)initialise custom FX on first render */
+    fx_epoch++;
     FILTER_INIT(self, pos);
 }
 
@@ -172,6 +174,7 @@ void fx_init(void *self, int pos)
 void fx_init_stereo(void *self)
 {
     fx_cur_master = -1;
+    fx_epoch_master++;
     FILTER_ST_INIT(self);
 }
 
@@ -232,10 +235,17 @@ void *read_fx_param_safe(int slot, int pos)
 }
 
 static void fx_render_(void *self, int16_t *buf, const int16_t *params);
+uint32_t fx_ident(int master)                                    /* dsp/declick.c: the FX the filter type runs */
+{
+    return master ? (uint32_t)(fx_cur_master & 0xFF) | (uint32_t)fx_epoch_master << 8 : (uint32_t)(fx_cur & 0xFF) | (uint32_t)fx_epoch << 8;
+}
+void dc_mono(uint32_t id, int16_t *buf, int16_t dry0);          /* dsp/declick.c */
 void fx_render(void *self, int16_t *buf, const int16_t *params)
 {
     uint32_t t0 = op1_cycles();
+    int16_t d0 = buf[0];
     fx_render_(self, buf, params);
+    dc_mono(0x100u | fx_ident(0) << 9, buf, d0);                 /* FX switch declick */
     sm_cy[SMC_FX] += op1_cycles() - t0;
 }
 static void fx_render_(void *self, int16_t *buf, const int16_t *params)
@@ -842,6 +852,7 @@ void lz_guard(uint32_t *o)                    /* Screen::find_node entry (hook.S
         return;
     }
 }
+static volatile uint32_t lz_input;            /* key presses / knob turns (key_event_hook, knob_event_hook) */
 static void lz_frame(void)                    /* Gfx, the start of a frame: what will be shown, else one in the background */
 {
 #ifdef WDOG
@@ -859,8 +870,12 @@ static void lz_frame(void)                    /* Gfx, the start of a frame: what
         int vis = ((int (*)(void *, int))*(const uint32_t *)(vt + 0x14))((uint8_t *)o + *(const int16_t *)(vt + 0x10), cur);
         if (vis && lz_load(i)) { if (lz_stat[0] < 16) lz_shown[lz_stat[0]] = (uint8_t)(i | (slot << 0) * 0); lz_shown_slot[lz_stat[0] & 15] = (uint8_t)slot; lz_stat[0]++; did = 1; }
     }
+    static uint32_t seen, quiet;                             /* frames since the last key / knob (hundekraft 3.3: a parse */
+    const uint32_t in = lz_input;                            /*  made a frame late while someone played: stutter) */
+    if (in != seen) { seen = in; quiet = 0; } else if (quiet < 30) quiet++;
     if (!lz_bg) return;                                      /* test build: only on show / guard */
-    if (did || ++frames < 30) return;                        /* the background starts half a second after the first frame */
+    if (did || ++frames < 30 || quiet < 30) return;          /* the background starts half a second after the first frame
+                                                              * and half a second after the last key press / knob turn */
     static const uint8_t order[] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C,
         0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
         0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x30, 0x31,
@@ -1154,6 +1169,7 @@ static uint8_t mode_keys;                                               /* synth
 
 void key_event_hook(int code, int pressed)
 {
+    lz_input++;                                                  /* lazy screens: no background parse while playing */
     plk_poll();                                                  /* parameter-lock clips: load / save (seq/plk.c) */
     if (pressed) { extern void bgs_flush(void); bgs_flush(); }   /* delayed saves (bgsave.c): a key may change mode / start disk mode */
     { extern void in_screen_sync(void), in_flush(void); extern int in_press(int); in_flush(); in_screen_sync();   /* input engines: T2 tuner */
@@ -1442,6 +1458,7 @@ static int eng_turn_word(int n, int knob)
 
 void knob_event_hook(int knob, int16_t *delta)
 {
+    lz_input++;
     { extern void cc_fb_knob(int, int); cc_fb_knob(knob, *delta); }   /* CC feedback (midi/ccmap.c) */
     { extern void in_screen_sync(void); extern int in_knob(int, int); in_screen_sync(); if (in_knob(knob, *delta)) return; }   /* input engine tuner: gain */
     if (knob >= 0 && knob < 4 && se_is_open()) { se_knob(knob, *delta); return; }   /* sample editor */
