@@ -1101,13 +1101,14 @@ static int tape_page(void)
 }
 
 /* Shift + Drop on the tape screen: an all-tracks lift is summed into one track (tape/mixdrop.c), then the stock
- * Drop (without Shift) pastes it on the selected track. Anything else keeps the stock Shift + Drop. */
-extern int tape_mix_clip(void);
+ * Drop (without Shift) pastes it on the selected track. Anything else keeps the stock Shift + Drop. The sum replaces
+ * the lift, so only when the stock Drop can take it (clips left, clipboard idle: tape/punch.c). */
+extern int tape_mix_clip(void), pu_clips_ok(void);
 static uint8_t sd_swallow;                                     /* the Drop release that belongs to our Shift + Drop */
 static int tape_shift_drop(int pressed)
 {
     if (!pressed) { int r = sd_swallow; sd_swallow = 0; return r; }
-    if (!*(volatile uint8_t *)0x01DD7F78 || !tape_page() || !tape_mix_clip()) return 0;
+    if (!*(volatile uint8_t *)0x01DD7F78 || !tape_page() || !pu_clips_ok() || !tape_mix_clip()) return 0;
     volatile uint8_t *shift = (volatile uint8_t *)0x01DD7F78;
     uint8_t held = *shift;
     sd_swallow = 1;

@@ -1,10 +1,13 @@
 /* Host test for tape/punch.c: forward / reverse / varispeed travel, loop wraps both ways, starting between markers,
- * one in/out per arming, cancel, not playing. Tape state 10 = playing, 5 = recording while playing. */
+ * one in/out per arming, cancel, not playing, a key while the punch-in is made. Tape state 10 = playing, 5 = recording while playing. */
 #include "../op1_synth.h"
 #include <assert.h>
 #include <stdio.h>
 int32_t host_tape_state, host_tape_pos, host_loop_in, host_loop_out, host_loop_on;
-int host_clips_left = 1;
+static int clips_left = 1, kh_toggle;                  /* kh_toggle: a key toggles punch mode inside the clips check */
+void pu_toggle(void);
+int kh_clips(void) { if (kh_toggle) { kh_toggle = 0; pu_toggle(); } return clips_left; }
+#define host_clips_left kh_clips()
 static int set_modes;
 void host_set_mode(void) { set_modes++; }
 int32_t tm_pos[32]; int tm_n;
@@ -77,7 +80,10 @@ int main(void)
     /* not playing (stopped / armed) at the in marker: no recording, punch mode off */
     setup(15000, 0); host_tape_state = 0; run(64, 100); assert(host_tape_state == 0 && pu_mode == PU_OFF);
     /* out of clips: no recording */
-    setup(15000, 0); host_clips_left = 0; run(64, 100); assert(host_tape_state == 10 && pu_mode == PU_OFF); host_clips_left = 1;
+    setup(15000, 0); clips_left = 0; run(64, 100); assert(host_tape_state == 10 && pu_mode == PU_OFF); clips_left = 1;
+    /* punch mode turned off (key thread) while the main loop makes the punch-in: no recording */
+    setup(15000, 0); kh_toggle = 1; run(64, 400);
+    assert(!kh_toggle && pu_mode == PU_OFF && host_tape_state == 10 && rec_from < 0);
     printf("ok\n");
     return 0;
 }

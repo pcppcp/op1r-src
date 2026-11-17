@@ -1,4 +1,5 @@
-/* Host test for tape/markers.c: add / duplicate guard / remove tolerance / jumps with wrap / save-load / limits.
+/* Host test for tape/markers.c: add / duplicate guard / remove tolerance / jumps with wrap / save-load / limits /
+ * an edit while the first draw loads them.
  * "render <cursor> <zoom>": JSON lines of one frame for the preview. */
 #include "../op1_synth.h"
 #include <assert.h>
@@ -60,6 +61,13 @@ int main(int argc, char **argv)
         float want = zs[i] < 1 ? 1 : zs[i] > 4096 ? 4096 : zs[i];
         assert(abs(tm_zoom_q10() - (int)(want * 1024)) <= 1);
     }
+    /* a red press (key thread) while the first draw (GUI thread) is inside the load: ignored, the saved set stays */
+    strcpy(tm_host_saved, "441000,882000,1323000");
+    tm_n = 0; tm_loaded = 1;                                    /* (the GUI thread's state during its tm_load) */
+    tm_host_cursor = 50 * S; tm_add(); tm_remove(); tm_turn(1024);
+    assert(tm_n == 0 && !strcmp(tm_host_saved, "441000,882000,1323000"));
+    tm_load(); tm_loaded = 2;                                   /* the load ends */
+    tm_add(); assert(tm_n == 4 && !strcmp(tm_host_saved, "441000,882000,1323000,2205000"));
     printf("ok\n");
     return 0;
 }

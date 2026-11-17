@@ -20,10 +20,14 @@ int32_t tm_host_cursor; float tm_host_zoom = 40.0f; int32_t tm_host_located = -1
 static uint32_t tm_host_bits(void) { uint32_t b; memcpy(&b, &tm_host_zoom, 4); return b; }
 #define TM_ZOOM_BITS() tm_host_bits()
 #define TM_LOCATE(s) (tm_host_located = (s))
+static uint32_t irq_off(void) { return 0; }
+static void irq_on(uint32_t m) { (void)m; }
 #else
 #define TM_CURSOR()  (*(volatile int32_t *)0xFF802974 >> 6)
 #define TM_ZOOM_BITS() (*(volatile uint32_t *)0x018C183C)      /* float px/s, read as bits */
 #define TM_LOCATE(s) (((void (*)(int32_t))0x01A55024)(s))
+static uint32_t irq_off(void) { uint32_t m; __asm__ volatile ("cli %0;" : "=d"(m) : : "memory"); return m; }
+static void irq_on(uint32_t m) { __asm__ volatile ("sti %0;" : : "d"(m) : "memory"); }
 #endif
 
 /* ---- persistence: "p1,p2,..." decimal ---- */
@@ -83,8 +87,20 @@ static void tm_load(void)
     if (s.size) tm_parse(s.cap > 15 ? s.u.ptr : s.u.buf, (int)s.size);   /* (heap copy once per boot, not freed) */
 }
 #endif
-static uint8_t tm_loaded;
-void tm_ready(void) { if (!tm_loaded) { tm_loaded = 1; if (!op1r_safe_boot) tm_load(); } }   /* (also seqdev/ms_fw.c) */
+static volatile uint8_t tm_loaded;                          /* 0 not yet, 1 being loaded (by another thread), 2 loaded */
+static int tm_get(void)                                     /* 1: loaded (now, if nobody had); 0: another thread loads */
+{
+    if (tm_loaded == 2) return 1;
+    uint32_t m = irq_off();
+    int mine = !tm_loaded;
+    if (mine) tm_loaded = 1;
+    irq_on(m);
+    if (!mine) return 0;
+    if (!op1r_safe_boot) tm_load();
+    tm_loaded = 2;                                          /* only now: an edit before would save an empty set */
+    return 1;
+}
+void tm_ready(void) { tm_get(); }                           /* (also seqdev/ms_fw.c) */
 static void tm_store(void) { if (!op1r_safe_boot) tm_save(); }   /* safe mode: markers only until power off */
 
 /* ---- edits ---- */
@@ -104,7 +120,7 @@ static int32_t tm_hit_samples(void)                       /* TM_HIT_PX at the cu
 }
 void tm_add_at(int32_t c)                                   /* also the free tape machine (its active head) */
 {
-    tm_ready();
+    if (!tm_get()) return;                                  /* (the first draw is loading them) */
     if (c < 0 || c > TM_MAXPOS || tm_n >= TM_MAX) return;
     int i = 0;
     while (i < tm_n && tm_pos[i] < c) i++;
@@ -116,7 +132,7 @@ void tm_add_at(int32_t c)                                   /* also the free tap
 void tm_add(void) { tm_add_at(TM_CURSOR()); }
 void tm_remove_at(int32_t c, int32_t tol)
 {
-    tm_ready();
+    if (!tm_get()) return;                                  /* (the first draw is loading them) */
     int32_t best = -1, bd = 0;
     for (int i = 0; i < tm_n; i++) {
         int32_t d = tm_pos[i] > c ? tm_pos[i] - c : c - tm_pos[i];
@@ -131,7 +147,7 @@ void tm_remove(void) { tm_remove_at(TM_CURSOR(), tm_hit_samples()); }
 static int32_t tm_acc;
 void tm_turn(int delta)                                    /* Shift + red: one jump per detent, wraps */
 {
-    tm_ready();
+    if (!tm_get()) return;
     if ((tm_acc > 0 && delta < 0) || (tm_acc < 0 && delta > 0)) tm_acc = 0;
     tm_acc += delta;
     int st = tm_acc / 1024;

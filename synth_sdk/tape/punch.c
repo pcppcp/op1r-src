@@ -20,20 +20,24 @@ void host_set_mode(void);
 #define LOOP_ON     host_loop_on
 #define CLIPS_OK()  host_clips_left
 #define SET_MODE()  host_set_mode()
+static uint32_t irq_off(void) { return 0; }
+static void irq_on(uint32_t m) { (void)m; }
 #else
 #define TAPE_STATE  (*(volatile int32_t *)0x018C17D4)
 #define TAPE_POS    (*(volatile int32_t *)0xFF802974)     /* 1/64 samples */
 #define LOOP_IN     (*(volatile int32_t *)0x01B4EF34)     /* samples (tape_c 0x01A53DA0) */
 #define LOOP_OUT    (*(volatile int32_t *)0x01B4EF38)     /* samples (tape_c 0x01A53D88) */
 #define LOOP_ON     (*(volatile uint8_t *)0xFF8029C5)
-/* the stock REC-press checks (on_key 0x21): clips left, clipboard idle */
-static int pu_clips_ok(void)
+/* the stock REC-press checks (on_key 0x21): clips left, clipboard idle (also dispatcher.c: Shift + Drop) */
+int pu_clips_ok(void)
 {
     if (*(int32_t *)((uint8_t *)((void *(*)(void))0x0195BBB4)() + 0x1A00) < 1) return 0;
     return ((int (*)(void))0x0191C750)() != 0 && ((int (*)(void))0x0191554C)() == 0;
 }
 #define CLIPS_OK()  pu_clips_ok()
 #define SET_MODE()  (((void (*)(void))0x01A581F4)())      /* TapeController::set_mode */
+static uint32_t irq_off(void) { uint32_t m; __asm__ volatile ("cli %0;" : "=d"(m) : : "memory"); return m; }
+static void irq_on(uint32_t m) { __asm__ volatile ("sti %0;" : : "d"(m) : "memory"); }
 #endif
 
 extern int32_t tm_pos[];                     /* tape/markers.c: sorted marker positions (samples) */
@@ -77,15 +81,22 @@ void pu_block(void)
     if (pu_crossed(fwd ? b_start - 1 : b_start + 1, pos)) pu_cross();
 }
 
-/* main loop (from ci_service): the stock punch state changes */
+/* main loop (from ci_service): the stock punch state changes. The request is taken and acted on with the interrupts
+ * off: a key (pu_toggle / pu_key) or a crossing in between would be undone or lost. */
 void pu_service(void)
 {
-    uint8_t r = pu_req;
-    if (!r) return;
+    if (!pu_req) return;
+    int ok = pu_req == 1 && CLIPS_OK();                       /* (stock calls: before the interrupts go off) */
+    uint32_t m = irq_off();
+    uint8_t r = pu_req, mode = 0;
     pu_req = 0;
-    if (r == 1 && TAPE_STATE == 10 && CLIPS_OK()) { TAPE_STATE = 5; SET_MODE(); }      /* as REC held while playing */
-    else if (r == 1) pu_mode = PU_OFF;                                                  /* not playing / no clips */
-    if (r == 2 && TAPE_STATE == 5) { TAPE_STATE = 10; SET_MODE(); }                     /* as REC released */
+    if (r == 1 && pu_mode == PU_REC) {
+        if (TAPE_STATE == 10 && ok) { TAPE_STATE = 5; mode = 1; }                     /* as REC held while playing */
+        else pu_mode = PU_OFF;                                                          /* not playing / no clips */
+    }
+    if (r == 2 && TAPE_STATE == 5) { TAPE_STATE = 10; mode = 1; }                      /* as REC released */
+    irq_on(m);
+    if (mode) SET_MODE();
 }
 
 /* key thread */
