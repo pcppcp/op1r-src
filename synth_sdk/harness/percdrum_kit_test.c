@@ -204,6 +204,27 @@ int main(int argc, char **argv)
         texts(0, 3, PG_TONE, 1, lab, val, prs, name, info); assert(!strcmp(val[0], "tonic 1") && !strcmp(lab[0], "sound"));
         ui_turn(0, 3, PG_TONE, 1, 0, -25); assert(!memcmp(&kit[0][3], &mine, sizeof mine));
     }
+    {   /* copy / paste of a key's sound (Lift / Drop with a key held): the whole key, one undo, saved */
+        kit_load(2, 0); kit_load(3, 0); clip_ok = 0; undo_slot = -1; note_kind = 0;
+        assert(!clip_paste(2, 7) && note_kind == NOTE_EMPTY && kit[2][7].origin == 7);              /* nothing copied: nothing changes */
+        kit[2][3].a[P_OSCFREQ] = 12345; kit[2][3].b[P_OSCFREQ] = 54321; kit[2][3].morph = 9000; kit[2][3].flags |= PK_EDITED;
+        clip_copy(2, 3); assert(clip_ok && note_kind == NOTE_COPIED && note_from == 3);
+        pd_key before = kit[2][7], src = kit[2][3];
+        assert(clip_paste(2, 7) && note_kind == NOTE_PASTED && note_from == 7);                     /* paste on another key */
+        assert(!memcmp(kit[2][7].a, src.a, sizeof src.a) && !memcmp(kit[2][7].b, src.b, sizeof src.b));
+        assert(kit[2][7].morph == 9000 && kit[2][7].origin == src.origin && (kit[2][7].flags & PK_EDITED));
+        assert(!memcmp(&kit[2][3], &src, sizeof src));                                              /* the source is untouched */
+        assert(undo_slot == 2 && undo_swap(2) && !memcmp(&kit[2][7], &before, sizeof before));      /* one undo: the key as it was */
+        clip_copy(2, 3); assert(clip_paste(3, 20) && kit[3][20].a[P_OSCFREQ] == 12345);             /* another kit takes it too */
+        assert(kit[3][19].origin == 19 && kit[3][21].origin == 21);                                 /* its neighbours do not change */
+        clip_paste(3, 3); assert(clip_ok);                                                           /* onto the same key: harmless */
+        kit_load(2, 0); assert(clip_ok);                                                             /* the clipboard outlives a kit load */
+        assert(clip_paste(2, 5) && kit[2][5].a[P_OSCFREQ] == 12345);
+        uint8_t raw[PD_RAW_MAX]; pd_key keep = kit[2][5]; unsigned len;                              /* and it saves and loads back */
+        uint8_t *save = pd_raw; (void)save; len = pack_kit(2); memcpy(raw, pd_raw, len);
+        kit_load(4, 0); unpack_kit(4, raw, len);
+        assert(kit[4][5].a[P_OSCFREQ] == 12345 && kit[4][5].b[P_OSCFREQ] == 54321 && kit[4][5].morph == keep.morph);
+    }
     if (argc > 1 && !strcmp(argv[1], "render")) {
         static perc_xfer_t x; memset(&x, 0, sizeof x);
         kit_load(0, 0); pool_n[0] = 0; note_kind = 0;

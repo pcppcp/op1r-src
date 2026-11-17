@@ -9,6 +9,8 @@
  *             are previewed on the keys from the selected one forward and written on a press (one undo)
  *   pages     T1 tone (oscillator, bend), T2 noise (filter, envelope), T4 mix (mix, drive, EQ, level, morph); turn, Shift
  *             + turn, and encoder presses for the modes, as drum+. T3 is the stock FX page.
+ *   copy      Lift with a key held copies that key's sound, Drop with another key held pastes it (one undo); the
+ *             clipboard is shared by every kit. Without a key held, Lift and Drop are the stock ones.
  *   save      "op1r": {"engine": "perc", "b": "<base64>"}: packed bytes, a preset slot is 4 bytes, an edited or
  *             transferred one adds its 21 (+ 21) words. About 2.8 KB at worst (a big patch froze R246 on save).
  *             Without this plugin the firmware plays the kit as a stock sampled kit: its sample, i.e. a transfer
@@ -379,8 +381,22 @@ static int w_mode(uint16_t w) { return w < 21845 ? 0 : w < 43691 ? 1 : 2; }
  * transferred sounds; turning loads, coming back to "mine" restores */
 static struct { int8_t slot, pad; uint8_t valid; int16_t pos; pd_key stash; } br = { -1, -1, 0, 0, { { 0 }, { 0 }, 0, 0, 0 } };
 static uint8_t note_kind, note_from, note_n; static uint16_t note_age;   /* the last action, shown for a while */
-enum { NOTE_PLACED = 1, NOTE_UNDO, NOTE_HOME, NOTE_SKIP };
+enum { NOTE_PLACED = 1, NOTE_UNDO, NOTE_HOME, NOTE_SKIP, NOTE_COPIED, NOTE_PASTED, NOTE_EMPTY };
 static void note(int kind, int from, int n) { note_kind = (uint8_t)kind; note_from = (uint8_t)from; note_n = (uint8_t)n; note_age = 0; }
+
+/* copy / paste of a key's sound (Lift / Drop with that key held, pd_keyev): the whole key (sides a and b, morph, where it
+ * came from), one clipboard for every kit; a paste is one undo. 1: the key changed */
+static pd_key clip_key;
+static uint8_t clip_ok;
+static void clip_copy(int slot, int pad) { clip_key = kit[slot][pad]; clip_ok = 1; note(NOTE_COPIED, pad, 1); }
+static int clip_paste(int slot, int pad)
+{
+    if (!clip_ok) { note(NOTE_EMPTY, pad, 0); return 0; }
+    undo_save(slot);
+    kit[slot][pad] = clip_key; kit[slot][pad].flags |= PK_EDITED;    /* (edited: home goes back to the sound's own preset) */
+    br.valid = 0; note(NOTE_PASTED, pad, 1);
+    return 1;
+}
 
 static void browse(int slot, int pad, int st)
 {
@@ -545,7 +561,8 @@ static void ui_texts(int slot, int pad, int page, int shift, int reading, char *
     if (reading) put(info, "reading..");
     else if (note_kind && note_age < 150) {
         if (note_kind == NOTE_PLACED) { char *p = put(info, "placed "); p = fmt_key(p, note_from); if (note_n > 1) { *p++ = '-'; fmt_key(p, note_from + note_n - 1); } }
-        else put(info, note_kind == NOTE_UNDO ? "undo" : note_kind == NOTE_HOME ? "factory" : "skipped");
+        else put(info, note_kind == NOTE_UNDO ? "undo" : note_kind == NOTE_HOME ? "factory" : note_kind == NOTE_COPIED ? "copied"
+                       : note_kind == NOTE_PASTED ? "pasted" : note_kind == NOTE_EMPTY ? "nothing copied" : "skipped");
     } else if (k->morph > 0 || page == PG_MIX) put(info, key_side(k) ? "side b" : "side a");
     for (int i = 0; i < 4; i++) {
         int l = ui_lane[page][shift ? 1 : 0][i];
@@ -906,8 +923,26 @@ static int pd_knob(int knob, int delta)
 /* keys: the encoder presses on our pages; T4 anywhere in drum mode on a perc kit (from T1, T2, the FX page, or the LFO
  * page the mode came back to: the LFO does nothing for a perc kit) shows the mix page on the T1 screen, T1 the tone page
  * again. Shift + T-keys and T3 stay stock. */
+/* the key of that pad is down. A percussive voice ends while its key is still held (pd_render), so the voice alone is
+ * not enough: R246's physical key table (24 flags, non-zero while down; as Hundekraft's kennel kn_keys.c reads it) is
+ * the main test, and a voice that has not seen its note off yet the fallback */
+#define KEY_HELD ((const volatile uint8_t *)0x01AAD488)
+static int pad_held(int slot, int pad)
+{
+    if ((unsigned)pad < PD_PADS && KEY_HELD[pad]) return 1;
+    for (int v = 0; v < PD_VOICES; v++)
+        if (pv_on[v] && pv_slot[v] == slot && pv_pad[v] == pad && VOICE_OBJ[v] && model(VOICE_OBJ[v])->state == ST_HELD) return 1;
+    return 0;
+}
 static int pd_keyev(int code, int pressed)
 {
+    if ((code == 0x0A || code == 0x0B) && pressed && !SHIFT_HELD && pd_ready && pd_slot_ours()) {   /* Lift / Drop */
+        int slot = DRUM_SLOT_CUR, pad = pd_pad();
+        if (!pad_held(slot, pad)) return 0;                   /* no key held: the stock Lift / Drop */
+        if (code == 0x0A) clip_copy(slot, pad);
+        else if (clip_paste(slot, pad)) pd_changed(slot, pad);
+        return 1;                                             /* (its release too) */
+    }
     if (code == 0x09) {
         if (!pressed) { int r = pd_t4_down; pd_t4_down = 0; return r; }
         int page = pd_page();
