@@ -88,3 +88,11 @@ python3 make_plugin.py plugins/reedie          # -> build/plugins/reedie.op1p
 
 `reedie.wav` is the standard harness phrase at the factory settings. `REEDIE_SPEC.md` is the full
 design and decision log.
+
+## Voice rate
+
+reedie is a 44.1 kHz design (its filters, the reed's start and the 100 ms release are counted in samples at 44.1 kHz).
+R246 renders a voice as 128 samples at 88.2 kHz, 689 times a second, and `OP1_PITCH_INC` counts 88.2 kHz steps. Run
+directly, the pitch is right (the bore length comes from the increment) but every time constant is twice as fast and
+every fixed filter corner an octave up. `rd_rate.c` is the plugin's source: it includes `reedie.c` unchanged, runs the
+model once per two calls on a doubled increment and plays each block's samples upsampled 2x (`harness/reedie_rate_test.c`).
