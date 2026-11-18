@@ -4,7 +4,7 @@
   "kind": "synth",
   "symbol": "ENGINE_reedie",
   "sources": [
-    "reedie.c"
+    "rd_rate.c"
   ],
   "defaults": [
     6553,
