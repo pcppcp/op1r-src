@@ -4,7 +4,7 @@
   "kind": "synth",
   "symbol": "ENGINE_reedophone",
   "sources": [
-    "reedophone.c",
+    "ww_rate.c",
     "reedscr.c"
   ],
   "screen": {
