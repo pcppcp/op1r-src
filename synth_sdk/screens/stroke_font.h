@@ -3,10 +3,10 @@
  * returns the x after the text. Unknown chars leave a gap. */
 #ifndef STROKE_FONT_H
 #define STROKE_FONT_H
-static void sf_line(void *r, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t w, const uint8_t *c)
+#include "pxsnap.h"                              /* straight lines / strokes on the panel's pixel grid */
+static __attribute__((unused)) void sf_line(void *r, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t w, const uint8_t *c)
 {
-    op1_pt a = { x0, y0 }, b = { x1, y1 };
-    op1_raster_line(r, &a, &b, w, c);
+    px_line(r, x0, y0, x1, y1, w, c, 1);
 }
 static const struct { char c; uint8_t n; uint8_t seg[8][4]; } sf_font[] = {
     { '0', 4, { {0,0,4,0},{4,0,4,6},{4,6,0,6},{0,6,0,0} } },
@@ -60,7 +60,7 @@ static int32_t sf_text(void *r, int32_t x, int32_t y, int32_t s, const char *t, 
         for (unsigned k = 0; k < sizeof sf_font / sizeof sf_font[0]; k++) if (sf_font[k].c == *t) {
             for (int j = 0; j < sf_font[k].n; j++) {
                 const uint8_t *g = sf_font[k].seg[j];
-                sf_line(r, x + g[0] * s, y + g[1] * s, x + g[2] * s, y + g[3] * s, w, c);
+                px_tline(r, x + g[0] * s, y + g[1] * s, x + g[2] * s, y + g[3] * s, w, c);
             }
             break;
         }

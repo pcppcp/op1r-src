@@ -1,0 +1,9 @@
+{
+  "name": "pxtest",
+  "author": "pcppcp",
+  "kind": "fx",
+  "symbol": "FX_pxtest",
+  "sources": ["pxtest.c"],
+  "defaults": [0, 0, 0, 0],
+  "screen": { "svg": "pxtest.svg", "symbol": "SCREEN_pxtest" }
+}

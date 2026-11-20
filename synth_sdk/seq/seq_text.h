@@ -9,6 +9,7 @@
  * Copyright (C) 2026 ultralazr. GPL-3.0-or-later with the OP-1 firmware permission (see LICENSE and NOTICE). */
 #ifndef SEQ_TEXT_H
 #define SEQ_TEXT_H
+#include "../screens/pxsnap.h"
 #pragma GCC push_options
 #pragma GCC optimize("Os")                             /* GUI / saver code only: size, not speed */
 #ifdef OP1_HOST
@@ -39,10 +40,11 @@ static const uint8_t sq_seg[] = {
     0x46, 0x00, 0x06, 0x06, 0x46, 0x46, 0x40, 0x00, 0x26, 0x26, 0x40, 0x00, 0x46, 0x40, 0x06, 0x00, 0x06, 0x40, 0x03,
     0x03, 0x46, 0x00, 0x40, 0x40, 0x06, 0x06, 0x46, 0x21, 0x22, 0x24, 0x25, 0x40, 0x46, 0x46, 0x06, 0x06, 0x04, 0x00,
     0x40, 0x40, 0x46, 0x46, 0x06, 0x06, 0x00, 0x24, 0x47, 0x00, 0x16, 0x16, 0x23, 0x23, 0x36, 0x36, 0x40 };
+/* straight lines and glyph strokes on the running panel's pixel grid (screens/pxsnap.h): whole pixels, not two
+ * half-lit rows; the width rounded to whole pixels (at least 1), diagonals keep their ends */
 SQ_DEF void sq_line(void *r, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t w, const uint8_t *c)
 {
-    op1_pt a = { x0, y0 }, b = { x1, y1 };
-    op1_raster_line(r, &a, &b, w, c);
+    px_line(r, x0, y0, x1, y1, w, c, 1);
 }
 SQ_DEF int32_t sq_text(void *r, int32_t x, int32_t y, int32_t s, const char *t, int32_t w, const uint8_t *c)
 {
@@ -50,7 +52,7 @@ SQ_DEF int32_t sq_text(void *r, int32_t x, int32_t y, int32_t s, const char *t, 
         for (unsigned k = 0; k < sizeof sq_fc - 1; k++) if (sq_fc[k] == *t) {
             const uint8_t *g = sq_seg + 2 * sq_fo[k];
             for (int j = 0; j < sq_fn[k]; j++, g += 2)
-                sq_line(r, x + (g[0] >> 4) * s, y + (g[0] & 15) * s, x + (g[1] >> 4) * s, y + (g[1] & 15) * s, w, c);
+                px_tline(r, x + (g[0] >> 4) * s, y + (g[0] & 15) * s, x + (g[1] >> 4) * s, y + (g[1] & 15) * s, w, c);
             break;
         }
         x += (*t == '1' || *t == '.' ? 4 : 6) * s;
