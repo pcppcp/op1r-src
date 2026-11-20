@@ -17,9 +17,9 @@
  *   - both columns' row interpolation is one vector subtract, one dual MAC and one vector add ({col + 1 : col}).
  *   - the sine index: the warped phase is 0..32767 (it interpolates table values), so (x * 8191) >> 15 <= 8190 and
  *     the C's clamp never acts.
- *   - the low-pass lp += (d >> 2) + (d >> 5) + (d >> 6), d = sample - lp (4.9 kHz at 88.2 kHz): d shifted in place
- *     (arithmetic shifts compose exactly); lp stays within int16, vel gain <= 32767, so (lp * vg) >> 16 is the
- *     product's high half and op1_sat16 never acts.
+ *   - the low-pass lp += (d * 19) >> 6, d = sample - lp (4.9 kHz at 88.2 kHz): 19 d = d + 2 d + 16 d in shifts and
+ *     adds; lp stays within int16 (it moves towards the sample, never past it; brass_render clamps the state it
+ *     starts from), vel gain <= 32767, so (lp * vg) >> 16 is the product's high half and op1_sat16 never acts.
  *
  * Schedule: each pass of the loop finishes the previous sample (its sine lookup, low-pass and store) while it starts
  * the next one; the code before the loop starts sample 0 and the code after it finishes sample 127. Registers: R7 ph,
@@ -119,11 +119,11 @@ _br_loop:
 	P2 = P0 + (P2 << 1);
 	R3 = R3 + R1 (NS) || R4 = W[P1] (X) || NOP;            /* vph += vinc; sine(n - 1) (P1 set four packets ago) */
 	R4 = R4 - R6 (NS) || R2 = [I3++] || NOP;               /* d = sine - lp; {width : 257} */
-	R4 >>>= 2;
-	R6 = R6 + R4;
-	R4 >>>= 3;
-	R6 = R6 + R4;
-	R4 >>>= 1;
+	R1 = R4 << 1;                                          /* (R1 free until the ev below) */
+	R4 = R4 + R1;
+	R1 <<= 3;
+	R4 = R4 + R1;                                          /* 19 d */
+	R4 >>>= 6;
 	R6 = R6 + R4;                                          /* lp(n - 1) */
 	R1 = R5 >>> 7 || [P4] = R3 || R4 = [I3++];             /* ev; interp_start */
 	R3.L = (A0 = R1.L * R2.H) (T) || R1.H = W[P2] || NOP;  /* width * ev >> 15; R1 = {vibrato sine : ev} */
@@ -163,11 +163,11 @@ _br_loop:
 	/* sample 127's output */
 	R0 = W[P1] (X);
 	R0 = R0 - R6 (NS);
-	R0 >>>= 2;
-	R6 = R6 + R0;
-	R0 >>>= 3;
-	R6 = R6 + R0;
-	R0 >>>= 1;
+	R1 = R0 << 1;
+	R0 = R0 + R1;
+	R1 <<= 3;
+	R0 = R0 + R1;
+	R0 >>>= 6;
 	R6 = R6 + R0;
 	R4 = R6.L * R2.H (IS);
 	W[I0++] = R4.H;
