@@ -936,12 +936,16 @@ static int pad_held(int slot, int pad)
 }
 static int pd_keyev(int code, int pressed)
 {
+    static uint8_t clip_taken[2];                             /* a Lift / Drop press taken here: its release too */
+    if ((code == 0x0A || code == 0x0B) && !pressed && clip_taken[code - 0x0A]) { clip_taken[code - 0x0A] = 0; return 1; }
+    if ((code == 0x0A || code == 0x0B) && pressed) clip_taken[code - 0x0A] = 0;
     if ((code == 0x0A || code == 0x0B) && pressed && !SHIFT_HELD && pd_ready && pd_slot_ours()) {   /* Lift / Drop */
         int slot = DRUM_SLOT_CUR, pad = pd_pad();
         if (!pad_held(slot, pad)) return 0;                   /* no key held: the stock Lift / Drop */
         if (code == 0x0A) clip_copy(slot, pad);
         else if (clip_paste(slot, pad)) pd_changed(slot, pad);
-        return 1;                                             /* (its release too) */
+        clip_taken[code - 0x0A] = 1;
+        return 1;
     }
     if (code == 0x09) {
         if (!pressed) { int r = pd_t4_down; pd_t4_down = 0; return r; }
