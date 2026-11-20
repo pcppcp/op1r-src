@@ -53,14 +53,15 @@ def main():
         before = open(img, 'rb').read()[:132 * BLOCK]
         boot(img, 400, f'{res}:4:{W}/{t}.res')
         after = open(img, 'rb').read()[:132 * BLOCK]
-        r = struct.unpack('<i', open(f'{W}/{t}.res', 'rb').read())[0]
+        res_f = f'{W}/{t}.res'                                       # (an applied update restarts: op1emu resets and
+        r = struct.unpack('<i', open(res_f, 'rb').read())[0] if os.path.exists(res_f) else None   # leaves no dump: None)
         staged = subprocess.run(inst + [img, '--list'], capture_output=True, text=True).stdout.count('op1r_stage')
         teboot = before[:4 * BLOCK] == after[:4 * BLOCK]
         if t == 't1':
             subprocess.run(inst + [img, '--get', f'content/display/usbout.svg={W}/back.svg'], check=True, stdout=subprocess.DEVNULL)
             boot(img, 60, f'018f7358:40:{W}/bt', snapshot=True)
             bt = open(f'{W}/bt', 'rb').read().replace(b'\0', b'').decode(errors='replace').strip()
-            good = (r == 0 and teboot and after[4 * BLOCK:4 * BLOCK + len(ldr)] == ldr and staged == 0 and
+            good = (r in (0, None) and teboot and after[4 * BLOCK:4 * BLOCK + len(ldr)] == ldr and staged == 0 and
                     open(f'{W}/back.svg', 'rb').read() == svg and bt.split('..')[0].strip() in ldr.decode('latin-1'))
             print(f't1 applied: result {r}, te-boot identical {teboot}, LDR in blocks 4.. {after[4*BLOCK:4*BLOCK+len(ldr)] == ldr}, '
                   f'SVG in place, staging left {staged}, boots "{bt.split("..")[0].strip()}" -> {"ok" if good else "FAIL"}')
