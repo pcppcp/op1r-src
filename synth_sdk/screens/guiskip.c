@@ -338,6 +338,22 @@ void op1_screen_draw_cached_fn(void *scr, int dt, void *first_live)
 }
 
 static int slot_of(const uint32_t *b) { if (buf_id[0] == b) return 0; if (buf_id[1] == b) return 1; return -1; }
+/* Still pages (after Opus 2's "lighter screens"): once two record frames in a row matched the shown picture, the GUI
+ * thread renders only every 4th tick until a key or a turn comes in (lz_input). Both buffers hold the latest picture
+ * then (record frames only run so), so a skipped tick presents the same pixels; the screens' update() and the hash run
+ * every 4th tick, so a change of their own (meters, MIDI) shows within 3 ticks. CALL render at 0x019AB8B2. */
+volatile uint8_t gs_throttle = 1;                /* 0: render every tick (A/B: poke it) */
+volatile uint32_t gs_skipped;
+static uint8_t idle_n;
+void gs_tick(void *buf)
+{
+    extern volatile uint32_t lz_input;
+    static uint32_t seen; static uint8_t n;
+    const uint32_t in = lz_input;
+    if (gs_throttle && !gs_off && idle_n >= 2 && in == seen && (++n & 3)) { gs_skipped++; return; }
+    seen = in; n = 0;
+    ((void (*)(void *))0x019B2674)(buf);
+}
 void gs_frame(void *raster)                    /* CALL Raster::clear in Screen::frame (0x01A3BBE0): a new frame */
 {
     { extern void lazy_screens_frame(void); lazy_screens_frame(); }   /* plugin pages parsed when first shown (dispatcher.c) */
@@ -364,6 +380,7 @@ void gs_frame(void *raster)                    /* CALL Raster::clear in Screen::
     }
 #endif
     gs_logn[recording] = logn; logn = 0;
+    idle_n = prev_buf && prev_rec && h == last ? (uint8_t)(idle_n < 255 ? idle_n + 1 : 255) : 0;   /* still frames in a row */
     if (prev_buf) {
         int ps = slot_of(prev_buf);
         if (prev_rec) { if (h != last) { last = h; force = 2; gs_stat.changes++; } }

@@ -38,6 +38,7 @@ SECTIONS {
   .hook_gsmove 0x019149C4 : { KEEP(*(.hook_gsmove)) }
   .hook_gsline 0x01914904 : { KEEP(*(.hook_gsline)) }
   .hook_gsframe 0x01A3BBE0 : { KEEP(*(.hook_gsframe)) }
+  .hook_gstick 0x019AB8B2 : { KEEP(*(.hook_gstick)) }
   .hook_lzfind 0x01A3B580 : { KEEP(*(.hook_lzfind)) }
   .hook_gstext 0x01A6259C : { KEEP(*(.hook_gstext)) }
   .hook_gsfade 0x01A22F3C : { KEEP(*(.hook_gsfade)) }
@@ -111,6 +112,9 @@ SECTIONS {
   .hook_psql5 0x019405D4 : { KEEP(*(.hook_psql5)) }
   .hook_psql6 0x0194063E : { KEEP(*(.hook_psql6)) }
   .hook_psql7 0x019408AC : { KEEP(*(.hook_psql7)) }
+  .hook_isql1 0x019956F4 : { KEEP(*(.hook_isql1)) }
+  .hook_isql2 0x01995AA6 : { KEEP(*(.hook_isql2)) }
+  .hook_isql3 0x01995CEE : { KEEP(*(.hook_isql3)) }
   .hook_tapeflush 0x019F0BE2 : { KEEP(*(.hook_tapeflush)) }
   .hook_wdshut 0x019F0B9E : { KEEP(*(.hook_wdshut)) }       /* wdog_nmi.S, only with the hang detector */
   .hook_lander1 0x01A3BDB0 : { KEEP(*(.hook_lander1)) }

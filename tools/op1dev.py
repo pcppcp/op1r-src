@@ -105,14 +105,20 @@ def run_script(d, path, log=print):
 def perf(d, secs=3.0, log=print):
     """cycles per audio block from the counters (screens/sysmon.c sm_aud_tot: blocks, cycles / 256; tape/tm.c)"""
     prof = 'tm_prof' in d.syms
-    a0 = d.u32('sm_aud_tot', 2); t0 = d.u32('tm_cyc')[0]; p0 = d.u32('tm_prof', 12) if prof else None
+    def idle():                                                    # the idle thread's run cycles (VDK stats, screens/sysmon.c)
+        if 'idle_obj' not in d.syms: return None
+        o = d.u32('idle_obj')[0]; st = d.u32(hex(o + 0x34))[0] if o else 0
+        return d.u32(hex(st + 0x20))[0] if st else None
+    a0 = d.u32('sm_aud_tot', 2); t0 = d.u32('tm_cyc')[0]; p0 = d.u32('tm_prof', 12) if prof else None; i0 = idle()
     time.sleep(secs)
-    a1 = d.u32('sm_aud_tot', 2); t1 = d.u32('tm_cyc')[0]; p1 = d.u32('tm_prof', 12) if prof else None
+    a1 = d.u32('sm_aud_tot', 2); t1 = d.u32('tm_cyc')[0]; p1 = d.u32('tm_prof', 12) if prof else None; i1 = idle()
     n = (a1[0] - a0[0]) & 0xFFFFFFFF
     if not n: raise RuntimeError('no audio blocks counted')
     blk = 400e6 / 44100 * 64                                       # cycles per 64-frame block at 400 MHz
     cb = ((a1[1] - a0[1]) & 0xFFFFFFFF) * 256 / n; fr = ((t1 - t0) & 0xFFFFFFFF) / n
     log(f'blocks {n}  callback {cb:.0f} cycles = {cb / blk * 100:.1f} %  tape engine {fr:.0f} = {fr / blk * 100:.1f} %')
+    if i0 is not None and i1 is not None:                          # all threads: what the idle thread did not get
+        log(f'cpu (all threads) {100 - ((i1 - i0) & 0xFFFFFFFF) / (n * blk) * 100:.1f} %')
     if prof:                                                       # tape/tm.c PROFILE builds: the engine's sections per block
         nb = ((p1[7] - p0[7]) & 0xFFFFFFFF) or 1
         names = ('start', 'slots', None, None, 'mix', 'out', 'rec', None, 'fast:top', 'fast:setup', 'fast:part', None)

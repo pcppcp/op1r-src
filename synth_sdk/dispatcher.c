@@ -837,7 +837,7 @@ void lz_guard(uint32_t *o)                    /* Screen::find_node entry (hook.S
         return;
     }
 }
-static volatile uint32_t lz_input;            /* key presses / knob turns (key_event_hook, knob_event_hook) */
+volatile uint32_t lz_input;                   /* key presses / knob turns (also guiskip.c gs_tick) (key_event_hook, knob_event_hook) */
 static void lz_frame(void)                    /* Gfx, the start of a frame: what will be shown, else one in the background */
 {
 #ifdef WDOG

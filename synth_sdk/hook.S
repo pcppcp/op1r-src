@@ -811,6 +811,8 @@ _cw_post0_stub:
 	jump.l _gs_line_stub;
 	.section .hook_gsframe,"ax"
 	call _gs_frame;
+	.section .hook_gstick,"ax"
+	call _gs_tick;
 	.section .hook_gstext,"ax"
 	jump.l _gs_text_stub;
 	.section .hook_gsdim,"ax"

@@ -311,6 +311,7 @@ _SW = bytes.fromhex('09e1b45549e1a0ff')                                       # 
 GUISKIP_HOOKS = {0x019149C4: ('hook_gsmove', bytes.fromhex('00e80000')),      # rasterizer move_to entry (LINK 0)
                  0x01914904: ('hook_gsline', bytes.fromhex('00e80000')),      # rasterizer line_to entry (LINK 0)
                  0x01A3BBE0: ('hook_gsframe', bytes.fromhex('ffe3433c')),     # Screen::frame: CALL Raster::clear
+                 0x019AB8B2: ('hook_gstick', bytes.fromhex('00e3e136')),      # GUI thread: CALL render -> gs_tick (still pages: every 4th tick)
                  0x01A3B580: ('hook_lzfind', bytes.fromhex('00e80000')),      # Screen::find_node entry: lazy stock screens
                  0x01A6259C: ('hook_gstext', bytes.fromhex('00e80900')),      # Text::draw entry (LINK 0x24)
                  0x01A2357A: ('hook_gsdim', bytes.fromhex('0032e505')),       # Raster::dim_all entry
@@ -506,7 +507,10 @@ def build(engs, fxs):
     code = open(os.path.join(HERE, 'build', 'synth.bin'), 'rb').read()
     code += b'\0' * (-len(code) % 4)
     hooks = {}
+    ld = open(os.path.join(HERE, 'link.ld')).read()
     for addr, (sec, orig) in list(HOOKS.items()) + list(OPZ_HOOKS.items()) + list(DEV_HOOKS.items()):
+        # a hook section must be linked at its site (link.ld): else its pc-relative CALL / JUMP points elsewhere
+        assert re.search(r'\.%s\s+0x%08X\b' % (re.escape(sec), addr), ld, re.I), f'{sec} not placed at {addr:#x} in link.ld'
         hooks[addr] = open(os.path.join(HERE, 'build', sec + '.bin'), 'rb').read()
         assert len(hooks[addr]) == len(orig), (sec, hooks[addr])
     return code, hooks, syms
