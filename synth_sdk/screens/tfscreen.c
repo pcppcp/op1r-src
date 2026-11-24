@@ -832,6 +832,8 @@ int tfs_key(int code, int pressed)                               /* key thread: 
             else for (int i = 0; i < NCLIPS; i++)                /* lift: the clip under the head */
                 if (CLIP_USED[i] && CLIPS[i * 3] == sel && CLIPS[i * 3 + 1] <= h && h < CLIPS[i * 3 + 2]) {
                     const int32_t a = CLIPS[i * 3 + 1];
+                    if (CLIPS[i * 3 + 2] - a > 0x3C8FE7) break;  /* copy asserts at 90 s (audio_clipboard.cpp:380); R246's
+                                                                  * lift checks first (0x01A5774E) and only shows a note */
                     ((void (*)(int, int32_t, int32_t, int))0x0191BBD0)(sel, a, CLIPS[i * 3 + 2], i);   /* audio_clipboard::copy */
                     tm_set_head(sel, a);                         /* as stock: to the lifted clip's start */
                     break;
