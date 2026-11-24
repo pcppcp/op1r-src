@@ -370,6 +370,15 @@ static void sl_go(int s, int on, int synced)                     /* key thread: 
     if (on) { if (q->len <= 0 || tm_sl_rec == (int8_t)s) return; q->pstop = 0; q->pend = (uint8_t)(synced ? 2 : 1); }
     else { q->pend = 0; if (synced && q->play) q->pstop = 1; else { q->pstop = 0; q->gate = 0; } }
 }
+/* R246's note for a lift over 90 s (tape key handler 0x01A57772): the message screen (0x019DE250 makes it once) shows
+ * the text in the colour R246 passes (0x01BAAF58, filled at boot); key thread, as there */
+static void lift_too_long(void)
+{
+#ifndef OP1_HOST
+    ((void *(*)(void))0x019DE250)();
+    ((void (*)(const char *, const uint8_t *))0x019DE1E0)("max. lift: 90 secs!", (const uint8_t *)0x01BAAF58);
+#endif
+}
 static int sl_key(int code, int pressed)                         /* key thread, slot page shown */
 {
     for (int i = 0; i < 24; i++) if (code == sl_kb[i]) {         /* Shift + a white key: select; a key while REC is held: record */
@@ -425,9 +434,11 @@ static int sl_key(int code, int pressed)                         /* key thread, 
     }
     if (code == 0x0A) {                                          /* LIFT: into R246's clipboard (when it fits), the slot empty */
         volatile tm_slm *q = &tm_sl[sl_sel];
-        if (pressed && tm_sl_rec < 0 && q->len > 0) {
+        if (pressed && tm_sl_rec < 0 && q->len > 0x3C8FE7) lift_too_long();   /* over 90 s (slots hold 120): R246's note,
+                                                                 * the slot stays (it used to be emptied without the copy) */
+        else if (pressed && tm_sl_rec < 0 && q->len > 0) {
             const int t = sl_sel / 3; const int32_t a = (sl_sel % 3) * SL_MAX, e = a + q->len;
-            if (q->len <= 0x3C8FE7) for (int i = 0; i < NCLIPS; i++)   /* audio_clipboard::copy needs the clip there */
+            for (int i = 0; i < NCLIPS; i++)                     /* audio_clipboard::copy needs the clip there */
                 if (CLIP_USED[i] && CLIPS[i * 3] == t && CLIPS[i * 3 + 1] <= a && a < CLIPS[i * 3 + 2]) {
                     ((void (*)(int, int32_t, int32_t, int))0x0191BBD0)(t, a, e, i);
                     sl_clip_bpm = q->bpm; sl_clip_len = q->len;
@@ -832,8 +843,8 @@ int tfs_key(int code, int pressed)                               /* key thread: 
             else for (int i = 0; i < NCLIPS; i++)                /* lift: the clip under the head */
                 if (CLIP_USED[i] && CLIPS[i * 3] == sel && CLIPS[i * 3 + 1] <= h && h < CLIPS[i * 3 + 2]) {
                     const int32_t a = CLIPS[i * 3 + 1];
-                    if (CLIPS[i * 3 + 2] - a > 0x3C8FE7) break;  /* copy asserts at 90 s (audio_clipboard.cpp:380); R246's
-                                                                  * lift checks first (0x01A5774E) and only shows a note */
+                    if (CLIPS[i * 3 + 2] - a > 0x3C8FE7) { lift_too_long(); break; }   /* copy asserts at 90 s
+                                                                  * (audio_clipboard.cpp:380): R246's lift checks first */
                     ((void (*)(int, int32_t, int32_t, int))0x0191BBD0)(sel, a, CLIPS[i * 3 + 2], i);   /* audio_clipboard::copy */
                     tm_set_head(sel, a);                         /* as stock: to the lifted clip's start */
                     break;
