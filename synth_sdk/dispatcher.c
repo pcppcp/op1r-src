@@ -1218,6 +1218,7 @@ void key_event_hook(int code, int pressed)
         }
     }
     if (code == 0x0B && tape_shift_drop(pressed)) return;        /* Shift + Drop: all tracks as one */
+    { extern int ep_key(int, int); if (ep_key(code, pressed)) return; }   /* engine+: fm encoder presses (engplus/ep.c) */
     extern int tool_key(int code, int pressed);
     if (tool_key(code, pressed)) return;                         /* tool plugins (screens/overlay.c) */
     if (ext_engine_key(code, pressed)) return;                   /* extended engines (op1r 60): key callback, Shift pages */
@@ -1467,6 +1468,7 @@ void knob_event_hook(int knob, int16_t *delta)
     if (knob >= 0 && knob < 4 && se_is_open()) { se_knob(knob, *delta); return; }   /* sample editor */
     { extern int fg_knob(int, int); if (fg_knob(knob, *delta)) return; }   /* FX list: white = group (screens/fxgroups.c) */
     if (dpu_knob(knob, *delta)) return;                          /* drum+ pages (pitch / volume: stock) */
+    { extern int ep_knob(int, int); if (ep_knob(knob, *delta)) return; }   /* engine+: a flipped fm knob */
     if (spc_knob(knob, *delta)) return;                          /* sampler+ pages */
     if (knob == 0 && sm_on == 1 && CUR_MODE_ID == 0x0C) { extern void sm_turn(int); sm_turn(*delta); return; }   /* monitor: metrics */
 #ifdef L1SLOT

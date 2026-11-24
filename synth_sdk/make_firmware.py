@@ -54,7 +54,12 @@ SLOTS = {'synth_render': (VT_ITER, 2, 0x019B99D4), 'synth_note_on': (VT_ITER, 3,
          'dc_mono_delay': (0x0190FB6C, 2, 0x0197D8C4), 'dc_mono_grid': (0x01910204, 2, 0x019AF338),
          'dc_mono_punch': (0x01910C1C, 2, 0x019E6260), 'dc_mono_phone': (0x019112F4, 2, 0x01A1BB74),
          'dc_mono_spring': (0x019113BC, 2, 0x01A326E8), 'dc_mono_nitro': (0x01910014, 2, 0x019A62A4),
-         'dc_mono_cwo': (0x0190F574, 2, 0x0194480C)}                    # Tombola player advance: long frames in short steps (seq/tombola.c)
+         'dc_mono_cwo': (0x0190F574, 2, 0x0194480C),
+         'ep_fm_render': (0x0190FF84, 2, 0x019A23D4),                   # engine+ (engplus/ep.c): fm / digital voice render
+         'ep_digital_render': (0x01911A34, 2, 0x01A51F7A), 'ep_string_render': (0x019118C4, 2, 0x01A4F098),
+         'ep_cluster_render': (0x0190F67C, 2, 0x01960288), 'ep_phase_render': (0x0191113C, 2, 0x01A0BC5C),
+         'ep_dna_render': (0x019102A4, 2, 0x019B48D8), 'ep_voltage_render': (0x0191185C, 2, 0x01A49BF4),
+         'ep_pulse_render': (0x019111CC, 2, 0xFFA04B88)}
 FX_BUILTIN = {'delay','grid','punch','phone','spring','filter','nitro','cwo'}
 # FILTER defaults for a fresh pick: LP IV, FREQ fully open, RES 0, DRIVE 60 (op1repacker's [7548, 0, 8272, 19572] was
 # AP, DRIVE 45). Words 0..3 = FREQ, RES, type (0 = LP IV, 8192 = AP), DRIVE.
@@ -401,7 +406,7 @@ def gen_table(engs, fxs):
 def build(engs, fxs):
     os.makedirs(os.path.join(HERE, 'build'), exist_ok=True)
     gen_table(engs, fxs)
-    srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'seq/plk.c', 'seq/tombola.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/pcpage.c', 'screens/usbtrack.c', 'screens/tr_rs.S', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'boottime.c', 'build/l1_runtime.c', 'dsp/outstage.c', 'dsp/outstage_l1.c', 'dsp/eq.c', 'dsp/fir.S', 'dsp/eq_l1.c', 'dsp/fir_l1.S', 'dsp/mix.c', 'dsp/mix_l1.S', 'dsp/dec.c', 'dsp/dec_l1.S', 'dsp/dc.c', 'dsp/cw.c', 'dsp/mon.c', 'plugload/op1p_load.c', 'screens/settings.c', 'screens/stxt.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/tm.c', 'tape/tm_loop.S', 'tape/sl_mix.S', 'tape/tm_l1.S', 'screens/tfscreen.c', 'screens/slotown.c', 'screens/fxshiftx.c', 'patch_sql.c', 'dsp/declick.c', 'tape/mixdrop.c', 'crash.c', 'safeboot.c', 'patchjob.c', 'l1pool.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxgroups.c', 'screens/guiskip.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c', 'input/in_host.c', 'dsp/coop/coop_fast.c'] + ['dsp/coop/%s_fast.S' % n for n in ('dsynth', 'cwo', 'punch', 'phone', 'nitro', 'grid', 'spring', 'delay', 'phase', 'voltage')] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
+    srcs = ['dispatcher.c', 'build/engines_table.c', 'lfo/quadlfo.c', 'seq/seq_core.c', 'seq/plk.c', 'seq/tombola.c', 'screens/iterlab.c', 'screens/sysmon.c', 'screens/pcpage.c', 'screens/usbtrack.c', 'screens/tr_rs.S', 'screens/usbout.c', 'tape/markers.c', 'screens/oblique.c', 'build/oblique_data.c', 'tape/countin.c', 'seqdev/ms_core.c', 'seqdev/ms_fw.c', 'seqdev/ms_draw.c', 'midi/mx.c', 'midi/pclk.c', 'midi/ccmap.c', 'screens/overlay.c', 'plugload/plugload.c', 'boottime.c', 'build/l1_runtime.c', 'dsp/outstage.c', 'dsp/outstage_l1.c', 'dsp/eq.c', 'dsp/fir.S', 'dsp/eq_l1.c', 'dsp/fir_l1.S', 'dsp/mix.c', 'dsp/mix_l1.S', 'dsp/dec.c', 'dsp/dec_l1.S', 'dsp/dc.c', 'dsp/cw.c', 'dsp/mon.c', 'plugload/op1p_load.c', 'screens/settings.c', 'screens/stxt.c', 'tape/punch.c', 'screens/sampedit.c', 'tape/erase.c', 'tape/safewrite.c', 'tape/tm.c', 'tape/tm_loop.S', 'tape/sl_mix.S', 'tape/tm_l1.S', 'screens/tfscreen.c', 'screens/slotown.c', 'screens/fxshiftx.c', 'patch_sql.c', 'dsp/declick.c', 'engplus/ep.c', 'engplus/ep_dsp.c', 'engplus/ep_dsp_bf.S', 'tape/mixdrop.c', 'crash.c', 'safeboot.c', 'patchjob.c', 'l1pool.c', 'patch_repair.c', 'drumplus/dp_core.c', 'samplerplus/sp_core.c', 'devupd/du.c', 'devupd/du_fw.c', 'screens/duprompt.c', 'screens/sbrowse.c', 'screens/fxgroups.c', 'screens/guiskip.c', 'screens/fxroute.c', 'screens/mixaux.c', 'screens/scalepg.c', 'screens/op1r_settings.c', 'bgsave.c', 'scale/sc_core.c', 'scale/sc_fw.c', 'input/in_host.c', 'dsp/coop/coop_fast.c'] + ['dsp/coop/%s_fast.S' % n for n in ('dsynth', 'cwo', 'punch', 'phone', 'nitro', 'grid', 'spring', 'delay', 'phase', 'voltage')] + [s for e in engs for s in [e['source']] + e.get('extra_sources', [])] + [s for f in fxs for s in [f['source']] + f.get('extra_sources', [])]
     objs = []
     cmds = []
     if os.environ.get('OP1R_WDOG', '1') == '1': srcs += ['wdog.c', 'wdog_nmi.S']   # hang detector (wdog.c, docs/18), on by default (OP1R_WDOG=0: off)
@@ -443,6 +448,9 @@ def build(engs, fxs):
     if os.environ.get('OP1R_TMCHECK') == '1': flags['tape/tm.c'] = flags.get('tape/tm.c', []) + ['-DTM_CHECK']   # asm loop vs C per block (docs/82)   # test: the free tape machine on (docs/82)
     if os.environ.get('OP1R_TAPEIO') == '1':          # docs/82: tape read / write times on page 9
         for f in ('tape/safewrite.c', 'screens/sysmon.c'): flags[f] = flags.get(f, []) + ['-DTAPE_IO']
+    if os.environ.get('OP1R_EP_PROF') == '1':                               # docs/90: engine+ cycle counters
+        flags['engplus/ep.c'] = flags['engplus/ep_dsp.c'] = ['-DEP_PROF']
+    if os.environ.get('OP1R_EP_CHECK') == '1': flags['engplus/ep_dsp.c'] = flags.get('engplus/ep_dsp.c', []) + ['-DEP_CHECK']   # C vs assembly
     flags['dsp/eq_l1.c'] = ['-Os']                                          # docs/81: the L1 room (1 204 bytes)
     if os.environ.get('OP1R_EQ') in ('check', 'stress'):                       # docs/81: master EQ model vs original, per block
         flags['dsp/eq.c'] = flags.get('dsp/eq.c', []) + ['-DEQ_CHECK', '-DSTAGE_DUMP'] + (['-DEQ_STRESS'] if os.environ['OP1R_EQ'] == 'stress' else [])
@@ -840,6 +848,10 @@ def main(opz=False, release=False, plugin_files='all', builtin=''):
         symmap.write(OUT_FW + '-symbols.json', symmap.from_build([os.path.basename(o)[:-5] for o in outs]))
     except Exception as x:                       # never fails the firmware build
         print(f'warning: no symbol map ({x!r})')
+    import drumtrim                              # factory drum kits without silent tails (docs/89); the patcher
+    dt, a, b = drumtrim.trim_tree(OUT_FW)        # replays the segment list, so no TE audio is shipped
+    json.dump(dt, open(OUT_FW + '-drumtrim.json', 'w'))
+    print(f'drumtrim: {len(dt)} kits {a / 1048576:.2f} -> {b / 1048576:.2f} MB')
     patch_db(os.path.join(OUT_FW, 'content', 'op1_factory.db'), engs, fxs)
     disp = os.path.join(OUT_FW, 'content', 'display')
     for e in engs + fxs:

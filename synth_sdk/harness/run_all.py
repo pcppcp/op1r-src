@@ -11,7 +11,7 @@ EXTRA = {                                   # test -> extra sources (relative to
     'chord': ['chord/ch_core.c'], 'dddd': ['dddd/dd_core.c'], 'dddd_plugin': ['dddd/dd_core.c'],
     'devupd': ['devupd/du.c'], 'dp_plus': ['drumplus/dp_plus.c', 'drumplus/dp_voice.c'],
     'dp_ui': ['drumplus/dp_plus.c', 'drumplus/dp_voice.c'], 'erase': ['tape/erase.c'], 'plk': ['seq/plk.c'],
-    'mseq': ['seqdev/ms_core.c'], 'oblique': ['harness/build/oblique_data.c'], 'mx': ['midi/mx.c'], 'ccmap': ['midi/ccmap.c', 'midi/mx.c', 'screens/op1r_settings.c'], 'overlay': ['screens/overlay.c'], 'safeboot': ['safeboot.c'],
+    'mseq': ['seqdev/ms_core.c'], 'oblique': ['harness/build/oblique_data.c'], 'mx': ['midi/mx.c'], 'ccmap': ['midi/ccmap.c', 'midi/mx.c', 'screens/op1r_settings.c'], 'overlay': ['screens/overlay.c'], 'engplus': ['engplus/ep.c', 'engplus/ep_dsp.c'], 'safeboot': ['safeboot.c'],
     'rnd': ['rnd/rn_core.c'], 'pclk': ['midi/pclk.c', 'screens/op1r_settings.c'], 'safewrite': ['tape/safewrite.c'], 'tapeevict': ['tape/safewrite.c'], 'tapelift': ['tape/safewrite.c'], 'percdrum_kit': ['plugins/percsyn/perc_dsp.c'], 'steve': ['steve/st_core.c'],
     'usbtrack': ['screens/usbtrack.c'], 'op1p': ['plugload/op1p_load.c'], 'mixdrop': ['tape/mixdrop.c'], 'patchjob': ['patchjob.c'], 'sp_start': ['samplerplus/sp_plus.c', 'samplerplus/sp_voice.c'], 'sp_pp': ['samplerplus/sp_plus.c', 'samplerplus/sp_voice.c'], 'tombola': ['seq/tombola.c'], 'fxgroups': ['screens/fxgroups.c'], 'slotown': ['screens/slotown.c'], 'grids_ui': ['grids/gr_core.c'], 'psql': ['patch_sql.c'], 'esctrio': ['plugins/delayed/delay_dsp.c', 'plugins/pitchdelay/pitch_dsp.c', 'plugins/bubbler/bubbler_dsp.c', 'plugins/bubbler/bubbler_params.c'],
 }
@@ -29,7 +29,7 @@ if not _plugins(): SKIP['op1p'] = 'no built plugins (build/plugins/*.op1p)'
 if not os.path.exists(os.path.join(HERE, 'build', 'oblique_hostw.h')):   # width table made from the stock font (local)
     SKIP['oblique'] = 'needs build/oblique_hostw.h (stock font widths, local only)'
 
-PY = ['pluginkit', 'release_env', 'image_layout']      # harness/<name>_test.py: run with python3, no C build
+PY = ['pluginkit', 'release_env', 'image_layout', 'drumtrim']      # harness/<name>_test.py: run with python3, no C build
 
 def run(name):
     if name in PY:
