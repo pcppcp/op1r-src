@@ -770,7 +770,7 @@ static void tfs_update(void *scr, int dt)
     {                                                            /* bar marks (from tape 0, R246's tempo) */
         const int64_t bar_q8 = (int64_t)4 * 60 * SR * 256 * 256 / bpm_q8();   /* samples per bar, Q8 */
         const int64_t a = (int64_t)(head - 8 * SR) << 8, b = (int64_t)(head + 8 * SR) << 8;
-        for (int64_t k = a <= 0 ? 0 : (a + bar_q8 - 1) / bar_q8; k * bar_q8 <= b && k < 4096; k++) {
+        for (int64_t k = a <= 0 ? 0 : (a + bar_q8 - 1) / bar_q8; k * bar_q8 <= b && (k * bar_q8 >> 8) <= 0xF2BFA0 && k < 4096; k++) {   /* up to 6:00 */
             const int32_t x = xof(OP1_Q10(155), OP1_Q10(145), 8 * SR, (int32_t)(k * bar_q8 >> 8), head);
             ln(r, x, OP1_Q10(76), x, OP1_Q10(82), 0x800, c_grey);
         }
