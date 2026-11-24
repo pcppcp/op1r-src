@@ -581,6 +581,13 @@ __hook_tapesave:
 	call _patch_sql;
 	.section .hook_psql7,"ax"
 	call _patch_sql;
+/* R246's inserts with user text (patch_sql.c insert_sql / slot_insert_sql) */
+	.section .hook_isql1,"ax"
+	call _insert_sql;
+	.section .hook_isql2,"ax"
+	call _slot_insert_sql;
+	.section .hook_isql3,"ax"
+	call _slot_insert_sql;
 	.section .hook_tapeflush,"ax"
 	.global __hook_tapeflush
 __hook_tapeflush:

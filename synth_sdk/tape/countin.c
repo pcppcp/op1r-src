@@ -28,7 +28,9 @@ extern int32_t host_tape_pos;
 #define M_ENV     (*(volatile uint16_t *)(MB + 0x00))          /* click envelope, decays per sample */
 #define M_START   (*(volatile uint16_t *)(MB + 0x02))          /* envelope start value */
 #define M_LEVEL   (*(volatile int16_t  *)(MB + 0x04))          /* metronome level 0..0x7FFF */
-#define M_ON      (*(volatile int32_t  *)(MB + 0x08))          /* clicks on beat wraps only if != 0 */
+#define M_ON      (*(volatile int16_t  *)(MB + 0x08))          /* the metronome level (0..32768: the orange knob x 0x1FF,
+                                                                * metronome_set_level 0x019DE670): clicks on beat wraps only
+                                                                * if != 0; the tempo screen draws it (0x019DE6F0, Q15) */
 #define M_HALF    (*(volatile int32_t  *)(MB + 0x0C))          /* square half period (samples): pitch */
 #define M_TAPE    (*(volatile uint8_t  *)(MB + 0x14))          /* phase follows the tape speed (0x01AADAD0) */
 #define M_RESET   (*(volatile uint8_t  *)(MB + 0x16))          /* phase was reset on tape start (0x01AADAD2) */
@@ -57,13 +59,15 @@ static int tape_accent(void)
     int32_t idx = d >= 0 ? d / beat : -((-d + beat - 1) / beat);
     return (idx & 3) == 0;
 }           /* accent: blocks left, the stock half period to restore */
-static uint8_t saved_on, saved_level_set;
+static uint8_t on_forced, saved_level_set;              /* on_forced: the count turned a level of 0 to 1 */
 static int16_t saved_level;
 
 
 static void restore_metro(void)
 {
-    M_ON = saved_on;
+    /* only a level the count raised from 0 goes back (after hundekraft 3.3.2: the whole level used to be saved in a byte,
+     * so after any count-in 0x3FE0 came back as 0xE0 and the tempo screen showed the metronome at 0) */
+    if (on_forced) { if (M_ON == 1) M_ON = 0; on_forced = 0; }
     if (saved_level_set) { M_LEVEL = saved_level; saved_level_set = 0; }
 }
 
@@ -106,7 +110,7 @@ void ci_metro_render(void)
     /* the count's start beat: silent, the tape start's re-sync click (moments later, where recording really
      * starts) is beat 1 instead (hardware: a double click); the accent pitch is held until that click */
     int mute = will && ci_on && ci_left <= 0;
-    int32_t on = M_ON;
+    int16_t on = M_ON;
     if (mute) { M_ON = 0; if (acc_left) acc_left = (M_LEN >> 21) + ACC_BLOCKS; }
     ((void (*)(void))
 #ifdef OP1_HOST
@@ -156,13 +160,13 @@ int ci_start_ext(void)
 }
 static void ci_begin(void)
 {
-    saved_on = (uint8_t)M_ON;
+    on_forced = M_ON == 0;
     if (M_LEVEL == 0) { saved_level = M_LEVEL; saved_level_set = 1; M_LEVEL = CI_LEVEL_MIN; }
     bar_beat = 0;
     since_wrap = 0x7FFFFFFF;
     bar_anchor = TAPE_POS >> 6;                                   /* recording starts here: beat 1 */
     ci_left = ci_beats;
-    M_ON = 1;                                                     /* clicks on the stock beat clock */
+    if (on_forced) M_ON = 1;                                      /* clicks on the stock beat clock (a level that is on stays) */
     M_PHASE = 0;                                                  /* first click on the next block */
     ci_on = 1;
 }

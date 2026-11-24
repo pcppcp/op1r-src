@@ -137,6 +137,9 @@ HOOKS = {0x019B975C: ('hook_namecmp', bytes.fromhex('18300b32')),      # instr_t
          0x019405D4: ('hook_psql5', bytes.fromhex('08e38263')),       # slot save job 0x01940574, drum: CALL snprintf(UPDATE ..._slots, 5000) -> patch_sql (patch_sql.c)
          0x0194063E: ('hook_psql6', bytes.fromhex('08e34d63')),       # slot save job 0x01940574, synth: CALL snprintf(UPDATE ..._slots, 5000) -> patch_sql (patch_sql.c)
          0x019408AC: ('hook_psql7', bytes.fromhex('08e31662')),       # synth preset load job 0x019407DC: CALL snprintf(UPDATE ..._slots, 5000) -> patch_sql (patch_sql.c)
+         0x019956F4: ('hook_isql1', bytes.fromhex('05e3f2ba')),       # user preset insert (disk sync): CALL snprintf(INSERT INTO %s (patch,folder), 8192) -> insert_sql (patch_sql.c)
+         0x01995AA6: ('hook_isql2', bytes.fromhex('05e319b9')),       # synth slot row insert: CALL snprintf(INSERT INTO synth_slots, 8192) -> slot_insert_sql
+         0x01995CEE: ('hook_isql3', bytes.fromhex('05e3f5b7')),       # drum slot row insert: CALL snprintf(INSERT INTO drum_slots, 8192) -> slot_insert_sql
          0x01A044A8: ('hook_dpkeep', bytes.fromhex('fde38ccc')),         # parse_patch_json: keep "op1r" (drum+, docs/31)
          0x01977900: ('hook_dpbrowse', bytes.fromhex('04e37f53')),       # DrumController Shift+T1: start row (user kit -> DRUM, drum+ -> DRUM+)
          0x01995680: ('hook_pparse1', bytes.fromhex('03e39470')),       # insert_user_patch: parse -> JSON repair first (patch_repair.c)
@@ -777,7 +780,7 @@ DEV_BUILD = False
 BUILD_ENV = {k: None for k in (
     'OP1R_OUTSTAGE', 'OP1R_EQ', 'OP1R_MIX', 'OP1R_MASTER', 'OP1R_CW', 'OP1R_MON', 'OP1R_DEC', 'OP1R_DC',
     'OP1R_L1SLOT', 'OP1R_L1SLOT_CHECK', 'OP1R_GUISKIP_VERIFY', 'OP1R_GUISKIP_NOREG', 'OP1R_GUISKIP_TILESTAT',
-    'OP1R_GUISKIP_NOCACHE', 'OP1R_EAGER_SCREENS', 'OP1R_LZ_NOBG', 'OP1R_FORCE_MFX', 'OP1R_FORCE_HP', 'OP1R_TFDIAG',
+    'OP1R_GUISKIP_NOCACHE', 'OP1R_EAGER_SCREENS', 'OP1R_LZ_NOBG', 'OP1R_FORCE_MFX', 'OP1R_FORCE_HP', 'OP1R_TFDIAG', 'OP1R_EP_PROF', 'OP1R_EP_CHECK',
     'OP1R_SPKDIAG', 'OP1R_TAPEFREE', 'OP1R_TMDBG', 'OP1R_TMXTEST', 'OP1R_TAPEMIX', 'OP1R_CRASHTEST',
     'OP1R_WDOG_NORESET', 'OP1R_TMCHECK', 'OP1R_TAPEIO', 'OP1R_L1READ', 'OP1R_USB_RAWIN', 'OP1R_AUDRING', 'OP1R_COOPFAST',
     'OP1R_SINE_SKIP', 'OP1R_SLPROF')}

@@ -66,6 +66,9 @@ int main(void)
     /* cancel: no recording, settings restored */
     reset(120, 1, 0x2000); restart_at = -1; host_tape_state = 3; assert(ci_start()); run(100); ci_cancel(); host_tape_state = 0; run(2000);
     assert(plays == 0 && M_ON == 1 && M_LEVEL == 0x2000);
+    /* a real level word (the orange knob x 0x1FF) comes back whole, not its low byte (hundekraft 3.3.2's find) */
+    reset(120, 0x3FE0, 0x2000); restart_at = -1; host_tape_state = 3; assert(ci_start()); run(100); ci_cancel(); run(2000);
+    assert(M_ON == 0x3FE0);
     /* MIDI recorder count-in: from stop, tape not armed, PLAY after the count; not while playing / counting */
     reset(120, 1, 0x2000); restart_at = -1; host_tape_state = 0; ci_beats = 4;
     assert(ci_start_ext() && host_tape_state == 0 && ci_pending() && !ci_start_ext() && !ci_start());
