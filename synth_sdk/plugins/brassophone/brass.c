@@ -109,6 +109,11 @@ static void brass_render(void *self, int16_t *out, const int16_t *params)
 {
     brass_voice_t *v = (brass_voice_t *)self;
     const int32_t *inc = OP1_PITCH_INC;
+    /* The voice object is shared with the other engines: after an engine switch (no note_on) it holds their state.
+     * The ranges the loop (and brass_dsp.S, which reads interp_start's and lp's low halves) relies on: */
+    if ((uint32_t)v->interp_start > 32767) v->interp_start = v->interp_start < 0 ? 0 : 32767;
+    if ((uint32_t)v->prev_block_env > 32767) v->prev_block_env = v->prev_block_env < 0 ? 0 : 32767;
+    if (v->lp != (int16_t)v->lp) v->lp = v->lp < 0 ? -32768 : 32767;
 
     uint32_t ph = v->ph; int32_t lp = v->lp;
     uint32_t vibrato_phase = v->vibrato_phase;
@@ -224,8 +229,10 @@ static void brass_render(void *self, int16_t *out, const int16_t *params)
         /* Lookup sine value. */
         int32_t sample = op1_sin(sine_idx);
 
-        /* One-pole low-pass, 4.9 kHz at OP1_VOICE_RATE (a = 0.297, shifts as brass_dsp.S). */
-        { int32_t d = sample - lp; lp += (d >> 2) + (d >> 5) + (d >> 6); }
+        /* One-pole low-pass, 4.9 kHz at OP1_VOICE_RATE (a = 19 / 64 = 0.297, as brass_dsp.S). One rounding: lp
+         * moves towards the sample and never past it, so it stays within int16 (three floored shifts overshot by up
+         * to 2: -32769 near a -32767 trough, whose low half the kernel's output multiply read as +32767). */
+        { int32_t d = sample - lp; lp += (d * 19) >> 6; }
 
         /* Velocity, half scale as the other engines (six voices on the synth bus); the firmware applies the
          * gain envelope. */
