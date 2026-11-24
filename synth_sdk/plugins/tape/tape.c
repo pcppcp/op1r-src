@@ -37,6 +37,7 @@ typedef struct {
     uint32_t wow, flt;  /* LFO phases */
     int32_t  lp;        /* feedback low-pass state */
     int32_t  lpx[2];    /* extra heads' low-pass states */
+    int32_t  dc;        /* feedback DC blocker state, Q12 */
     int32_t  rng;
 } tape_t;
 
@@ -57,7 +58,7 @@ static inline int32_t softclip(int32_t x)          /* Q15 in/out, gentle cubic *
 static void tape_init(int pos)
 {
     tape_t *t = &st[pos % 3];
-    t->w = 0; t->filled = 0; t->lp = 0; t->lpx[0] = t->lpx[1] = 0; t->wow = 0; t->flt = 0x40000000u;
+    t->w = 0; t->filled = 0; t->lp = 0; t->lpx[0] = t->lpx[1] = 0; t->dc = 0; t->wow = 0; t->flt = 0x40000000u;
     t->d = -1;                                      /* set from knob on first render */
 }
 
@@ -89,6 +90,7 @@ static void tape_render(int pos, int16_t *buf, const int16_t *p)
     int32_t age    = k0;
     int32_t lpk    = 32767 - ((age * 29000) >> 15);                               /* LP coeff */
     int32_t drive  = 32768 + (age << 1);                                          /* 1x..3x */
+    fb = (fb << 15) / drive;                     /* drive is in the loop: small signals go round at fb, not fb x drive */
     if (t->d < 0) t->d = target << 10;
 
     int32_t peak = 0, inpk = 0, fbpk = 0;
@@ -113,7 +115,7 @@ static void tape_render(int pos, int16_t *buf, const int16_t *p)
         }
 
         /* age: low-pass + saturation in the loop */
-        t->lp += ((wet - t->lp) * lpk) >> 15;
+        t->lp += ((wet - t->lp) * lpk + 16384) >> 15;             /* rounded: >> alone leaves a -1 .. -8 tail */
         int32_t loop = softclip((t->lp * drive) >> 15);
         int32_t heads = (t->lp * hg) >> 15;                       /* main head + the pattern's extra heads */
         for (int h = 0; h < 2 && pat_frac[pat][h]; h++) {
@@ -126,13 +128,15 @@ static void tape_render(int pos, int16_t *buf, const int16_t *p)
                 int32_t a = ring[r], b = ring[(r - 1) & MASK];
                 xv = a + (((b - a) * (int32_t)xf) >> 10);
             }
-            t->lpx[h] += ((xv - t->lpx[h]) * lpk) >> 15;
+            t->lpx[h] += ((xv - t->lpx[h]) * lpk + 16384) >> 15;
             heads += (t->lpx[h] * hg) >> 15;
         }
 
         int32_t in = buf[n];
         if (in > inpk) inpk = in; else if (-in > inpk) inpk = -in;
         int32_t fbs = (loop * fb) >> 15;
+        t->dc += (fbs * 4096 - t->dc) >> 10;                       /* one-pole DC blocker in the loop (~7 Hz) */
+        fbs -= t->dc >> 12;
         if (fbs > fbpk) fbpk = fbs; else if (-fbs > fbpk) fbpk = -fbs;
         ring[t->w] = (int16_t)softclip(in + fbs);
         t->w = (t->w + 1) & MASK;
