@@ -339,7 +339,7 @@ void op1_screen_draw_cached_fn(void *scr, int dt, void *first_live)
 
 static int slot_of(const uint32_t *b) { if (buf_id[0] == b) return 0; if (buf_id[1] == b) return 1; return -1; }
 /* Still pages (after Opus 2's "lighter screens"): once two record frames in a row matched the shown picture, the GUI
- * thread renders only every 4th tick until a key or a turn comes in (lz_input). Both buffers hold the latest picture
+ * thread renders only every 4th tick; a key or a turn (lz_input) gives half a second of full rate, a held key all along. Both buffers hold the latest picture
  * then (record frames only run so), so a skipped tick presents the same pixels; the screens' update() and the hash run
  * every 4th tick, so a change of their own (meters, MIDI) shows within 3 ticks. CALL render at 0x019AB8B2. */
 volatile uint8_t gs_throttle = 1;                /* 0: render every tick (A/B: poke it) */
@@ -347,11 +347,14 @@ volatile uint32_t gs_skipped;
 static uint8_t idle_n;
 void gs_tick(void *buf)
 {
-    extern volatile uint32_t lz_input;
-    static uint32_t seen; static uint8_t n;
+    extern volatile uint32_t lz_input; extern volatile uint8_t gs_keys_held;
+    static uint32_t seen; static uint8_t n, hot;
     const uint32_t in = lz_input;
-    if (gs_throttle && !gs_off && idle_n >= 2 && in == seen && (++n & 3)) { gs_skipped++; return; }
-    seen = in; n = 0;
+    if (in != seen) { seen = in; hot = 30; }                     /* input: full rate for half a second (a key's effect, e.g.
+                                                                  * STEFAN's wind, may start a few frames later) */
+    else if (hot) hot--;
+    if (gs_throttle && !gs_off && idle_n >= 2 && !hot && !gs_keys_held && (++n & 3)) { gs_skipped++; return; }   /* and while a key is held */
+    n = 0;
     ((void (*)(void *))0x019B2674)(buf);
 }
 void gs_frame(void *raster)                    /* CALL Raster::clear in Screen::frame (0x01A3BBE0): a new frame */

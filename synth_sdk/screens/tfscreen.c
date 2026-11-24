@@ -824,9 +824,29 @@ static void tfs_set(int on)                                      /* main loop */
 }
 static int8_t wind;                                              /* -1 / +1 while < / > is held on this screen */
 static uint32_t wind_t;
+/* s3 while recording arms the loop (lp_arm = the track): its in point shows at the take's start; when the recording
+ * stops, the loop is the clip the take ended up in (once R246's clip list has it; the take itself after 2 s) */
+static volatile int8_t lp_arm = -1;
+static int32_t lp_a, lp_b; static uint32_t lp_t;
+static void loop_arm_poll(void)                                  /* main loop */
+{
+    const int t = lp_arm;
+    if (t < 0) return;
+    if (T_MODE == 1) { if (TAKE_B >= TAKE_A) { lp_a = TAKE_A; lp_b = TAKE_B; } lp_t = now(); return; }
+    volatile tm_track *tr = &tm_tr[t];
+    int32_t a = -1, b = -1;
+    for (int i = 0; i < NCLIPS; i++)
+        if (CLIP_USED[i] && CLIPS[i * 3] == t && CLIPS[i * 3 + 1] <= lp_a && lp_a < CLIPS[i * 3 + 2]) { a = CLIPS[i * 3 + 1]; b = CLIPS[i * 3 + 2]; break; }
+    if (a < 0 && now() - lp_t < 400000000u * 2) return;          /* the clip list not updated yet */
+    if (a < 0) { a = lp_a; b = lp_b; }
+    if (b > TM_MAXPOS) b = TM_MAXPOS;
+    if (b > a) { tr->lin = a; tr->lout = b; tr->lset = 1; tr->lon = 1; }
+    lp_arm = -1;
+}
 void tfs_poll(void)                                              /* main loop, every pass: setting, scrubbing */
 {
     sl_service();
+    loop_arm_poll();
     if (tm_on && !tfs_in && CUR_MODE_ID == 2) tfs_set(1);
     else if (!tm_on && tfs_in) tfs_set(0);
     extern volatile int8_t tm_scrub; extern int tm_scrubbing(void);
@@ -925,6 +945,9 @@ int tfs_key(int code, int pressed)                               /* key thread: 
                 tr->lset = 1; tr->lon = tr->lout > tr->lin;
                 break;
             }
+    } else if (T_MODE == 1) {                                    /* s3 while recording: the loop armed (again: off) */
+        if (lp_arm >= 0) lp_arm = -1;
+        else if (TAKE_B >= TAKE_A) { lp_a = TAKE_A; lp_b = TAKE_B; lp_t = now(); tr->lin = TAKE_A; tr->lset = 1; tr->lon = 0; lp_arm = (int8_t)sel; }
     } else tr->lon = (uint8_t)(!tr->lon && tr->lout > tr->lin);   /* s3: on / off */
     return 1;
 }

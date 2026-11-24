@@ -1156,9 +1156,15 @@ void *lander_stub(void)
 static uint8_t mode_keys;                                               /* synth drum tape mixer held (bits) */
 static uint8_t swallowed[0x40];                                         /* presses taken below the page flushes */
 
+volatile uint8_t gs_keys_held;                                /* keys held now (guiskip.c: full frame rate meanwhile) */
+static uint8_t key_down[0x40];
 void key_event_hook(int code, int pressed)
 {
-    lz_input++;                                                  /* lazy screens: no background parse while playing */
+    lz_input++;
+    if (code >= 0 && code < 0x40 && pressed != 0xA5 && !pressed != !key_down[code]) {   /* (0xA5: MX_KEY, not a key) */
+        key_down[code] = (uint8_t)(pressed != 0);
+        gs_keys_held = (uint8_t)(gs_keys_held + (pressed ? 1 : -1));
+    }                                                  /* lazy screens: no background parse while playing */
     plk_poll();                                                  /* parameter-lock clips: load / save (seq/plk.c) */
     if (pressed && pressed != 0xA5) { extern void bgs_flush(void); bgs_flush(); }   /* delayed saves (bgsave.c): a key may change mode / start disk mode (not MX_KEY below: MIDI CCs keep the debounce) */
     if (pressed && code < 0x40) swallowed[code] = 0;             /* (its last release may have been taken above) */
