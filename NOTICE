@@ -54,6 +54,12 @@ THIRD-PARTY CODE (MIT License, compatible with the GPL; their notices are kept)
   Open303's TeeBeeFilter (rosic_TeeBeeFilter), (c) 2009 Robin Schmidt (rs-met.com), MIT License.
 - hail (plugins/hail): a port of Mutable Instruments Beads, (c) 2017 Emilie Gillet, MIT License
   (plugins/hail/LICENSE.beads).
+- engine+ (synth_sdk/engplus/ep_dsp.c): the drive, ladder filter and crush stages of op1-sdk's
+  features/engine_plus, (c) 2026 BertBrandstifter, MIT License (engplus/LICENSE.op1-sdk); op1r retuned the filter table
+  for the voice rate and wrote the fm hook, keys and screen (engplus/ep.c).
+- drumtrim (synth_sdk/drumtrim.py, the patcher's drumtrim step): the method (cut each factory drum hit 64 frames
+  after its last sample above -60 dB of its own peak, fade those frames, move the key points) and the self-check
+  after op1-sdk's features/drumtrim, (c) 2026 BertBrandstifter, MIT License (https://github.com/BertBrandstifter/op1-sdk).
 - perc (plugins/percsyn, plugins/percdrum): the PO-32 patch model, parameter maps and signal path follow libpo32's
   documented reference renderer, and the transfer reader (DPSK demodulator, framing) is an integer port of libpo32's,
   (c) 2026 Eric Lewis, MIT License (https://github.com/ericlewis/libpo32).
