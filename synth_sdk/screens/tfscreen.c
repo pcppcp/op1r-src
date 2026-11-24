@@ -642,10 +642,19 @@ static void sl_draw(void *r)
 /* a track around its own head: clips, its loop; window +-win s over [x0, x1] */
 static uint8_t rec_red;                                          /* recording or armed: the active track red */
 static volatile uint8_t rec_held;                                /* REC held (arms, as stock) */
+/* x of tape position v on a scale of `half` Q10 units per `span` samples around cx (the head's x): positions are counted in
+ * whole device pixels from the tape's start (screens/pxsnap.h scale), so two marks keep their pixel distance while the
+ * head moves; per mark rounding (head-relative) made them step out of step, one pixel apart now and then */
+static int32_t xof(int32_t cx, int32_t half, int32_t span, int32_t v, int32_t head)
+{
+    const int64_t s = px_dev_scale(), den = (int64_t)span << 20;
+    const int64_t pv = (int64_t)(v < 0 ? 0 : v) * half * s / den, ph = (int64_t)(head < 0 ? 0 : head) * half * s / den;
+    return cx + (int32_t)(((pv - ph) * (1 << 20) + s / 2) / s);
+}
 static void lane(void *r, int t, int32_t y, int32_t x0, int32_t x1, int32_t head, int32_t win, int32_t thick, int on, int big)
 {
     const int32_t cx = (x0 + x1) / 2, half = (x1 - x0) / 2, span = win * SR;
-    #define XOF(v) (cx + (int32_t)((int64_t)((v) - head) * half / span))
+    #define XOF(v) xof(cx, half, span, (v), head)
     #define CLAMP(v) ((v) < x0 ? x0 : (v) > x1 ? x1 : (v))
     ln(r, x0, y, x1, y, 0x400, c_dim);
     for (int i = 0; i < NCLIPS; i++) {
@@ -738,7 +747,7 @@ static void tfs_update(void *scr, int dt)
         const int64_t bar_q8 = (int64_t)4 * 60 * SR * 256 * 256 / bpm_q8();   /* samples per bar, Q8 */
         const int64_t a = (int64_t)(head - 8 * SR) << 8, b = (int64_t)(head + 8 * SR) << 8;
         for (int64_t k = a <= 0 ? 0 : (a + bar_q8 - 1) / bar_q8; k * bar_q8 <= b && k < 4096; k++) {
-            const int32_t x = OP1_Q10(155) + (int32_t)(((k * bar_q8 >> 8) - head) * OP1_Q10(145) / (8 * SR));
+            const int32_t x = xof(OP1_Q10(155), OP1_Q10(145), 8 * SR, (int32_t)(k * bar_q8 >> 8), head);
             ln(r, x, OP1_Q10(76), x, OP1_Q10(82), 0x800, c_grey);
         }
     }
@@ -748,7 +757,7 @@ static void tfs_update(void *scr, int dt)
         for (int i = 0; i < tm_n; i++) {
             const int64_t d = (int64_t)(tm_pos[i] - head) * OP1_Q10(145) / (8 * SR);
             if (d < -OP1_Q10(145) || d > OP1_Q10(145)) continue;
-            const int32_t x = OP1_Q10(155) + (int32_t)d;         /* as on the stock tape screen (tape/markers.c): a grey
+            const int32_t x = xof(OP1_Q10(155), OP1_Q10(145), 8 * SR, tm_pos[i], head);   /* as on the stock tape screen (tape/markers.c): a grey
                                                                   * line through the track, a green v above (white at the head) */
             const uint8_t *col = d > -OP1_Q10(2) && d < OP1_Q10(2) ? c_white : c_green;
             ln(r, x, OP1_Q10(58), x, OP1_Q10(78), 0x400, c_grey);
