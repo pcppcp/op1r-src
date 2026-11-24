@@ -335,6 +335,15 @@ void sl_erase_all(void)                                          /* main loop: t
     }
     sl_touch();
 }
+void tfs_erase_reset(void)                                       /* main loop: the tape erased (tape/erase.c): STEFAN's
+                                                                  * heads and loop points back to the start, loops off */
+{
+    for (int t = 0; t < 4; t++) {
+        volatile tm_track *tr = &tm_tr[t];
+        tr->lon = 0; tr->lset = 0; tr->lin = 0; tr->lout = 0;
+        tm_set_head(t, 0);
+    }
+}
 void sl_state_load(void)                                         /* boot (tfs_state_load) */
 {
     extern int op1r_setting_get(const char *, int);
@@ -457,6 +466,18 @@ static int sl_key(int code, int pressed)                         /* key thread, 
             tm_sel = (uint8_t)(sl_sel / 3);                      /* R246's drop worker reads the selected track (tm.c sets it) */
             ((void (*)(int, int32_t, int))0x0191BEA8)(sl_sel / 3, (sl_sel % 3) * SL_MAX, 0);
             q->len = n; q->bpm = n == sl_clip_len ? sl_clip_bpm : 0;   /* the tempo if it came from a slot */
+            {                                                    /* its waveform now, from the clipboard (buffer 0 of R246's
+                                                                  * table 0x02040000, int16 mono: tape/mixdrop.c), not only
+                                                                  * once it plays; every 4th sample is enough for the peaks */
+                volatile uint8_t *pk = tm_sl_peak[sl_sel];
+                const int16_t *x = (const int16_t *)*(volatile const int32_t *)0x02040000;
+                for (int k = 0; k < SL_PKN; k++) pk[k] = 0;
+                for (int32_t i = 0; i < n; i += 4) {
+                    const int32_t v = x[i] < 0 ? (x[i] == -32768 ? 32767 : -x[i]) : x[i];
+                    const uint8_t a = (uint8_t)(v >> 7);
+                    if (a > pk[i >> SL_PKS]) pk[i >> SL_PKS] = a;
+                }
+            }
             tm_reload_after_clip = 1; sl_touch();
         }
         return 1;
@@ -656,7 +677,10 @@ static void lane(void *r, int t, int32_t y, int32_t x0, int32_t x1, int32_t head
     const int32_t cx = (x0 + x1) / 2, half = (x1 - x0) / 2, span = win * SR;
     #define XOF(v) xof(cx, half, span, (v), head)
     #define CLAMP(v) ((v) < x0 ? x0 : (v) > x1 ? x1 : (v))
-    ln(r, x0, y, x1, y, 0x400, c_dim);
+    {                                                            /* the tape itself: from 0:00 to 6:00 only */
+        const int32_t a = XOF(0), b = XOF(0xF2BFA0);             /* (R246's tape end, tape_c::check_pos) */
+        if (b > x0 && a < x1) ln(r, CLAMP(a), y, CLAMP(b), y, 0x400, c_dim);
+    }
     for (int i = 0; i < NCLIPS; i++) {
         if (!CLIP_USED[i] || CLIPS[i * 3] != t) continue;
         const int32_t a = XOF(CLIPS[i * 3 + 1]), b = XOF(CLIPS[i * 3 + 2]);

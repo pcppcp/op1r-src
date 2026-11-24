@@ -55,5 +55,6 @@ done:
     TAPE_PROGRESS = 0;
     tape_xfade_inv(0xF);
     { extern void sl_erase_all(void); sl_erase_all(); }         /* ELSE-MARIE's slots: empty too (screens/tfscreen.c) */
+    { extern void tfs_erase_reset(void); tfs_erase_reset(); }   /* STEFAN's heads and loop points: back to 0 */
 }
 #endif
