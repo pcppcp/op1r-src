@@ -112,6 +112,8 @@ static void *idle_stats(void)                                /* VDK stats block 
 #endif
 }
 
+uint32_t sm_idle_cycles(void) { void *st = idle_stats(); return st ? IDLE_TOTAL_LO(st) : 0; }   /* (guiskip.c gs_rcyc) */
+
 /* optional profile line: paulstretch phase cycles (shelved/paulstretch/paulstretch_dsp.c), weak: absent = no line */
 extern volatile uint32_t ps_prof[7] __attribute__((weak));
 static uint32_t prof_last[7];

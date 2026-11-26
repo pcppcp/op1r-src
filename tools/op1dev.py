@@ -109,9 +109,12 @@ def perf(d, secs=3.0, log=print):
         if 'idle_obj' not in d.syms: return None
         o = d.u32('idle_obj')[0]; st = d.u32(hex(o + 0x34))[0] if o else 0
         return d.u32(hex(st + 0x20))[0] if st else None
+    gui = 'gs_rcyc' in d.syms
     a0 = d.u32('sm_aud_tot', 2); t0 = d.u32('tm_cyc')[0]; p0 = d.u32('tm_prof', 12) if prof else None; i0 = idle()
+    g0 = d.u32('gs_rcyc', 4) if gui else None
     time.sleep(secs)
     a1 = d.u32('sm_aud_tot', 2); t1 = d.u32('tm_cyc')[0]; p1 = d.u32('tm_prof', 12) if prof else None; i1 = idle()
+    g1 = d.u32('gs_rcyc', 4) if gui else None
     n = (a1[0] - a0[0]) & 0xFFFFFFFF
     if not n: raise RuntimeError('no audio blocks counted')
     blk = 400e6 / 44100 * 64                                       # cycles per 64-frame block at 400 MHz
@@ -119,6 +122,12 @@ def perf(d, secs=3.0, log=print):
     log(f'blocks {n}  callback {cb:.0f} cycles = {cb / blk * 100:.1f} %  tape engine {fr:.0f} = {fr / blk * 100:.1f} %')
     if i0 is not None and i1 is not None:                          # all threads: what the idle thread did not get
         log(f'cpu (all threads) {100 - ((i1 - i0) & 0xFFFFFFFF) / (n * blk) * 100:.1f} %')
+    if gui:                                                        # screens/guiskip.c gs_tick: GUI render, audio ISR and idle time removed (other threads remain)
+        fn, w, au, idl = (((g1[i] - g0[i]) & 0xFFFFFFFF) for i in range(4))
+        if fn:
+            c = (w - au - idl) * 256 / fn
+            log(f'gui render {fn / secs:.1f} frames/s  {c:.0f} cycles/frame = {c / 4e5:.2f} ms  '
+                f'= {c * fn / secs / 4e8 * 100:.1f} % cpu')
     if prof:                                                       # tape/tm.c PROFILE builds: the engine's sections per block
         nb = ((p1[7] - p0[7]) & 0xFFFFFFFF) or 1
         names = ('start', 'slots', None, None, 'mix', 'out', 'rec', None, 'fast:top', 'fast:setup', 'fast:part', None)

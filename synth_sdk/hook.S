@@ -842,23 +842,102 @@ _cw_post0_stub:
 	CC = R0 == 0;
 	R2 = [SP++]; R1 = [SP++]; R0 = [SP++]; RETS = [SP++];
 .endm
+/* GUI primitive timing (docs/91; only with OP1R_GUIPROF=1, else a plain tail jump): call the original body, add its cycles to gs_prim[k] (cycles, calls); R7 is
+ * callee-saved by the body; 32 bytes of argument area (3 register args; the sweep also writes FP + 0x14..0x1B) */
+.macro GS_TIMED body, k
+.ifndef GUIPROF
+	jump.l \body;
+.else
+	[--SP] = RETS; [--SP] = R7;
+	R7 = CYCLES;
+	SP += -32;
+	call \body;
+	SP += 32;
+	[--SP] = ASTAT; [--SP] = R1; [--SP] = R2; [--SP] = P0;
+	R1 = CYCLES; R1 = R1 - R7;
+	P0.L = _gs_prim; P0.H = _gs_prim;
+	R2 = [P0 + \k * 8]; R2 = R2 + R1; [P0 + \k * 8] = R2;
+	R2 = [P0 + \k * 8 + 4]; R2 += 1; [P0 + \k * 8 + 4] = R2;
+	[P0 + 32 + \k * 4] = R1;                 /* gs_plast[k]: this call's cycles */
+	P0 = [SP++]; R2 = [SP++]; R1 = [SP++]; ASTAT = [SP++];
+	R7 = [SP++]; RETS = [SP++];
+	rts;
+.endif
+.endm
+_gs_move_orig:
+	LINK 0;
+	jump.l _rs_move_body;
+_gs_line_orig:
+	LINK 0;
+	jump.l _rs_line_body;
+_gs_sweep_orig:
+	P1.L = 0x55b4; P1.H = 0xffa0;
+	jump (P1);
+_gs_text_orig:
+	LINK 0x24;
+	jump.l _txt_draw_body;
+_gs_text_orig2:					/* Text::draw body, then gs_text_done (text cache: a capture ends) */
+	[--SP] = RETS;
+	SP += -32;				/* its argument area (it writes FP + 8..) */
+	call _gs_text_orig;
+	[SP + 28] = R0;
+	call _gs_text_done;
+	R0 = [SP + 28];
+	SP += 32;
+	RETS = [SP++];
+	rts;
+
+/* text cache capture (screens/guiskip.c, docs/91): the 3 CALLs of text_blend_glyph_rgb565 in render_glyphs ->
+ * _l1_tglyph (L1, pc-relative): straight on unless gs_cap is set, then via _gs_tglyph_stub (every register kept,
+ * gs_tglyph records the scanline) to the original. P1 / CC are free at these calls (the original sets / clobbers them). */
+	.section .l1tape.tg,"ax"
+	.global _l1_tglyph
+	.align 2
+_l1_tglyph:
+	P1.L = _gs_cap; P1.H = _gs_cap;
+	P1 = [P1];
+	CC = P1 == 0;
+	IF !CC JUMP 1f;
+	jump.l _txt_blend;
+1:	P1.L = _gs_tglyph_stub; P1.H = _gs_tglyph_stub;
+	jump (P1);
+	.global _l1_tglyph_end
+_l1_tglyph_end:
+	.text
+	.align 2
+_gs_tglyph_stub:
+	[--SP] = RETS; [--SP] = ASTAT;
+	[--SP] = (R7:0, P5:0);
+	[--SP] = A0.X; [--SP] = A0.W; [--SP] = A1.X; [--SP] = A1.W;
+	[--SP] = LC0; [--SP] = LT0; [--SP] = LB0; [--SP] = LC1; [--SP] = LT1; [--SP] = LB1;
+	[--SP] = I0; [--SP] = I1; [--SP] = I2; [--SP] = I3; [--SP] = M0; [--SP] = M1; [--SP] = M2; [--SP] = M3;
+	[--SP] = B0; [--SP] = B1; [--SP] = B2; [--SP] = B3; [--SP] = L0; [--SP] = L1; [--SP] = L2; [--SP] = L3;
+	L0 = 0; L1 = 0; L2 = 0; L3 = 0;
+	SP += -12;
+	call _gs_tglyph;
+	SP += 12;
+	L3 = [SP++]; L2 = [SP++]; L1 = [SP++]; L0 = [SP++]; B3 = [SP++]; B2 = [SP++]; B1 = [SP++]; B0 = [SP++];
+	M3 = [SP++]; M2 = [SP++]; M1 = [SP++]; M0 = [SP++]; I3 = [SP++]; I2 = [SP++]; I1 = [SP++]; I0 = [SP++];
+	LB1 = [SP++]; LT1 = [SP++]; LC1 = [SP++]; LB0 = [SP++]; LT0 = [SP++]; LC0 = [SP++];
+	A1.W = [SP++]; A1.X = [SP++]; A0.W = [SP++]; A0.X = [SP++];
+	(R7:0, P5:0) = [SP++];
+	ASTAT = [SP++]; RETS = [SP++];
+	P1.L = 0x8718; P1.H = 0xffa0;
+	jump (P1);
 _gs_move_stub:
 	[--SP] = P0; P0.L = _gs_caller; P0.H = _gs_caller; R3 = RETS; [P0] = R3; P0 = [SP++];
 	GS_CALL _gs_point
 	IF !CC JUMP 1f;
-	LINK 0;
-	jump.l _rs_move_body;
+	GS_TIMED _gs_move_orig, 0
 _gs_line_stub:
 	[--SP] = P0; P0.L = _gs_caller; P0.H = _gs_caller; R3 = RETS; [P0] = R3; P0 = [SP++];
 	GS_CALL _gs_point
 	IF !CC JUMP 1f;
-	LINK 0;
-	jump.l _rs_line_body;
+	GS_TIMED _gs_line_orig, 1
 _gs_text_stub:
 	GS_CALL _gs_text
 	IF !CC JUMP 1f;
-	LINK 0x24;
-	jump.l _txt_draw_body;
+	GS_TIMED _gs_text_orig2, 2
 _gs_dot_stub:
 	[--SP] = R0; R0 = 2;
 	GS_CALL _gs_misc_dot
@@ -887,8 +966,7 @@ _gs_sweep_stub:
 	CC = R0 == 0;
 	R2 = [SP++]; R1 = [SP++]; R0 = [SP++]; RETS = [SP++];
 	IF !CC JUMP 1f;
-	P1.L = 0x55b4; P1.H = 0xffa0;
-	jump (P1);
+	GS_TIMED _gs_sweep_orig, 3
 1:	RTS;
 
 /* lazy stock screens (dispatcher.c lz_guard, docs/79): Screen::find_node 0x01A3B580 entry (LINK 0) -> parse an

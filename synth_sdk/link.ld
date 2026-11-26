@@ -15,7 +15,7 @@ SECTIONS {
   .l1mix 0xFFA00E58 : { KEEP(*(.l1mix)) KEEP(*(.l1mix.1)) }                                /* dsp/mix_l1.S: in place of Core_mix_master's mix loops (docs/81) */
   .l1out 0xFFA04280 : { KEEP(*(.l1out.0)) KEEP(*(.l1out.1)) }           /* dsp/outstage_l1.c: in place of master_output_stage (docs/81) */
   .l1pulse 0xFFA04B88 : { KEEP(*(.l1pulse)) }    /* OP1R_L1SLOT test: Pulse's render slot (docs/56); loaded into l1slot_img, written at boot */
-  .l1tape 0xFFA01D60 : { KEEP(*(.l1tape)) }      /* tape/tm_l1.S: in the dead Lander audio range (docs/56, docs/82) */
+  .l1tape 0xFFA01D60 : { KEEP(*(.l1tape)) KEEP(*(.l1tape.tg)) }      /* tape/tm_l1.S: in the dead Lander audio range (docs/56, docs/82) */
   _l1_lander_end = 0xFFA020A8;
   .l1tramp 0xFFA0BFB4 : { KEEP(*(.l1tramp)) }    /* free end of L1 instruction SRAM (image ends 0xFFA0BFB4) */
   .hook_namecmp 0x019B975C : { KEEP(*(.hook_namecmp)) }
@@ -53,7 +53,8 @@ SECTIONS {
   _vc_down_body = 0x01A85754;      /* VoiceCtl key_down after its LINK 0x10 (sequencer hook) */
   _vc_up_body = 0x01A85844;        /* VoiceCtl key_up after its LINK 0x20 */
   _rs_move_body = 0x019149C8;      /* rasterizer move_to after its LINK 0 (guiskip) */
-  _rs_line_body = 0x01914908;      /* rasterizer line_to after its LINK 0 */
+  _rs_line_body = 0x01914908;
+  _txt_blend = 0xFFA08718;         /* text_blend_glyph_rgb565 (text cache, guiskip) */      /* rasterizer line_to after its LINK 0 */
   _mix_ret = 0xFFA00FDC;          /* Core_mix_master after its mix loops (docs/81) */
   _core_mix_master = 0xFFA00E50;   /* R246's master section (docs/81) */
   _find_node_body = 0x01A3B584;    /* Screen::find_node after its LINK 0 (lazy stock screens) */

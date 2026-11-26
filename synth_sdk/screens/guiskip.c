@@ -133,16 +133,157 @@ int gs_sweep(const uint8_t *ras, const uint8_t *bgra)   /* the 5 sweep sites: 1 
     if (recording) gs_stat.skipped_sweeps++;
     return recording;
 }
+/* hook.S GS_TIMED (docs/91): words 0..7 cycles / calls of move_to, line_to, Text::draw, sweep; 8..11 the last call's cycles */
+volatile uint32_t gs_prim[12];
+
+/* ---- text cache (docs/91) ----
+ * Text::draw 0x01A6259C rasterises its glyphs every time; its pixels all go through text_blend_glyph_rgb565 0xFFA08718
+ * (one scanline of coverage spans from globals 0x01B61110.., called 3x from render_glyphs; L1 CALLs -> _l1_tglyph).
+ * A string seen twice with the same key is captured (its spans + coverage); afterwards it is replayed with the same
+ * blend arithmetic and Text::draw is skipped. The key: the string, the text words that place / colour it, the
+ * matrix and the raster. */
+#define TC_N    48
+#define TC_POOL 24576
+struct tc_ent { uint32_t k1, k2, used; uint16_t off, len; uint8_t state; };   /* state: 0 free, 1 seen, 2 capturing, 3 ready */
+static struct tc_ent tc[TC_N];
+static uint8_t tc_pool[TC_POOL] __attribute__((aligned(4)));
+static uint32_t tc_top, tc_tick;
+volatile struct tc_ent *volatile gs_cap;       /* the entry being captured (hook.S _l1_tglyph reads it) */
+volatile uint8_t gs_tc_on = 1;                 /* 0: off (A/B: poke it) */
+volatile uint32_t gs_tc_stat[4];
+volatile uint8_t gs_tc_boxfill = 1;            /* 1: the backdrop as a plain rectangle (not pixel-exact at its edges) */
+static const uint8_t *tc_box_r;                /* set while TE's backdrop routine runs for a cache hit */
+/* dotted_hline(a = {x0, x1, y0, y1} q10, black): draw_line verticals of width [0x01DE5DE0] every [0x01DE5DDC] = a solid
+ * box; filled here: pixels whose centre lies inside, through the raster matrix 0x01DE5E68. 1: done (skip the dots) */
+static int tc_box_fill(const int32_t *a, const uint8_t *c)
+{
+    if (!tc_box_r || !gs_tc_boxfill || c[0] | c[1] | c[2] || c[3] != 0xFF) return 0;
+    const int32_t hw = *(const int32_t *)0x01DE5DE0 / 2, st = *(const int32_t *)0x01DE5DDC;
+    if (st > 2 * hw) return 0;                                   /* gaps between the dots: not a box */
+    const int32_t p0[2] = { a[0] - hw, a[2] }, p1[2] = { a[1] + hw, a[3] };
+    int32_t q0[2], q1[2];
+    ((void (*)(int32_t *, const void *, const int32_t *))0x01A231B0)(q0, (const void *)0x01DE5E68, p0);
+    ((void (*)(int32_t *, const void *, const int32_t *))0x01A231B0)(q1, (const void *)0x01DE5E68, p1);
+    const uint8_t *d = *(const uint8_t *const *)(tc_box_r + 0x28);
+    uint16_t *const *rows = *(uint16_t *const *const *)(d + 4);
+    const int W = *(const int *)(d + 8), H = *(const int *)(d + 0xC);
+    int32_t xa = q0[0] < q1[0] ? q0[0] : q1[0], xb = q0[0] < q1[0] ? q1[0] : q0[0];
+    int32_t ya = q0[1] < q1[1] ? q0[1] : q1[1], yb = q0[1] < q1[1] ? q1[1] : q0[1];
+    int x0 = (xa - 512 + 1023) >> 10, x1 = (xb - 512) >> 10, y0 = (ya - 512 + 1023) >> 10, y1 = (yb - 512) >> 10;
+    if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0; if (x1 >= W) x1 = W - 1; if (y1 >= H) y1 = H - 1;
+    for (int y = y0; y <= y1; y++) for (int x = x0; x <= x1; x++) rows[y][x] = 0;
+    return 1;
+}                  /* test: skip the black dotted box on hits */                /* debug: dotted boxes drawn on hits, cycles */               /* hits, captures, flushes, overflows */
+#define TG ((volatile uint8_t *)0x01B61110)
+#define TG16(o) (*(volatile int16_t *)(TG + (o)))
+#define TG32(o) (*(volatile uint32_t *)(TG + (o)))
+static void tc_flush(void) { for (int i = 0; i < TC_N; i++) tc[i].state = 0; tc_top = 0; gs_tc_stat[2]++; }
+void gs_tglyph(const uint8_t *const *ras, int n, const uint8_t *col)   /* from _l1_tglyph while capturing: one scanline */
+{
+    (void)ras; (void)n;
+    struct tc_ent *e = (struct tc_ent *)gs_cap;
+    if (!e) return;
+    const int cnt = (int)TG32(0x1C);
+    const int row = TG16(0x0E) + TG16(0x0A);                     /* 0x01B6111E + 0x01B6111A (high halves) */
+    const int x0 = TG16(0x00) + TG16(0x08) - (int)TG32(0x10);    /* + cover pointer = x */
+    const uint8_t *const *ptr = (const uint8_t *const *)TG32(0x14);
+    const uint16_t *len = (const uint16_t *)TG32(0x18);
+    uint32_t need = 8;
+    for (int i = 1; i <= cnt; i++) need += 4 + ((len[i] + 1u) & ~1u);
+    if (cnt <= 0 || cnt > 256 || tc_top + need > TC_POOL) { e->state = 0; gs_cap = 0; gs_tc_stat[3]++; return; }
+    uint8_t *w = tc_pool + tc_top;
+    *(int16_t *)w = (int16_t)row; *(uint16_t *)(w + 2) = (uint16_t)cnt;
+    w[4] = col[0]; w[5] = col[1]; w[6] = col[2]; w[7] = col[3]; w += 8;   /* the colour as passed (a font may override it) */
+    for (int i = 1; i <= cnt; i++) {
+        const uint16_t l = len[i];
+        *(int16_t *)w = (int16_t)((int)(uintptr_t)ptr[i] + x0); *(uint16_t *)(w + 2) = l; w += 4;
+        for (int k = 0; k < l; k++) w[k] = ptr[i][k];
+        w += (l + 1u) & ~1u;
+    }
+    tc_top += need; e->len = (uint16_t)(tc_top - e->off);
+}
+void gs_text_done(void)                        /* after the Text::draw body (hook.S): the capture is complete */
+{
+    struct tc_ent *e = (struct tc_ent *)gs_cap;
+    if (e) { e->state = 3; gs_tc_stat[1]++; }
+    gs_cap = 0;
+}
+static void tc_replay(const struct tc_ent *e, const uint8_t *r)   /* as text_blend_glyph_rgb565 */
+{
+    const uint8_t *d = *(const uint8_t *const *)(r + 0x28);     /* its raster: +4 rows, +8 width, +0xC height */
+    uint16_t *const *rows = *(uint16_t *const *const *)(d + 4);
+    const int W = *(const int *)(d + 8), H = *(const int *)(d + 0xC);
+    const uint32_t M = 0x07E0F81Fu;
+    const uint8_t *p = tc_pool + e->off, *end = p + e->len;
+    while (p < end) {
+        const int row = *(const int16_t *)p, cnt = *(const uint16_t *)(p + 2), a = p[7];
+        const uint32_t c = ((uint32_t)p[6] << 8 | (uint32_t)p[5] << 19 | p[4] >> 3) & M;
+        p += 8;
+        uint16_t *rp = row >= 0 && row < H && a ? rows[row] : 0;
+        for (int i = 0; i < cnt; i++) {
+            int x = *(const int16_t *)p, l = *(const uint16_t *)(p + 2); p += 4;
+            const uint8_t *cv = p; p += (l + 1u) & ~1u;
+            if (!rp) continue;
+            if (x < 0) { l += x; cv -= x; x = 0; if (l <= 0) continue; }
+            if (x + l >= W) { l = W - x; if (l <= 0) continue; }
+            uint16_t *q = rp + x;
+            for (int k = 0; k < l; k++) {
+                const uint32_t f = a == 0xFF ? (cv[k] + 4u) >> 3 : ((a * cv[k] >> 8) + 5u) >> 3;
+                uint32_t v = (q[k] | (uint32_t)q[k] << 16) & M;
+                v = (v + ((c - v) * f >> 5)) & M;
+                q[k] = (uint16_t)(v | v >> 16);
+            }
+        }
+    }
+}
+static int tc_lookup(const uint8_t *t, const uint8_t *r, const int32_t *m)   /* 1: replayed (skip Text::draw) */
+{
+    if (!gs_tc_on || !m) return 0;
+    uint32_t k1 = 0x811C9DC5u, k2 = 0x9E3779B9u;
+#define TK(v) do { uint32_t v_ = (uint32_t)(v); k1 = (k1 ^ v_) * 0x01000193u; k2 = (k2 + v_) * 0x85EBCA6Bu; k2 ^= k2 >> 13; } while (0)
+    TK((uintptr_t)r); TK(*(const uint32_t *)(t + 0x18)); TK(*(const uint32_t *)(t + 0x1C));
+    for (int o = 0x58; o < 0x74; o += 4) TK(*(const uint32_t *)(t + o));
+    for (int o = 0x90; o < 0xA0; o += 4) TK(*(const uint32_t *)(t + o));   /* the dotted box (flag +0xA0) */
+    TK(t[0xA0]);
+    for (int i = 0; i < 9; i++) TK(m[i]);
+    const char *s = *(const char *const *)(t + 0x74), *x = *(const char *const *)(t + 0x78);
+    TK(x - s); for (; s < x; s++) TK(*s);
+#undef TK
+    tc_tick++;
+    struct tc_ent *e = 0, *lru = &tc[0];
+    for (int i = 0; i < TC_N; i++) {
+        if (tc[i].state && tc[i].k1 == k1 && tc[i].k2 == k2) { e = &tc[i]; break; }
+        if (!tc[i].state || (lru->state && tc[i].used < lru->used)) lru = &tc[i];
+    }
+    if (!e) { lru->k1 = k1; lru->k2 = k2; lru->state = 1; lru->used = tc_tick; return 0; }   /* first sight */
+    e->used = tc_tick;
+    if (e->state == 3) {
+        if (t[0xA0]) {                                           /* Text::draw's black backdrop (0x01A60878: bounds +0x90..)
+                                                                  * as one rectangle fill (gs_misc_dot) instead of its dots */
+            tc_box_r = r;
+            ((void (*)(const void *, const void *, const int32_t *))0x01A60878)(t, r, m);
+            tc_box_r = 0;
+        }   /* as Text::draw: its dotted box
+                                                                  * first (bounds +0x90..+0x9C, dotted_hline: not glyph spans) */
+        tc_replay(e, r); gs_tc_stat[0]++;
+        return 1;
+    }
+    if (e->state == 1 && !gs_cap) {                              /* second sight: capture this draw */
+        if (tc_top > TC_POOL - 2048) tc_flush();
+        if (!e->state) return 0;
+        e->off = (uint16_t)tc_top; e->len = 0; e->state = 2; gs_cap = e;
+    }
+    return 0;
+}
 int gs_text(const uint8_t *t, void *r, const int32_t *m)  /* Text::draw entry: 1 = skip */
 {
-    (void)r;
     FNV(fh, (uintptr_t)t);
     for (int o = 0x58; o < 0x74; o += 4) FNV(fh, *(const uint32_t *)(t + o));   /* position, size, align, colour */
     const char *s = *(const char *const *)(t + 0x74), *e = *(const char *const *)(t + 0x78);
     for (; s < e; s++) FNV(fh, *s);
     if (m) for (int i = 0; i < 9; i++) FNV(fh, m[i]);
-    if (recording) gs_stat.skipped_text++;
-    return recording;
+    if (recording) { gs_stat.skipped_text++; return 1; }
+    return tc_lookup(t, (const uint8_t *)r, m);
 }
 int gs_misc(int id, const int32_t *a)          /* dim_all (id 1) / dotted_hline (id 2, a = {x0, x1, y}) */
 {
@@ -156,7 +297,7 @@ int gs_misc_dim(void *raster) { (void)raster; return gs_misc(1, 0); }
 /* Raster::fade(raster, amount) 0x01A22F3C: the help screen's animated fade of everything under it (its update
  * 0x019B3A0C, the only caller); the amount changes per frame, so it must be in the hash (else the fade froze) */
 int gs_misc_fade(void *raster, int32_t amount) { (void)raster; FNV(fh, amount); return gs_misc(3, 0); }
-int gs_misc_dot(int id, const int32_t *a, const uint8_t *c) { (void)id; int r = gs_misc(2, a); FNV(fh, c[0] | c[1] << 8 | c[2] << 16); return r; }
+int gs_misc_dot(int id, const int32_t *a, const uint8_t *c) { (void)id; int r = gs_misc(2, a); FNV(fh, c[0] | c[1] << 8 | c[2] << 16); return r || tc_box_fill(a, c); }
 static int slot_of(const uint32_t *b);
 
 /* ---- static / dynamic screen regions (docs/75) ----
@@ -344,6 +485,7 @@ static int slot_of(const uint32_t *b) { if (buf_id[0] == b) return 0; if (buf_id
  * every 4th tick, so a change of their own (meters, MIDI) shows within 3 ticks. CALL render at 0x019AB8B2. */
 volatile uint8_t gs_throttle = 1;                /* 0: render every tick (A/B: poke it) */
 volatile uint32_t gs_skipped;
+volatile uint32_t gs_rcyc[4];                    /* rendered ticks, render cycles / 256 (wall), audio ISR / idle within (/256) */
 static uint8_t idle_n;
 void gs_tick(void *buf)
 {
@@ -355,7 +497,18 @@ void gs_tick(void *buf)
     else if (hot) hot--;
     if (gs_throttle && !gs_off && idle_n >= 2 && !hot && !gs_keys_held && (++n & 3)) { gs_skipped++; return; }   /* and while a key is held */
     n = 0;
+#ifndef OP1_HOST
+    extern volatile uint32_t sm_aud_tot[2];
+    extern uint32_t sm_idle_cycles(void);
+    uint32_t c0, c1, a0 = sm_aud_tot[1], i0 = sm_idle_cycles();
+    __asm__ volatile ("%0 = CYCLES;" : "=d"(c0));
+#endif
     ((void (*)(void *))0x019B2674)(buf);
+#ifndef OP1_HOST
+    __asm__ volatile ("%0 = CYCLES;" : "=d"(c1));
+    gs_rcyc[0]++; gs_rcyc[1] += (c1 - c0) >> 8; gs_rcyc[2] += sm_aud_tot[1] - a0;   /* audio ISR cycles inside it (/256) */
+    gs_rcyc[3] += (sm_idle_cycles() - i0) >> 8;                  /* idle thread inside it: waits (/256) */
+#endif
 }
 void gs_frame(void *raster)                    /* CALL Raster::clear in Screen::frame (0x01A3BBE0): a new frame */
 {

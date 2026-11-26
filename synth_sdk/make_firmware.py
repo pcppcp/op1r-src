@@ -261,7 +261,10 @@ L1_PCCALLS = {0xFFA0709C: ('l1_tramp_fwd', bytes.fromhex('06c41000')),   # mix l
               0xFFA02888: ('l1_tramp_dec', bytes.fromhex('ffe3a6ee')),
               0xFFA0217A: ('l1_tramp_rec', bytes.fromhex('00e3dd20')),   # CALL tape_record_block -> tm_rec_entry (free tape machine, docs/82)
               0xFFA02DCA: ('l1_tramp_rec', bytes.fromhex('00e3b51a')),
-              0xFFA06E04: ('l1_tpskip', bytes.fromhex('30e41a00'))}   # tape_play_mix gather head: R0 = [SP + 0x68] -> skip with FREE live (tape/tm_l1.S)   # .. the other call site   # core_block_process: CALL master_eq -> eq_stage (dsp/eq.c)
+              0xFFA06E04: ('l1_tpskip', bytes.fromhex('30e41a00')),
+              0xFFA08ACC: ('l1_tglyph', bytes.fromhex('ffe326fe')),   # render_glyphs: CALL text_blend_glyph_rgb565 -> text cache capture (guiskip.c)
+              0xFFA08AFC: ('l1_tglyph', bytes.fromhex('ffe30efe')),
+              0xFFA08B2C: ('l1_tglyph', bytes.fromhex('ffe3f6fd'))}   # tape_play_mix gather head: R0 = [SP + 0x68] -> skip with FREE live (tape/tm_l1.S)   # .. the other call site   # core_block_process: CALL master_eq -> eq_stage (dsp/eq.c)
 L1_TRAMP, L1_TRAMP_MAX = 0xFFA0BFB4, 0xFFA0C000 - 0xFFA0BFB4
 # docs/81: our output stage in place of R246's master_output_stage (L1 0xFFA04280..0xFFA04804), a plain LDR block after
 # the encrypted L1; check builds (OP1R_OUTSTAGE=check / stress) keep the original there and go through the trampoline
@@ -481,7 +484,7 @@ def build(engs, fxs):
         o = 'build/' + os.path.splitext(s.replace('/', '_'))[0] + '.o'; objs.append(o)
         cmds.append(f'bfin-elf-gcc -O2 -mcpu=bf524 -ffreestanding -fno-builtin -nostdlib -fno-common '
                     f'{" ".join(["-Wall -I.", *flags.get(s, [])])} -c {s} -o {o}')
-    cmds.append('bfin-elf-as -mcpu=bf524 hook.S -o build/hook.o'); objs.append('build/hook.o')
+    cmds.append('bfin-elf-as -mcpu=bf524' + (' --defsym GUIPROF=1' if os.environ.get('OP1R_GUIPROF') == '1' else '') + ' hook.S -o build/hook.o'); objs.append('build/hook.o')
     cmds.append(f'bfin-elf-ld -T link.ld {" ".join(objs)} $(bfin-elf-gcc -print-libgcc-file-name) -o build/synth.elf')
     cmds.append('bfin-elf-objcopy -O binary -j .text -j .rodata -j .data build/synth.elf build/synth.bin')
     for sec, _ in list(HOOKS.values()) + list(OPZ_HOOKS.values()) + list(DEV_HOOKS.values()):
@@ -707,7 +710,8 @@ def patch_ldr(src, dst, code, hooks, syms, opz=False, release=True):
         assert 0 < len(l1o) <= room, f'.{sec}: {len(l1o)} bytes, {room} fit'
         for m in re.finditer(r'^ *([0-9a-f]+):.*?\b(CALL|JUMP(?:\.[LS])?)\s+(0x(?:0x)?[0-9a-f]+|\([A-Z0-9]+\))', lst, re.M):
             at = int(m.group(1), 16)
-            if base <= at < base + len(l1o) and not syms.get('l1_tramp_mix', -1) <= at < syms.get('l1_tramp_end', -1):  # the mix check's trampoline calls out on purpose
+            if base <= at < base + len(l1o) and not syms.get('l1_tramp_mix', -1) <= at < syms.get('l1_tramp_end', -1) \
+                    and not syms.get('l1_tglyph', -1) <= at < syms.get('l1_tglyph_end', -1):  # the mix check's / text cache's trampolines call out on purpose
                 t = m.group(3)
                 if sec == 'l1master' and not t.startswith('0x'): continue   # constant-pointer calls (long calls), as R246's
                 assert t.startswith('0x'), f'.{sec}: indirect {m.group(2)} {t} at {at:#x}'
@@ -787,7 +791,7 @@ BUILD_ENV = {k: None for k in (
     'OP1R_GUISKIP_NOCACHE', 'OP1R_EAGER_SCREENS', 'OP1R_LZ_NOBG', 'OP1R_FORCE_MFX', 'OP1R_FORCE_HP', 'OP1R_TFDIAG', 'OP1R_EP_PROF', 'OP1R_EP_CHECK',
     'OP1R_SPKDIAG', 'OP1R_TAPEFREE', 'OP1R_TMDBG', 'OP1R_TMXTEST', 'OP1R_TAPEMIX', 'OP1R_CRASHTEST',
     'OP1R_WDOG_NORESET', 'OP1R_TMCHECK', 'OP1R_TAPEIO', 'OP1R_L1READ', 'OP1R_USB_RAWIN', 'OP1R_AUDRING', 'OP1R_COOPFAST',
-    'OP1R_SINE_SKIP', 'OP1R_SLPROF')}
+    'OP1R_SINE_SKIP', 'OP1R_SLPROF', 'OP1R_GUIPROF')}
 BUILD_ENV.update(OP1R_GUISKIP='1', OP1R_WDOG='1', OP1R_L1_RUNTIME='1')   # on by default; '' or a list is not
 def release_env_check(env):
     """the OP1R_* variables in env that make a release differ from the normal build (empty list: ok)"""
