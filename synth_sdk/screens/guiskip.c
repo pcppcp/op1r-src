@@ -111,14 +111,30 @@ static void ts_frame_end(int slot)
 
 /* move_to / line_to entries: 1 = skip the body (record frame, main rasterizer) */
 uint32_t gs_caller;                             /* the stub stores the caller's return address here */
+struct tc_ent;
+static uint8_t cap_kind, tc_kind;              /* the capture's kind: 1 text, 2 shape (tc_kind: the caller's, for tc_hit) */
+static volatile struct tc_ent *cap_paused;     /* a text capture paused over a sweep inside Text::draw (its backdrop) */
+volatile struct tc_ent *volatile gs_cap;       /* the entry being captured (hook.S _l1_tglyph reads it) */
+/* hook.S GS_TIMED (docs/91): words 0..7 cycles / calls of move_to, line_to, Text::draw, sweep; 8..11 the last call's cycles */
+volatile uint32_t gs_prim[12];
+/* OP1R_GUIPROF (docs/91): sweeps split by kind: main rasterizer (code-drawn) calls / cycles, SVG shape calls / cycles,
+ * line_to on SVG rasterizers (cells rebuilt), SVG sweeps whose cells were rebuilt since its last sweep */
+volatile uint32_t gs_swk[6];
+static uint8_t swk_last = 0xFF; static const void *svg_dirty;
+static uint32_t sc_gen[64];                    /* per rasterizer slot: bumped by every move_to / line_to (cells rebuilt) */
+static int sc_lookup(const uint8_t *ras, const uint8_t *bgra, const uint8_t *const *rp);
 int gs_point(void *ras, int x, int y)
 {
     if (gs_caller >= 0x01914A9C && gs_caller < 0x01914B80) return 0;   /* the sweep closing its path (FUN_01914a9c): not a new point */
     if (main_ras(ras)) { FNV(fh, x); FNV(fh, y); if (recording) { gs_stat.skipped_pts++; return 1; } }
+    if (!main_ras(ras)) { sc_gen[((uintptr_t)ras >> 4) & 63]++; if (!recording) { gs_swk[4]++; svg_dirty = ras; } }
     return 0;                                   /* other rasterizers: SVG shapes rebuilding their kept cells */
 }
-int gs_sweep(const uint8_t *ras, const uint8_t *bgra)   /* the 5 sweep sites: 1 = skip */
+int gs_sweep(const uint8_t *ras, const uint8_t *bgra, const uint8_t *const *rp)   /* the 5 sweep sites: 1 = skip */
 {
+    if (swk_last != 0xFF) gs_swk[swk_last * 2 + 1] += gs_prim[11];   /* the previous sweep has finished */
+    swk_last = recording ? 0xFF : !main_ras(ras);
+    if (!recording) { gs_swk[swk_last * 2]++; if (swk_last && svg_dirty == ras) gs_swk[5]++; }
 #ifdef GS_TILESTAT
     if (!recording) ts_shape(ras, bgra);
 #endif
@@ -130,11 +146,14 @@ int gs_sweep(const uint8_t *ras, const uint8_t *bgra)   /* the 5 sweep sites: 1 
         FNV(fh, *(const uint32_t *)(ras + 0x30)); FNV(fh, *(const uint32_t *)(ras + 0x34));
     }
     FNV(fh, bgra[0] | bgra[1] << 8 | bgra[2] << 16 | (uint32_t)bgra[3] << 24);
-    if (recording) gs_stat.skipped_sweeps++;
-    return recording;
+    if (recording) { gs_stat.skipped_sweeps++; return 1; }
+    if (gs_cap && cap_kind == 1) { cap_paused = gs_cap; gs_cap = 0; }   /* a sweep inside Text::draw: not its glyphs */
+    if (!main_ras(ras) && sc_lookup(ras, bgra, rp)) {
+        if (cap_paused) { gs_cap = cap_paused; cap_paused = 0; }   /* skipped: no gs_sweep_done */
+        return 1;
+    }
+    return 0;
 }
-/* hook.S GS_TIMED (docs/91): words 0..7 cycles / calls of move_to, line_to, Text::draw, sweep; 8..11 the last call's cycles */
-volatile uint32_t gs_prim[12];
 
 /* ---- text cache (docs/91) ----
  * Text::draw 0x01A6259C rasterises its glyphs every time; its pixels all go through text_blend_glyph_rgb565 0xFFA08718
@@ -142,13 +161,12 @@ volatile uint32_t gs_prim[12];
  * A string seen twice with the same key is captured (its spans + coverage); afterwards it is replayed with the same
  * blend arithmetic and Text::draw is skipped. The key: the string, the text words that place / colour it, the
  * matrix and the raster. */
-#define TC_N    48
-#define TC_POOL 24576
-struct tc_ent { uint32_t k1, k2, used; uint16_t off, len; uint8_t state; };   /* state: 0 free, 1 seen, 2 capturing, 3 ready */
+#define TC_N    256                            /* direct-mapped by the key (power of 2) */
+#define TC_POOL 131072
+struct tc_ent { uint32_t k1, k2, off, len; uint8_t state; };   /* state: 0 free, 1 seen, 2 capturing, 3 ready */
 static struct tc_ent tc[TC_N];
 static uint8_t tc_pool[TC_POOL] __attribute__((aligned(4)));
-static uint32_t tc_top, tc_tick;
-volatile struct tc_ent *volatile gs_cap;       /* the entry being captured (hook.S _l1_tglyph reads it) */
+static uint32_t tc_top;
 volatile uint8_t gs_tc_on = 1;                 /* 0: off (A/B: poke it) */
 volatile uint32_t gs_tc_stat[4];
 volatile uint8_t gs_tc_boxfill = 1;            /* 1: the backdrop as a plain rectangle (not pixel-exact at its edges) */
@@ -173,7 +191,7 @@ static int tc_box_fill(const int32_t *a, const uint8_t *c)
     if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0; if (x1 >= W) x1 = W - 1; if (y1 >= H) y1 = H - 1;
     for (int y = y0; y <= y1; y++) for (int x = x0; x <= x1; x++) rows[y][x] = 0;
     return 1;
-}                  /* test: skip the black dotted box on hits */                /* debug: dotted boxes drawn on hits, cycles */               /* hits, captures, flushes, overflows */
+}                  /* test: skip the black dotted box on hits */                /* debug: dotted boxes drawn on hits, cycles */               /* hits, captures, flushes, overflows + empty captures << 16 */
 #define TG ((volatile uint8_t *)0x01B61110)
 #define TG16(o) (*(volatile int16_t *)(TG + (o)))
 #define TG32(o) (*(volatile uint32_t *)(TG + (o)))
@@ -202,15 +220,31 @@ void gs_tglyph(const uint8_t *const *ras, int n, const uint8_t *col)   /* from _
     }
     tc_top += need; e->len = (uint16_t)(tc_top - e->off);
 }
-void gs_text_done(void)                        /* after the Text::draw body (hook.S): the capture is complete */
+#ifdef GS_PROF
+static void sc_vend(void);
+#endif
+static void tc_end(int kind)                   /* a capture of this kind is complete */
 {
     struct tc_ent *e = (struct tc_ent *)gs_cap;
-    if (e) { e->state = 3; gs_tc_stat[1]++; }
+    if (!e || cap_kind != kind) return;
+    e->state = e->len ? 3 : 1; gs_tc_stat[1]++;              /* nothing drawn: not cached */
+    if (!e->len) gs_tc_stat[3] += 0x10000;
     gs_cap = 0;
 }
-static void tc_replay(const struct tc_ent *e, const uint8_t *r)   /* as text_blend_glyph_rgb565 */
+void gs_text_done(void)                        /* after the Text::draw body (hook.S): a text capture is complete */
 {
-    const uint8_t *d = *(const uint8_t *const *)(r + 0x28);     /* its raster: +4 rows, +8 width, +0xC height */
+    tc_end(1);
+}
+void gs_sweep_done(void)                       /* after the sweep body (hook.S): a shape capture ends, a paused text one goes on */
+{
+#ifdef GS_PROF
+    sc_vend();
+#endif
+    tc_end(2);
+    if (cap_paused) { gs_cap = cap_paused; cap_paused = 0; }
+}
+static void tc_replay(const struct tc_ent *e, const uint8_t *d)   /* as text_blend_glyph_rgb565; d: +4 rows, +8 width, +0xC height */
+{
     uint16_t *const *rows = *(uint16_t *const *const *)(d + 4);
     const int W = *(const int *)(d + 8), H = *(const int *)(d + 0xC);
     const uint32_t M = 0x07E0F81Fu;
@@ -236,6 +270,18 @@ static void tc_replay(const struct tc_ent *e, const uint8_t *r)   /* as text_ble
         }
     }
 }
+static struct tc_ent *tc_hit(uint32_t k1, uint32_t k2)   /* a ready entry, or 0 (then: noted, or a capture armed) */
+{
+    struct tc_ent *e = &tc[k1 & (TC_N - 1)];
+    if (e->state == 2) return 0;                                 /* being captured (another key on its slot waits) */
+    if (!e->state || e->k1 != k1 || e->k2 != k2) { e->k1 = k1; e->k2 = k2; e->state = 1; return 0; }   /* first sight */
+    if (e->state == 3) return e;
+    if (!gs_cap) {                                               /* second sight: capture this draw */
+        if (tc_top > TC_POOL - 8192) { tc_flush(); e->k1 = k1; e->k2 = k2; }
+        e->off = tc_top; e->len = 0; e->state = 2; gs_cap = e; cap_kind = tc_kind;
+    }
+    return 0;
+}
 static int tc_lookup(const uint8_t *t, const uint8_t *r, const int32_t *m)   /* 1: replayed (skip Text::draw) */
 {
     if (!gs_tc_on || !m) return 0;
@@ -249,31 +295,73 @@ static int tc_lookup(const uint8_t *t, const uint8_t *r, const int32_t *m)   /* 
     const char *s = *(const char *const *)(t + 0x74), *x = *(const char *const *)(t + 0x78);
     TK(x - s); for (; s < x; s++) TK(*s);
 #undef TK
-    tc_tick++;
-    struct tc_ent *e = 0, *lru = &tc[0];
-    for (int i = 0; i < TC_N; i++) {
-        if (tc[i].state && tc[i].k1 == k1 && tc[i].k2 == k2) { e = &tc[i]; break; }
-        if (!tc[i].state || (lru->state && tc[i].used < lru->used)) lru = &tc[i];
-    }
-    if (!e) { lru->k1 = k1; lru->k2 = k2; lru->state = 1; lru->used = tc_tick; return 0; }   /* first sight */
-    e->used = tc_tick;
-    if (e->state == 3) {
-        if (t[0xA0]) {                                           /* Text::draw's black backdrop (0x01A60878: bounds +0x90..)
+    tc_kind = 1;
+    struct tc_ent *e = tc_hit(k1, k2);
+    if (!e) return 0;
+    if (t[0xA0]) {                                               /* Text::draw's black backdrop (0x01A60878: bounds +0x90..)
                                                                   * as one rectangle fill (gs_misc_dot) instead of its dots */
-            tc_box_r = r;
-            ((void (*)(const void *, const void *, const int32_t *))0x01A60878)(t, r, m);
-            tc_box_r = 0;
-        }   /* as Text::draw: its dotted box
-                                                                  * first (bounds +0x90..+0x9C, dotted_hline: not glyph spans) */
-        tc_replay(e, r); gs_tc_stat[0]++;
-        return 1;
+        tc_box_r = r;
+        ((void (*)(const void *, const void *, const int32_t *))0x01A60878)(t, r, m);
+        tc_box_r = 0;
     }
-    if (e->state == 1 && !gs_cap) {                              /* second sight: capture this draw */
-        if (tc_top > TC_POOL - 2048) tc_flush();
-        if (!e->state) return 0;
-        e->off = (uint16_t)tc_top; e->len = 0; e->state = 2; gs_cap = e;
-    }
-    return 0;
+    tc_replay(e, *(const uint8_t *const *)(r + 0x28)); gs_tc_stat[0]++;
+    return 1;
+}
+#ifdef GS_PROF
+/* shape check (OP1R_GUIPROF, gs_tc_verify = 1): every 8th shape hit is replayed over the shape's cell box (+0x30, clipped),
+ * kept, the box restored, the sweep draws and sc_vend compares: gs_tc_vstat = checks, bad, bad pixels, skipped */
+volatile uint8_t gs_tc_verify;
+volatile uint32_t gs_tc_vstat[4];
+static uint32_t sc_vn; static int sc_vb[4], sc_vact;
+static uint16_t sc_vpre[8192], sc_vrep[8192]; static uint16_t *const *sc_vrows;
+static int sc_vbegin(const uint8_t *ras, const uint8_t *d, const struct tc_ent *e)
+{
+    const int16_t *bx = (const int16_t *)(ras + 0x30);
+    const int W = *(const int *)(d + 8), H = *(const int *)(d + 0xC);
+    int x0 = bx[0] - 1, y0 = bx[1] - 1, x1 = bx[2] + 1, y1 = bx[3] + 1;
+    if (x0 < 0) x0 = 0; if (y0 < 0) y0 = 0; if (x1 >= W) x1 = W - 1; if (y1 >= H) y1 = H - 1;
+    const int w = x1 - x0 + 1, h = y1 - y0 + 1;
+    if (w <= 0 || h <= 0 || w * h > 8192) { gs_tc_vstat[3]++; return 0; }
+    sc_vrows = *(uint16_t *const *const *)(d + 4);
+    for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) sc_vpre[y * w + x] = sc_vrows[y0 + y][x0 + x];
+    tc_replay(e, d);
+    for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+        uint16_t *p = &sc_vrows[y0 + y][x0 + x]; sc_vrep[y * w + x] = *p; *p = sc_vpre[y * w + x]; }
+    sc_vb[0] = x0; sc_vb[1] = y0; sc_vb[2] = w; sc_vb[3] = h; sc_vact = 1;
+    return 1;
+}
+static void sc_vend(void)
+{
+    if (!sc_vact) return;
+    sc_vact = 0;
+    uint32_t bad = 0;
+    for (int y = 0; y < sc_vb[3]; y++) for (int x = 0; x < sc_vb[2]; x++)
+        bad += sc_vrows[sc_vb[1] + y][sc_vb[0] + x] != sc_vrep[y * sc_vb[2] + x];
+    gs_tc_vstat[0]++; if (bad) { gs_tc_vstat[1]++; gs_tc_vstat[2] += bad; }
+}
+#endif
+/* shape cache (docs/91): an SVG shape's sweep (its own rasterizer, cells kept between frames) is recorded and replayed
+ * like text; the key: rasterizer, its generation (sc_gen), cell count +0xC, cell box +0x30 / +0x34, colour, target */
+static int sc_lookup(const uint8_t *ras, const uint8_t *bgra, const uint8_t *const *rp)
+{
+    if (!gs_tc_on || !rp) return 0;
+    const int16_t *bx = (const int16_t *)(ras + 0x30);
+    if (bx[0] > bx[2] || bx[1] > bx[3]) return 0;                /* no cells: draws nothing */
+    uint32_t k1 = 0x811C9DC5u, k2 = 0x9E3779B9u;
+#define TK(v) do { uint32_t v_ = (uint32_t)(v); k1 = (k1 ^ v_) * 0x01000193u; k2 = (k2 + v_) * 0x85EBCA6Bu; k2 ^= k2 >> 13; } while (0)
+    TK(0x5EA9); TK((uintptr_t)ras); TK(sc_gen[((uintptr_t)ras >> 4) & 63]); TK(*(const uint32_t *)(ras + 0xC));
+    TK(*(const uint32_t *)(ras + 0x30)); TK(*(const uint32_t *)(ras + 0x34));
+    TK(bgra[0] | bgra[1] << 8 | bgra[2] << 16 | (uint32_t)bgra[3] << 24); TK((uintptr_t)*rp);
+    TK(*(const uint32_t *)(*rp + 8)); TK(*(const uint32_t *)(*rp + 0xC));   /* the target's size (clipping) */
+#undef TK
+    tc_kind = 2;
+    struct tc_ent *e = cap_paused ? 0 : tc_hit(k1, k2);       /* inside a text capture: no shape cache */
+    if (!e) return 0;
+#ifdef GS_PROF
+    if (gs_tc_verify && !(++sc_vn & 7) && sc_vbegin(ras, *rp, e)) return 0;   /* the sweep draws too: compared after it */
+#endif
+    tc_replay(e, *rp); gs_tc_stat[0]++;
+    return 1;
 }
 int gs_text(const uint8_t *t, void *r, const int32_t *m)  /* Text::draw entry: 1 = skip */
 {

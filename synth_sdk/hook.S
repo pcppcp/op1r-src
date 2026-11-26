@@ -876,6 +876,14 @@ _gs_sweep_orig:
 _gs_text_orig:
 	LINK 0x24;
 	jump.l _txt_draw_body;
+_gs_sweep_orig2:				/* the sweep, then gs_sweep_done (shape cache: a capture ends) */
+	[--SP] = RETS;
+	SP += -32;				/* it writes FP + 8..0x1B (caller's area) */
+	call _gs_sweep_orig;
+	call _gs_sweep_done;
+	SP += 32;
+	RETS = [SP++];
+	rts;
 _gs_text_orig2:					/* Text::draw body, then gs_text_done (text cache: a capture ends) */
 	[--SP] = RETS;
 	SP += -32;				/* its argument area (it writes FP + 8..) */
@@ -960,13 +968,13 @@ _gs_fade_stub:				/* Raster::fade(R0 raster, R1 amount) */
 _gs_sweep_stub:
 	[--SP] = RETS; [--SP] = R0; [--SP] = R1; [--SP] = R2;
 	SP += -12;
-	R1 = R2;
+	R3 = R1; R1 = R2; R2 = R3;		/* gs_sweep(ras, colour, raster + 0x28) */
 	call _gs_sweep;
 	SP += 12;
 	CC = R0 == 0;
 	R2 = [SP++]; R1 = [SP++]; R0 = [SP++]; RETS = [SP++];
 	IF !CC JUMP 1f;
-	GS_TIMED _gs_sweep_orig, 3
+	GS_TIMED _gs_sweep_orig2, 3
 1:	RTS;
 
 /* lazy stock screens (dispatcher.c lz_guard, docs/79): Screen::find_node 0x01A3B580 entry (LINK 0) -> parse an

@@ -264,7 +264,10 @@ L1_PCCALLS = {0xFFA0709C: ('l1_tramp_fwd', bytes.fromhex('06c41000')),   # mix l
               0xFFA06E04: ('l1_tpskip', bytes.fromhex('30e41a00')),
               0xFFA08ACC: ('l1_tglyph', bytes.fromhex('ffe326fe')),   # render_glyphs: CALL text_blend_glyph_rgb565 -> text cache capture (guiskip.c)
               0xFFA08AFC: ('l1_tglyph', bytes.fromhex('ffe30efe')),
-              0xFFA08B2C: ('l1_tglyph', bytes.fromhex('ffe3f6fd'))}   # tape_play_mix gather head: R0 = [SP + 0x68] -> skip with FREE live (tape/tm_l1.S)   # .. the other call site   # core_block_process: CALL master_eq -> eq_stage (dsp/eq.c)
+              0xFFA08B2C: ('l1_tglyph', bytes.fromhex('ffe3f6fd')),
+              0xFFA05730: ('l1_tglyph', bytes.fromhex('ffe328fe')),   # agg_sweep_scanlines: CALL agg_blend_span (byte-identical to
+              0xFFA05760: ('l1_tglyph', bytes.fromhex('ffe310fe')),   # text_blend_glyph_rgb565, which _l1_tglyph ends in) -> shape capture
+              0xFFA05790: ('l1_tglyph', bytes.fromhex('ffe3f8fd'))}   # tape_play_mix gather head: R0 = [SP + 0x68] -> skip with FREE live (tape/tm_l1.S)   # .. the other call site   # core_block_process: CALL master_eq -> eq_stage (dsp/eq.c)
 L1_TRAMP, L1_TRAMP_MAX = 0xFFA0BFB4, 0xFFA0C000 - 0xFFA0BFB4
 # docs/81: our output stage in place of R246's master_output_stage (L1 0xFFA04280..0xFFA04804), a plain LDR block after
 # the encrypted L1; check builds (OP1R_OUTSTAGE=check / stress) keep the original there and go through the trampoline
@@ -471,6 +474,7 @@ def build(engs, fxs):
         flags['screens/usbtrack.c'] = flags.get('screens/usbtrack.c', []) + ['-DUSB_RAWIN']
     if GUISKIP:                                                               # docs/74: frame skip (+ self-check)
         flags['screens/guiskip.c'] = ['-DGS_ON'] + (['-DGS_VERIFY'] if os.environ.get('OP1R_GUISKIP_VERIFY') else []) \
+            + (['-DGS_PROF'] if os.environ.get('OP1R_GUIPROF') == '1' else []) \
             + (['-DGS_NOREG'] if os.environ.get('OP1R_GUISKIP_NOREG') else []) \
             + (['-DGS_TILESTAT'] if os.environ.get('OP1R_GUISKIP_TILESTAT') else []) \
             + (['-DGS_NOCACHE'] if os.environ.get('OP1R_GUISKIP_NOCACHE') else []) \
